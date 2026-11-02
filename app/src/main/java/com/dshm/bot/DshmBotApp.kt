@@ -41,6 +41,13 @@ private const val SCREEN_SETTINGS = "settings"
 private const val SCREEN_ENGINE = "engine"
 private const val CHAT_PREFIX = "chat:"
 
+private fun depthOf(key: String): Int = when {
+    key == SCREEN_HOME -> 0
+    key == SCREEN_SEARCH || key == SCREEN_SETTINGS -> 1
+    key == SCREEN_ENGINE || key.startsWith(CHAT_PREFIX) -> 2
+    else -> 1
+}
+
 /**
  * 应用外壳：主界面 ↔ 搜索 ↔ 设置 ↔ Bot 对话。
  * 路由状态放在这里，页面本身不感知导航；所有页面切换都用 iOS 风格整屏 push / pop 动效。
@@ -112,8 +119,7 @@ fun DshmBotApp(
             .fillMaxSize()
             .background(Dshm.colors.background),
         transitionSpec = {
-            val opening = targetState != SCREEN_HOME &&
-                (initialState == SCREEN_HOME || targetState.startsWith(CHAT_PREFIX))
+            val opening = depthOf(targetState) >= depthOf(initialState) && targetState != SCREEN_HOME
             val duration = DshmMotion.screenTransitionMs
             val parallax: (Int) -> Int = { fullWidth ->
                 (fullWidth * DshmMotion.outgoingParallaxFraction).toInt()
@@ -202,6 +208,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 
