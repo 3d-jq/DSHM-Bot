@@ -33,7 +33,11 @@ fun AppearanceScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Scaffold(modifier = modifier.fillMaxSize(), containerColor = Dshm.colors.background) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = Dshm.colors.background,
+        topBar = { SettingsPageHeader(title = stringResource(R.string.settings_group_appearance), onBack = onBack) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -41,7 +45,6 @@ fun AppearanceScreen(
                 .padding(horizontal = Dshm.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md),
         ) {
-            SettingsPageHeader(title = stringResource(R.string.settings_group_appearance), onBack = onBack)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -79,7 +82,9 @@ fun AppearanceScreen(
 @Composable
 internal fun SettingsPageHeader(title: String, onBack: () -> Unit) {
     Row(
-        modifier = Modifier.padding(vertical = Dshm.spacing.sm),
+        modifier = Modifier
+            .statusBarsPadding()
+            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FloatingIconButton(
@@ -100,4 +105,5 @@ internal fun themeLabelOf(mode: ThemeMode): String = stringResource(
         ThemeMode.DARK -> R.string.theme_dark
     },
 )
+
 
