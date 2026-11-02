@@ -272,8 +272,7 @@ fun DshmBotApp(
             )
 
             key == SCREEN_ACCOUNT -> AccountScreen(
-                loggedInName = null,
-                balanceText = null,
+                endpoint = (engineState as? RuntimeState.Running)?.endpoint,
                 onBack = { accountOpen = false },
             )
 
@@ -301,6 +300,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 

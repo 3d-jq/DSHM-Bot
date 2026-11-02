@@ -129,7 +129,12 @@
     <string name="account_logged_out">未登录</string>
     <string name="account_login_hint">登录 DSH 账号后同步 Bot 与用量。</string>
     <string name="account_login">登录 DSH</string>
+    <string name="account_engine_required">请先启动本机引擎，再登录账号。</string>
+    <string name="account_signed_in">已登录</string>
+    <string name="account_signing_in">登录中…</string>
+    <string name="account_sign_out">退出登录</string>
 </resources>
+
 
 
 

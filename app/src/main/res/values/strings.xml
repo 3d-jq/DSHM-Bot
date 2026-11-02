@@ -129,7 +129,12 @@
     <string name="account_logged_out">Not signed in</string>
     <string name="account_login_hint">Sign in with your DSH account to sync bots and usage.</string>
     <string name="account_login">Log in to DSH</string>
+    <string name="account_engine_required">Start the local engine first, then sign in.</string>
+    <string name="account_signed_in">Signed in</string>
+    <string name="account_signing_in">Signing in…</string>
+    <string name="account_sign_out">Sign out</string>
 </resources>
+
 
 
 
