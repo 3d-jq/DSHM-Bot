@@ -34,6 +34,7 @@ import com.dshm.bot.ui.engine.OnboardingScreen
 import com.dshm.bot.ui.home.HomeScreen
 import com.dshm.bot.ui.home.HomeViewModel
 import com.dshm.bot.ui.home.SearchScreen
+import com.dshm.bot.ui.settings.AppearanceScreen
 import com.dshm.bot.ui.settings.SettingsScreen
 import com.dshm.bot.ui.settings.SettingsViewModel
 
@@ -42,12 +43,13 @@ private const val SCREEN_SEARCH = "search"
 private const val SCREEN_SETTINGS = "settings"
 private const val SCREEN_ENGINE = "engine"
 private const val SCREEN_ONBOARDING = "onboarding"
+private const val SCREEN_APPEARANCE = "appearance"
 private const val CHAT_PREFIX = "chat:"
 
 private fun depthOf(key: String): Int = when {
     key == SCREEN_HOME || key == SCREEN_ONBOARDING -> 0
     key == SCREEN_SEARCH || key == SCREEN_SETTINGS -> 1
-    key == SCREEN_ENGINE || key.startsWith(CHAT_PREFIX) -> 2
+    key == SCREEN_ENGINE || key == SCREEN_APPEARANCE || key.startsWith(CHAT_PREFIX) -> 2
     else -> 1
 }
 
@@ -81,6 +83,7 @@ fun DshmBotApp(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var engineOpen by rememberSaveable { mutableStateOf(false) }
+    var appearanceOpen by rememberSaveable { mutableStateOf(false) }
     // 已装运行时（含已停止）就不再走开屏引导：启动 App 直接进主界面。
     var onboardingDone by rememberSaveable { mutableStateOf(engineState !is RuntimeState.NotInstalled) }
 
@@ -110,6 +113,7 @@ fun DshmBotApp(
     val screenKey = when {
         !onboardingDone -> SCREEN_ONBOARDING
         engineOpen -> SCREEN_ENGINE
+        appearanceOpen -> SCREEN_APPEARANCE
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -129,10 +133,11 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || !onboardingDone) {
         when {
             !onboardingDone -> Unit
             engineOpen -> engineOpen = false
+            appearanceOpen -> appearanceOpen = false
             openBotId != null -> openBotId = null
             settingsOpen -> settingsOpen = false
             else -> {
@@ -222,7 +227,14 @@ fun DshmBotApp(
                 onBack = { settingsOpen = false },
                 onThemeChange = settingsViewModel::setThemeMode,
                 onOpenEngine = { engineOpen = true },
+                onOpenAppearance = { appearanceOpen = true },
                 engineStatus = engineStatusText,
+            )
+
+            key == SCREEN_APPEARANCE -> AppearanceScreen(
+                themeMode = settingsUiState.themeMode,
+                onThemeChange = settingsViewModel::setThemeMode,
+                onBack = { appearanceOpen = false },
             )
 
             key == SCREEN_SEARCH -> SearchScreen(
@@ -249,6 +261,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 

@@ -39,6 +39,7 @@ class SettingsScreenTest {
                     onBack = {},
                     onThemeChange = onThemeChange,
                     onOpenEngine = {},
+                    onOpenAppearance = {},
                 )
             }
         }
@@ -80,4 +81,5 @@ internal fun ThemeMode.label(context: android.content.Context): String = context
         ThemeMode.DARK -> R.string.theme_dark
     },
 )
+
 

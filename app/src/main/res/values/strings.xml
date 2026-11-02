@@ -119,7 +119,9 @@
     <string name="engine_restart_short">Restart</string>
     <string name="home_engine_starting">Local engine starting</string>
     <string name="home_engine_started">Local engine ready</string>
+    <string name="settings_appearance_hint">More appearance options are being ported from dsh-Go.</string>
 </resources>
+
 
 
 

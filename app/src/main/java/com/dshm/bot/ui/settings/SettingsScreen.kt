@@ -59,6 +59,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
     onOpenEngine: () -> Unit,
+    onOpenAppearance: () -> Unit,
     engineStatus: String,
     modifier: Modifier = Modifier,
 ) {
@@ -136,7 +137,7 @@ fun SettingsScreen(
                             icon = R.drawable.ic_lucide_palette,
                             title = stringResource(R.string.settings_theme),
                             value = themeLabel(uiState.themeMode),
-                            onClick = { showThemeDialog = true },
+                            onClick = onOpenAppearance,
                         )
                         SettingsRow(R.drawable.ic_lucide_type, stringResource(R.string.settings_chat_font), stringResource(R.string.settings_value_standard), comingSoonRow)
                         SettingsRow(R.drawable.ic_lucide_paw_print, stringResource(R.string.settings_pets), stringResource(R.string.settings_value_not_set), comingSoonRow)
@@ -370,5 +371,6 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 
 /** 测试用 tag：设置列表（用于滚动到指定行）。 */
 const val SETTINGS_LIST_TAG = "settings_list"
+
 
 
