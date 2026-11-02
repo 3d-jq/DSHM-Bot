@@ -60,6 +60,10 @@ fun SettingsScreen(
     onThemeChange: (ThemeMode) -> Unit,
     onOpenEngine: () -> Unit,
     onOpenAppearance: () -> Unit,
+    onOpenChatFont: () -> Unit,
+    onOpenLanguage: () -> Unit,
+    chatFontLabel: String,
+    languageLabel: String,
     engineStatus: String,
     modifier: Modifier = Modifier,
 ) {
@@ -139,7 +143,7 @@ fun SettingsScreen(
                             value = themeLabel(uiState.themeMode),
                             onClick = onOpenAppearance,
                         )
-                        SettingsRow(R.drawable.ic_lucide_type, stringResource(R.string.settings_chat_font), stringResource(R.string.settings_value_standard), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_type, stringResource(R.string.settings_chat_font), chatFontLabel, onOpenChatFont)
                         SettingsRow(R.drawable.ic_lucide_paw_print, stringResource(R.string.settings_pets), stringResource(R.string.settings_value_not_set), comingSoonRow)
                     }
                 }
@@ -147,7 +151,7 @@ fun SettingsScreen(
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_general)) {
                         SettingsRow(R.drawable.ic_lucide_layout_dashboard, stringResource(R.string.settings_interface), stringResource(R.string.settings_value_native), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_languages, stringResource(R.string.settings_language), stringResource(R.string.settings_value_follow_system), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_languages, stringResource(R.string.settings_language), languageLabel, onOpenLanguage)
                         SettingsRow(R.drawable.ic_lucide_bell, stringResource(R.string.settings_notifications), stringResource(R.string.settings_value_on), comingSoonRow)
                         SettingsRow(R.drawable.ic_lucide_mic, stringResource(R.string.settings_voice), stringResource(R.string.settings_value_auto), comingSoonRow)
                         SettingsRow(R.drawable.ic_lucide_gauge, stringResource(R.string.settings_performance), stringResource(R.string.settings_value_auto), comingSoonRow)
@@ -371,6 +375,8 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 
 /** 测试用 tag：设置列表（用于滚动到指定行）。 */
 const val SETTINGS_LIST_TAG = "settings_list"
+
+
 
 
 

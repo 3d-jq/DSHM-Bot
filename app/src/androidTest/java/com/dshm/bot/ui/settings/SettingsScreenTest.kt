@@ -40,6 +40,10 @@ class SettingsScreenTest {
                     onThemeChange = onThemeChange,
                     onOpenEngine = {},
                     onOpenAppearance = {},
+                    onOpenChatFont = {},
+                    onOpenLanguage = {},
+                    chatFontLabel = "标准",
+                    languageLabel = "跟随系统",
                 )
             }
         }
@@ -81,5 +85,7 @@ internal fun ThemeMode.label(context: android.content.Context): String = context
         ThemeMode.DARK -> R.string.theme_dark
     },
 )
+
+
 
 

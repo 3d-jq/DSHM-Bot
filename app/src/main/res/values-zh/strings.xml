@@ -120,7 +120,13 @@
     <string name="home_engine_starting">本机引擎启动中</string>
     <string name="home_engine_started">本机引擎启动成功</string>
     <string name="settings_appearance_hint">更多外观选项会按 dsh-Go 逐步移植。</string>
+    <string name="chat_font_small">小</string>
+    <string name="chat_font_large">大</string>
+    <string name="chat_font_xlarge">特大</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">English</string>
 </resources>
+
 
 
 

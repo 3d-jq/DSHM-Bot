@@ -120,7 +120,13 @@
     <string name="home_engine_starting">Local engine starting</string>
     <string name="home_engine_started">Local engine ready</string>
     <string name="settings_appearance_hint">More appearance options are being ported from dsh-Go.</string>
+    <string name="chat_font_small">Small</string>
+    <string name="chat_font_large">Large</string>
+    <string name="chat_font_xlarge">Extra large</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">English</string>
 </resources>
+
 
 
 
