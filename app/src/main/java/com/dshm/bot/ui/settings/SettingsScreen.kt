@@ -216,6 +216,7 @@ private fun OverviewCard(onClick: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onClick)
                 .padding(Dshm.spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
