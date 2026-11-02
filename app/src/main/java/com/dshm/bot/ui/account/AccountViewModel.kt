@@ -51,7 +51,18 @@ class AccountViewModel(private val repository: DshAccountRepository) : ViewModel
         viewModelScope.launch {
             runCatching {
                 val started = repository.startSignIn()
-                _ui.value = _ui.value.copy(authorizeUrl = started.authorizeUrl)
+                var url = started.authorizeUrl
+                var waited = 0
+                while (url == null && waited < 10) {
+                    delay(1_000)
+                    url = repository.state().authorizeUrl
+                    waited++
+                }
+                if (url == null) {
+                    _ui.value = _ui.value.copy(busy = false, error = "无法获取登录页，请重试")
+                    return@launch
+                }
+                _ui.value = _ui.value.copy(authorizeUrl = url)
                 repeat(90) {
                     delay(2_000)
                     val current = repository.state()
