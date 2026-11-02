@@ -62,6 +62,7 @@ fun SettingsScreen(
     onOpenAppearance: () -> Unit,
     onOpenChatFont: () -> Unit,
     onOpenLanguage: () -> Unit,
+    onOpenAccount: () -> Unit,
     chatFontLabel: String,
     languageLabel: String,
     engineStatus: String,
@@ -117,7 +118,7 @@ fun SettingsScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(Dshm.spacing.lg),
             ) {
-                item { OverviewCard() }
+                item { OverviewCard(onClick = onOpenAccount) }
 
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_ai)) {
@@ -210,7 +211,7 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun OverviewCard() {
+private fun OverviewCard(onClick: () -> Unit) {
     SettingsCard {
         Row(
             modifier = Modifier
@@ -375,6 +376,9 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 
 /** 测试用 tag：设置列表（用于滚动到指定行）。 */
 const val SETTINGS_LIST_TAG = "settings_list"
+
+
+
 
 
 

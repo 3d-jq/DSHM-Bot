@@ -125,7 +125,12 @@
     <string name="chat_font_xlarge">Extra large</string>
     <string name="language_chinese">中文</string>
     <string name="language_english">English</string>
+    <string name="settings_account">Account</string>
+    <string name="account_logged_out">Not signed in</string>
+    <string name="account_login_hint">Sign in with your DSH account to sync bots and usage.</string>
+    <string name="account_login">Log in to DSH</string>
 </resources>
+
 
 
 

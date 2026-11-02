@@ -125,7 +125,12 @@
     <string name="chat_font_xlarge">特大</string>
     <string name="language_chinese">中文</string>
     <string name="language_english">English</string>
+    <string name="settings_account">账号</string>
+    <string name="account_logged_out">未登录</string>
+    <string name="account_login_hint">登录 DSH 账号后同步 Bot 与用量。</string>
+    <string name="account_login">登录 DSH</string>
 </resources>
+
 
 
 
