@@ -38,3 +38,7 @@ build-log.txt
 # 本地构建/检查日志
 *.log
 
+
+# 本地检查日志（*-log.txt）
+*-log.txt
+
