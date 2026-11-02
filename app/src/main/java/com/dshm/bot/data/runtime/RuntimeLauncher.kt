@@ -38,7 +38,12 @@ class RuntimeLauncher(
             "{TMP}" to tmp.absolutePath,
             "{PORT}" to actualPort.toString(),
         )
-        val argv = ProotCommand.buildArgv(manifest.launchArgv, placeholders, guestEnv)
+        val argv = ProotCommand.buildArgv(manifest.launchArgv, placeholders, guestEnv).toMutableList()
+        // 账号登录桥：文件写入 rootfs 后才追加 --patch（失败则跳过，避免 DSH 起不来）。
+        if (AuthGuest.writeFiles(appContext, rootfs)) {
+            val webIndex = argv.indexOfFirst { it.contains("/usr/local/bin/dsh web") }
+            if (webIndex >= 0) AuthGuest.launchArg(argv[webIndex])?.let { argv[webIndex] = it }
+        }
         val env = ProotCommand.buildEnv(manifest.launchEnv, placeholders)
         EngineLog.log("launching ${argv.joinToString(" ")}")
 
@@ -113,3 +118,4 @@ class RuntimeLauncher(
         const val DEFAULT_PORT = 3080
     }
 }
+
