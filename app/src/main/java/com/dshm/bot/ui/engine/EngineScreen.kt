@@ -44,6 +44,7 @@ fun EngineScreen(
     onStart: () -> Unit = {},
     onStop: () -> Unit = {},
     onDone: () -> Unit = {},
+    showContinue: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(modifier = modifier.fillMaxSize(), containerColor = Dshm.colors.background) { padding ->
@@ -111,7 +112,9 @@ fun EngineScreen(
             }
 
             if (state is RuntimeState.Running) {
-                Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_continue)) }
+                if (showContinue) {
+                    Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_continue)) }
+                }
                 Button(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_stop_action)) }
             }
             if (state is RuntimeState.Installed || state is RuntimeState.Stopped) {
@@ -128,6 +131,8 @@ fun EngineScreen(
         }
     }
 }
+
+
 
 
 

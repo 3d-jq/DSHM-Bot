@@ -85,7 +85,15 @@
     <string name="engine_start_action">Start engine</string>
     <string name="engine_stop_action">Stop engine</string>
     <string name="engine_continue">Enter DSHM Bot</string>
+    <string name="engine_value_running">Running</string>
+    <string name="engine_value_installed">Installed</string>
+    <string name="engine_value_starting">Starting</string>
+    <string name="engine_value_installing">Installing</string>
+    <string name="engine_value_failed">Failed</string>
+    <string name="engine_value_stopped">Stopped</string>
+    <string name="engine_value_not_installed">Not installed</string>
 </resources>
+
 
 
 

@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,6 +58,15 @@ fun DshmBotApp(
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val engineState by engineViewModel.state.collectAsStateWithLifecycle()
+    val engineStatusText = when (engineState) {
+        is RuntimeState.Running -> stringResource(R.string.engine_value_running)
+        is RuntimeState.Installed -> stringResource(R.string.engine_value_installed)
+        is RuntimeState.Starting -> stringResource(R.string.engine_value_starting)
+        is RuntimeState.Installing -> stringResource(R.string.engine_value_installing)
+        is RuntimeState.Failed -> stringResource(R.string.engine_value_failed)
+        RuntimeState.Stopped -> stringResource(R.string.engine_value_stopped)
+        RuntimeState.NotInstalled -> stringResource(R.string.engine_value_not_installed)
+    }
     var openBotId by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -152,6 +162,7 @@ fun DshmBotApp(
             key == SCREEN_ENGINE -> EngineScreen(
                 state = engineState,
                 onBack = if (onboardingDone) ({ engineOpen = false }) else null,
+                showContinue = !onboardingDone,
                 onDone = {
                     onboardingDone = true
                     engineOpen = false
@@ -166,6 +177,7 @@ fun DshmBotApp(
                 onBack = { settingsOpen = false },
                 onThemeChange = settingsViewModel::setThemeMode,
                 onOpenEngine = { engineOpen = true },
+                engineStatus = engineStatusText,
             )
 
             key == SCREEN_SEARCH -> SearchScreen(
@@ -190,6 +202,9 @@ fun DshmBotApp(
         }
     }
 }
+
+
+
 
 
 

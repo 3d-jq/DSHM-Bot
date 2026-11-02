@@ -85,7 +85,15 @@
     <string name="engine_start_action">启动引擎</string>
     <string name="engine_stop_action">停止引擎</string>
     <string name="engine_continue">进入 DSHM Bot</string>
+    <string name="engine_value_running">运行中</string>
+    <string name="engine_value_installed">已安装</string>
+    <string name="engine_value_starting">启动中</string>
+    <string name="engine_value_installing">安装中</string>
+    <string name="engine_value_failed">安装失败</string>
+    <string name="engine_value_stopped">已停止</string>
+    <string name="engine_value_not_installed">未安装</string>
 </resources>
+
 
 
 
