@@ -34,3 +34,7 @@ __pycache__/
 
 # 构建日志
 build-log.txt
+
+# 本地构建/检查日志
+*.log
+
