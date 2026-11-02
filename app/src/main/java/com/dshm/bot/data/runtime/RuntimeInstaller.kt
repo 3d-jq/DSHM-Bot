@@ -1,6 +1,7 @@
 package com.dshm.bot.data.runtime
 
 import android.content.Context
+import android.os.SystemClock
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.tukaani.xz.XZInputStream
 import java.io.BufferedInputStream
@@ -43,6 +44,10 @@ class RuntimeInstaller(context: Context) {
     ): String {
         // zip 里带着 CI 生成的 manifest（哈希对应本次构建的 rootfs），优先用它。
         val effective = readEmbeddedManifest(zipFile) ?: manifest
+        EngineLog.init(appContext)
+        EngineLog.reset()
+        EngineLog.log("unpacking runtime ${effective.runtimeVersion} (${effective.abi})")
+        val startedAt = SystemClock.elapsedRealtime()
         baseDir.mkdirs()
         stagingDir.deleteRecursively()
         stagingDir.mkdirs()
@@ -77,18 +82,26 @@ class RuntimeInstaller(context: Context) {
                 }
             }
 
+            val verifyAt = SystemClock.elapsedRealtime()
+            EngineLog.log("install verify: ${verifyAt - startedAt} ms")
             onProgress(0, "解压中")
             extractTarXz(tarFile, stagingDir, effective.entriesTotal, onProgress)
+            EngineLog.log("install extract: ${SystemClock.elapsedRealtime() - verifyAt} ms")
         } finally {
             tarFile.delete()
         }
 
+        val syncAt = SystemClock.elapsedRealtime()
         rootfsDir.deleteRecursively()
         if (!stagingDir.renameTo(rootfsDir)) {
             stagingDir.copyRecursively(rootfsDir, overwrite = true)
             stagingDir.deleteRecursively()
         }
+        EngineLog.log("install sync: ${SystemClock.elapsedRealtime() - syncAt} ms")
+        val activateAt = SystemClock.elapsedRealtime()
         versionFile.writeText(effective.runtimeVersion)
+        EngineLog.log("install activate: ${SystemClock.elapsedRealtime() - activateAt} ms")
+        EngineLog.log("runtime ready in ${(SystemClock.elapsedRealtime() - startedAt) / 1000}s")
         onProgress(100, "已安装")
         return effective.runtimeVersion
     }

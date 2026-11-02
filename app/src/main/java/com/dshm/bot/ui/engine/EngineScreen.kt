@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,10 +37,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -324,16 +328,22 @@ private fun TerminalCard(logs: String) {
                     .padding(Dshm.spacing.xs),
             )
         }
-        Box(
+        // 只展示最新 20 行（最新在上），避免超长启动命令把日志井撑满。
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(Dshm.spacing.xxl * 6)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
+                .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
         ) {
-            SelectionContainer {
+            val tail = if (lines.isEmpty()) {
+                listOf(stringResource(R.string.engine_logs_empty))
+            } else {
+                lines.takeLast(20).reversed()
+            }
+            tail.forEach { line ->
                 Text(
-                    text = lines.joinToString("\n").ifEmpty { stringResource(R.string.engine_logs_empty) },
+                    text = line,
                     style = Dshm.typography.rowPreview.copy(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
@@ -349,12 +359,7 @@ private fun TerminalCard(logs: String) {
 @Composable
 private fun MoreCard() {
     SettingsCard {
-        Text(
-            text = stringResource(R.string.engine_more),
-            style = Dshm.typography.rowTitle,
-            color = Dshm.colors.textPrimary,
-        )
-        Spacer(Modifier.height(Dshm.spacing.sm))
+        Spacer(Modifier.height(Dshm.spacing.xs))
         Text(
             text = stringResource(R.string.engine_background),
             style = Dshm.typography.rowTitle,
@@ -382,12 +387,7 @@ private fun MoreCard() {
 @Composable
 private fun RuntimeInfoCard(version: String, abi: String) {
     SettingsCard {
-        Text(
-            text = stringResource(R.string.engine_runtime_info),
-            style = Dshm.typography.rowTitle,
-            color = Dshm.colors.textPrimary,
-        )
-        Spacer(Modifier.height(Dshm.spacing.sm))
+        Spacer(Modifier.height(Dshm.spacing.xs))
         InfoRow(stringResource(R.string.engine_version), version, mono = true)
         HorizontalDivider(color = Dshm.colors.divider, thickness = Dshm.spacing.hairline)
         InfoRow(stringResource(R.string.engine_arch), abi, mono = true)
@@ -456,4 +456,5 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
         content = content,
     )
 }
+
 

@@ -117,7 +117,10 @@
     <string name="engine_start_short">启动</string>
     <string name="engine_stop_short">停止</string>
     <string name="engine_restart_short">重启</string>
+    <string name="home_engine_starting">本机引擎启动中</string>
+    <string name="home_engine_started">本机引擎启动成功</string>
 </resources>
+
 
 
 

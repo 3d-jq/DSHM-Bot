@@ -117,7 +117,11 @@
     <string name="engine_start_short">Start</string>
     <string name="engine_stop_short">Stop</string>
     <string name="engine_restart_short">Restart</string>
+    <string name="home_engine_starting">Local engine starting</string>
+    <string name="home_engine_started">Local engine ready</string>
 </resources>
+
+
 
 
 

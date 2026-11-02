@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -90,8 +91,21 @@ fun DshmBotApp(
         }
     }
 
-    // 顶栏只显示「启动中」：运行中后不再占用位置（用户要求）。
-    val enginePill = if (engineState is RuntimeState.Starting) stringResource(R.string.engine_value_starting) else null
+    // 顶栏只用纯文字提示启动过程：启动中从左滑入，成功后从右往左滑出消失。
+    val startingText = stringResource(R.string.home_engine_starting)
+    val successText = stringResource(R.string.home_engine_started)
+    var engineNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(engineState) {
+        when (engineState) {
+            is RuntimeState.Starting -> engineNotice = startingText
+            is RuntimeState.Running -> if (engineNotice == startingText) {
+                engineNotice = successText
+                kotlinx.coroutines.delay(1_800)
+                engineNotice = null
+            }
+            else -> Unit
+        }
+    }
 
     val screenKey = when {
         !onboardingDone -> SCREEN_ONBOARDING
@@ -183,7 +197,7 @@ fun DshmBotApp(
                         onCreateGroup = {},
                         onOpenSearch = { searchOpen = true },
                         onOpenSettings = { settingsOpen = true },
-                        engineLabel = enginePill,
+                        engineLabel = engineNotice,
                         onEngineClick = { engineOpen = true },
                     )
                 }
@@ -229,12 +243,13 @@ fun DshmBotApp(
                 onCreateGroup = {},
                 onOpenSearch = { searchOpen = true },
                 onOpenSettings = { settingsOpen = true },
-                        engineLabel = enginePill,
+                        engineLabel = engineNotice,
                         onEngineClick = { engineOpen = true },
             )
         }
     }
 }
+
 
 
 

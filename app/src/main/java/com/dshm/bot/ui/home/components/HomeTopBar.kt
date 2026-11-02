@@ -1,7 +1,11 @@
 package com.dshm.bot.ui.home.components
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -11,7 +15,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
@@ -23,7 +26,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.DpOffset
@@ -62,7 +64,18 @@ fun HomeTopBar(
         )
         if (engineLabel != null) {
             Spacer(Modifier.width(Dshm.spacing.sm))
-            EnginePill(label = engineLabel, onClick = onEngineClick)
+            AnimatedVisibility(
+                visible = true,
+                enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+                exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+            ) {
+                Text(
+                    text = engineLabel,
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                    maxLines = 1,
+                )
+            }
         }
         Spacer(Modifier.weight(1f))
         FloatingIconButton(
@@ -84,33 +97,6 @@ fun HomeTopBar(
                 onCreateGroup = onCreateGroup,
             )
         }
-    }
-}
-
-/** 顶栏里的本机引擎状态胶囊：运行中/启动中/安装中/失败，点击进入引擎页。 */
-@Composable
-private fun EnginePill(label: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(Dshm.radius.pill))
-            .background(Dshm.colors.surfaceMuted)
-            .clickable(onClick = onClick)
-            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(Dshm.spacing.xs)
-                .clip(CircleShape)
-                .background(Dshm.colors.accent),
-        )
-        Spacer(Modifier.width(Dshm.spacing.xs))
-        Text(
-            text = label,
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textSecondary,
-            maxLines = 1,
-        )
     }
 }
 
