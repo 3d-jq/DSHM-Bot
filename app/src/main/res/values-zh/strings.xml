@@ -19,4 +19,5 @@
     <string name="home_coming_soon">即将上线</string>
     <string name="chat_placeholder_title">与 %1$s 的对话</string>
     <string name="chat_placeholder_hint">原生对话界面，底层由 DSH 驱动；DS Bot 团队能力将在后续里程碑接入。</string>
+    <string name="chat_details">查看 Bot 详情</string>
 </resources>

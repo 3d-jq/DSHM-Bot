@@ -20,6 +20,8 @@ class LucideIconResourcesTest {
         "users",
         "sparkles",
         "arrow_left",
+        "chevron_right",
+        "square_user",
     )
 
     @Test

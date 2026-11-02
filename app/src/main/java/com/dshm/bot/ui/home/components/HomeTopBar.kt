@@ -1,8 +1,6 @@
 package com.dshm.bot.ui.home.components
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +9,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
@@ -31,6 +28,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.components.FloatingIconButton
 
 /**
  * 顶栏：左侧个人资料，右侧搜索与新建。
@@ -141,35 +139,5 @@ fun HomeSearchBar(
                 color = Dshm.colors.accent,
             )
         }
-    }
-}
-
-/** 悬浮圆钮：填充色与页面底色一致，四周阴影让它浮起来。 */
-@Composable
-private fun FloatingIconButton(
-    @DrawableRes icon: Int,
-    contentDescription: String,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .size(Dshm.spacing.iconButton)
-            .shadow(
-                elevation = Dshm.spacing.floatingElevation,
-                shape = CircleShape,
-                ambientColor = Dshm.colors.shadow,
-                spotColor = Dshm.colors.shadow,
-            )
-            .clip(CircleShape)
-            .background(Dshm.colors.background)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = contentDescription,
-            tint = Dshm.colors.iconTint,
-            modifier = Modifier.size(Dshm.spacing.topBarIcon),
-        )
     }
 }

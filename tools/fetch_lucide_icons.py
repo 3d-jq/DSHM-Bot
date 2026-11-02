@@ -30,6 +30,8 @@ ICONS = [
     "users",
     "sparkles",
     "arrow-left",
+    "chevron-right",
+    "square-user",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

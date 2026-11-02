@@ -26,6 +26,8 @@ data class DshmSpacing(
     val listBottomPadding: Dp = 24.dp,
     /** 顶栏悬浮按钮的阴影高度。 */
     val floatingElevation: Dp = 10.dp,
+    /** 对话顶栏：名字胶囊叠入头像的量（头像罩住胶囊顶部一小段）。 */
+    val capsuleOverlap: Dp = 6.dp,
 )
 
 val LocalDshmSpacing = staticCompositionLocalOf { DshmSpacing() }
