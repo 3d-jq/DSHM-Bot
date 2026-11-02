@@ -41,7 +41,19 @@ class RuntimeManager(
     val state: StateFlow<RuntimeState> = _state.asStateFlow()
 
     suspend fun installFromUrl(url: String) {
-        _state.value = RuntimeState.Installing(0, "准备安装")`n        try {`n            // 开发/调试：外部目录放了 runtime.zip 就直接本地安装，省去下载。`n            val localZip = File(appContext.getExternalFilesDir(null), "runtime.zip")`n            if (localZip.isFile) {`n                withContext(Dispatchers.IO) {`n                    installer.installFromZip(localZip, manifest) { p, m ->`n                        _state.value = RuntimeState.Installing(p, m)`n                    }`n                }`n                _state.value = RuntimeState.Installed(manifest.runtimeVersion)`n                return`n            }
+        _state.value = RuntimeState.Installing(0, "准备安装")
+        try {
+            // 开发/调试：外部目录放了 runtime.zip 就直接本地安装，省去下载。
+            val localZip = File(appContext.getExternalFilesDir(null), "runtime.zip")
+            if (localZip.isFile) {
+                withContext(Dispatchers.IO) {
+                    installer.installFromZip(localZip, manifest) { p, m ->
+                        _state.value = RuntimeState.Installing(p, m)
+                    }
+                }
+                _state.value = RuntimeState.Installed(manifest.runtimeVersion)
+                return
+            }
             val zip = withContext(Dispatchers.IO) { download(url) }
             withContext(Dispatchers.IO) {
                 installer.installFromZip(zip, manifest) { progress, message ->
@@ -89,5 +101,6 @@ class RuntimeManager(
         }
     }
 }
+
 
 
