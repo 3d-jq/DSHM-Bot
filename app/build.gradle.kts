@@ -28,7 +28,7 @@ android {
     defaultConfig {
         applicationId = "com.dshm.bot"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 28
         versionCode = buildMinuteVersionCode()
         versionName = "0.1.0"
 
@@ -117,3 +117,4 @@ dependencies {
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.compose.ui.test.junit4)
 }
+
