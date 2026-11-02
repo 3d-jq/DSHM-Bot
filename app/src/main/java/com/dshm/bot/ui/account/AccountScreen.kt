@@ -5,16 +5,21 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -65,17 +70,38 @@ private fun AccountContent(endpoint: RuntimeEndpoint) {
                 .background(Dshm.colors.surface)
                 .padding(Dshm.spacing.lg),
         ) {
-            Text(
-                text = ui.name ?: stringResource(R.string.account_logged_out),
-                style = Dshm.typography.rowTitle,
-                color = Dshm.colors.textPrimary,
-            )
-            Spacer(Modifier.padding(Dshm.spacing.xs))
-            Text(
-                text = if (ui.name == null) stringResource(R.string.account_login_hint) else stringResource(R.string.account_signed_in),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textSecondary,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(Dshm.spacing.avatar)
+                        .clip(CircleShape)
+                        .background(Dshm.colors.surfaceMuted),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = (ui.name ?: "?").trim().take(1).uppercase(),
+                        style = Dshm.typography.rowTitle,
+                        color = Dshm.colors.textSecondary,
+                    )
+                }
+                Spacer(Modifier.padding(Dshm.spacing.sm))
+                Column {
+                    Text(
+                        text = ui.name ?: stringResource(R.string.account_logged_out),
+                        style = Dshm.typography.rowTitle,
+                        color = Dshm.colors.textPrimary,
+                    )
+                    Text(
+                        text = when {
+                            ui.balance != null -> stringResource(R.string.account_balance, ui.balance.orEmpty())
+                            ui.name == null -> stringResource(R.string.account_login_hint)
+                            else -> stringResource(R.string.account_signed_in)
+                        },
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.textSecondary,
+                    )
+                }
+            }
             ui.error?.let { error ->
                 Spacer(Modifier.padding(Dshm.spacing.xs))
                 Text(error, style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
@@ -102,3 +128,4 @@ private fun openAuthorizePage(context: Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }
+

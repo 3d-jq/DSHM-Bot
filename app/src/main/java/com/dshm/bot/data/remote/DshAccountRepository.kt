@@ -40,6 +40,29 @@ class DshAccountRepository(
         client.account("signOut", JSONObject().put("client", clientMeta())),
     )
 
+    data class Profile(val name: String?, val avatarUrl: String?)
+
+    /** 账号资料（account/getProfile 的 value：name/contact/avatarUrl）。 */
+    suspend fun profile(): Profile? = runCatching {
+        val value = client.account("getProfile", JSONObject().put("client", clientMeta())).optJSONObject("value")
+        val name = value?.optString("name")?.trim()?.ifEmpty { null }
+            ?: value?.optString("contact")?.trim()?.ifEmpty { null }
+        Profile(name, value?.optString("avatarUrl")?.trim()?.ifEmpty { null })
+    }.getOrNull()
+
+    /** 余额文案（getBalance 的 value[0] / bonusWallets[0]）。 */
+    suspend fun balanceText(): String? = runCatching {
+        val root = client.account("getBalance", JSONObject().put("client", clientMeta()))
+        val wallets = root.optJSONArray("value") ?: root.optJSONArray("bonusWallets") ?: return@runCatching null
+        val wallet = wallets.optJSONObject(0) ?: return@runCatching null
+        val display = when {
+            wallet.has("displayAmount") -> wallet.optString("displayAmount")
+            else -> wallet.optDouble("amount", Double.NaN).takeUnless { it.isNaN() }?.let { String.format("%.2f", it) }
+        } ?: return@runCatching null
+        val currency = wallet.optString("currency").ifEmpty { "CNY" }
+        if (currency == "CNY") "¥$display" else "$display $currency"
+    }.getOrNull()
+
     /** 已登录时的显示名（名称 → 脱敏联系方式）。 */
     suspend fun displayName(): String? = runCatching {
         val value = client.account("getProfile", JSONObject().put("client", clientMeta()))

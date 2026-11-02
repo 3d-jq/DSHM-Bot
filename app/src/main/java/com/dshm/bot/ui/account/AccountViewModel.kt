@@ -20,6 +20,8 @@ class AccountViewModel(private val repository: DshAccountRepository) : ViewModel
     data class UiState(
         val signedIn: Boolean = false,
         val name: String? = null,
+        val avatarUrl: String? = null,
+        val balance: String? = null,
         val authorizeUrl: String? = null,
         val busy: Boolean = false,
         val error: String? = null,
@@ -40,8 +42,14 @@ class AccountViewModel(private val repository: DshAccountRepository) : ViewModel
         viewModelScope.launch {
             runCatching {
                 val state = repository.state()
-                val name = if (state.signedIn) repository.displayName() else null
-                _ui.value = UiState(signedIn = state.signedIn, name = name)
+                val profile = if (state.signedIn) repository.profile() else null
+                val balance = if (state.signedIn) repository.balanceText() else null
+                _ui.value = UiState(
+                    signedIn = state.signedIn,
+                    name = profile?.name,
+                    avatarUrl = profile?.avatarUrl,
+                    balance = balance,
+                )
             }.onFailure { _ui.value = _ui.value.copy(error = it.message) }
         }
     }
@@ -67,7 +75,13 @@ class AccountViewModel(private val repository: DshAccountRepository) : ViewModel
                     delay(2_000)
                     val current = repository.state()
                     if (current.signedIn) {
-                        _ui.value = UiState(signedIn = true, name = repository.displayName())
+                        val profile = repository.profile()
+                        _ui.value = UiState(
+                            signedIn = true,
+                            name = profile?.name,
+                            avatarUrl = profile?.avatarUrl,
+                            balance = repository.balanceText(),
+                        )
                         return@launch
                     }
                 }

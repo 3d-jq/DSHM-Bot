@@ -133,7 +133,9 @@
     <string name="account_signed_in">Signed in</string>
     <string name="account_signing_in">Signing in…</string>
     <string name="account_sign_out">Sign out</string>
+    <string name="account_balance">Balance %1$s</string>
 </resources>
+
 
 
 
