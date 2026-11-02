@@ -46,3 +46,7 @@ build-log.txt
 # 本地运行时产物（首次启动下载，不入库）
 runtime-dev/
 
+
+# Kotlin 编译器临时文件
+.kotlin/
+
