@@ -94,6 +94,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.commons.compress)
+    implementation(libs.xz)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.foundation)
