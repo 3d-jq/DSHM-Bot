@@ -26,6 +26,9 @@ android {
     compileSdk = 36
 
     defaultConfig {
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
         applicationId = "com.dshm.bot"
         minSdk = 26
         targetSdk = 28
@@ -56,6 +59,9 @@ android {
     }
 
     packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += setOf(
                 "META-INF/LICENSE.md",
@@ -117,4 +123,5 @@ dependencies {
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.compose.ui.test.junit4)
 }
+
 

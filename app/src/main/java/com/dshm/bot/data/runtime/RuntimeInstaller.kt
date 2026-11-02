@@ -78,7 +78,7 @@ class RuntimeInstaller(context: Context) {
             }
 
             onProgress(0, "解压中")
-            extractTarXz(tarFile, stagingDir, onProgress)
+            extractTarXz(tarFile, stagingDir, effective.entriesTotal, onProgress)
         } finally {
             tarFile.delete()
         }
@@ -111,7 +111,7 @@ class RuntimeInstaller(context: Context) {
             .firstNotNullOfOrNull { zip.getEntry(it) }
             ?: error("运行时包缺少 rootfs：$asset")
 
-    private fun extractTarXz(tarFile: File, dest: File, onProgress: (Int, String) -> Unit) {
+    private fun extractTarXz(tarFile: File, dest: File, totalEntries: Int, onProgress: (Int, String) -> Unit) {
         BufferedInputStream(tarFile.inputStream()).use { buffered ->
             XZInputStream(buffered).use { xz ->
                 TarArchiveInputStream(xz).use { tar ->
@@ -143,7 +143,10 @@ class RuntimeInstaller(context: Context) {
                                 if (entry.mode and EXECUTABLE_MASK != 0) target.setExecutable(true, true)
                             }
                         }
-                        if (++count % 500 == 0) onProgress(0, "解压中（$count 项）")
+                        count++
+                        if (totalEntries > 0 && count % 200 == 0) {
+                            onProgress((count * 100 / totalEntries).coerceIn(0, 99), "解压中")
+                        }
                         entry = tar.nextEntry
                     }
                 }
@@ -172,4 +175,5 @@ class RuntimeInstaller(context: Context) {
         const val EXECUTABLE_MASK = 0b001_001_001
     }
 }
+
 

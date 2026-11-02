@@ -117,16 +117,18 @@ fun EngineScreen(
             if (state is RuntimeState.Installed || state is RuntimeState.Stopped) {
                 Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_start_action)) }
             }
-            Button(
-                onClick = { onInstall(DEFAULT_RUNTIME_URL) },
-                enabled = state !is RuntimeState.Installing,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.engine_install_action))
+            if (state is RuntimeState.NotInstalled || state is RuntimeState.Failed) {
+                Button(
+                    onClick = { onInstall(DEFAULT_RUNTIME_URL) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.engine_install_action))
+                }
             }
         }
     }
 }
+
 
 
 

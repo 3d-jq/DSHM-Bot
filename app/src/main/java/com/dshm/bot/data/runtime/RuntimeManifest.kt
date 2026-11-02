@@ -19,6 +19,7 @@ data class RuntimeManifest(
     val nodeVersion: String,
     val launchArgv: List<String>,
     val launchEnv: Map<String, String>,
+    val entriesTotal: Int,
 ) {
     companion object {
         private const val ASSET_PATH = "runtime/manifest.json"
@@ -48,7 +49,11 @@ data class RuntimeManifest(
                 nodeVersion = json.optString("nodeVersion"),
                 launchArgv = argv,
                 launchEnv = env,
+                entriesTotal = json.optJSONObject("entries")?.let {
+                    it.optInt("dir") + it.optInt("file") + it.optInt("symlink")
+                } ?: 0,
             )
         }
     }
 }
+
