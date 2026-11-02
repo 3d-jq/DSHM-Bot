@@ -46,8 +46,6 @@ fun EngineScreen(
     onDone: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var url by remember { mutableStateOf(DEFAULT_RUNTIME_URL) }
-
     Scaffold(modifier = modifier.fillMaxSize(), containerColor = Dshm.colors.background) { padding ->
         Column(
             modifier = Modifier
@@ -79,18 +77,6 @@ fun EngineScreen(
             )
             Text(stringResource(R.string.engine_intro), style = Dshm.typography.rowTitle, color = Dshm.colors.textPrimary)
             Text(stringResource(R.string.engine_intro_hint), style = Dshm.typography.rowPreview, color = Dshm.colors.textSecondary)
-
-            BasicTextField(
-                value = url,
-                onValueChange = { url = it },
-                singleLine = true,
-                textStyle = Dshm.typography.rowPreview.copy(color = Dshm.colors.textPrimary),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Dshm.radius.sm))
-                    .background(Dshm.colors.surfaceMuted)
-                    .padding(Dshm.spacing.md),
-            )
 
             when (state) {
                 is RuntimeState.Installing -> {
@@ -132,7 +118,7 @@ fun EngineScreen(
                 Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_start_action)) }
             }
             Button(
-                onClick = { onInstall(url) },
+                onClick = { onInstall(DEFAULT_RUNTIME_URL) },
                 enabled = state !is RuntimeState.Installing,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -141,6 +127,7 @@ fun EngineScreen(
         }
     }
 }
+
 
 
 
