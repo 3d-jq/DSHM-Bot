@@ -11,7 +11,7 @@ import java.security.MessageDigest
 import java.util.zip.ZipFile
 
 /**
- * 解包 rootfs：从运行时 zip 里取出 `manifest.rootfsAsset`（tar.xz），
+ * 解包 rootfs：从运行时 zip 里取出 `effective.rootfsAsset`（tar.xz），
  * 校验 SHA-256 后解到 `filesDir/runtime/rootfs`，并写版本文件。
  *
  * 目录布局：
@@ -40,7 +40,9 @@ class RuntimeInstaller(context: Context) {
         zipFile: File,
         manifest: RuntimeManifest,
         onProgress: (Int, String) -> Unit = { _, _ -> },
-    ) {
+    ): String {
+        // zip 里带着 CI 生成的 manifest（哈希对应本次构建的 rootfs），优先用它。
+        val effective = readEmbeddedManifest(zipFile) ?: manifest
         baseDir.mkdirs()
         stagingDir.deleteRecursively()
         stagingDir.mkdirs()
@@ -48,7 +50,7 @@ class RuntimeInstaller(context: Context) {
         val tarFile = File(appContext.cacheDir, "rootfs.tar.xz")
         try {
             ZipFile(zipFile).use { zip ->
-                val entry = findRootfsEntry(zip, manifest.rootfsAsset)
+                val entry = findRootfsEntry(zip, effective.rootfsAsset)
                 val digest = MessageDigest.getInstance("SHA-256")
                 var read = 0L
                 var lastReported = 0L
@@ -69,7 +71,7 @@ class RuntimeInstaller(context: Context) {
                     }
                 }
                 val actual = digest.digest().joinToString("") { "%02x".format(it) }
-                val expected = manifest.rootfsSha256
+                val expected = effective.rootfsSha256
                 require(expected == null || actual.equals(expected, ignoreCase = true)) {
                     "rootfs 校验失败：期望 $expected，实际 $actual"
                 }
@@ -86,9 +88,17 @@ class RuntimeInstaller(context: Context) {
             stagingDir.copyRecursively(rootfsDir, overwrite = true)
             stagingDir.deleteRecursively()
         }
-        versionFile.writeText(manifest.runtimeVersion)
+        versionFile.writeText(effective.runtimeVersion)
         onProgress(100, "已安装")
+        return effective.runtimeVersion
     }
+
+    private fun readEmbeddedManifest(zipFile: File): RuntimeManifest? = runCatching {
+        ZipFile(zipFile).use { zip ->
+            val entry = zip.getEntry("manifest.json") ?: return@use null
+            RuntimeManifest.parse(zip.getInputStream(entry).bufferedReader().use { it.readText() })
+        }
+    }.getOrNull()
 
     fun delete() {
         rootfsDir.deleteRecursively()
@@ -162,3 +172,4 @@ class RuntimeInstaller(context: Context) {
         const val EXECUTABLE_MASK = 0b001_001_001
     }
 }
+

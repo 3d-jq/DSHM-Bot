@@ -47,21 +47,21 @@ class RuntimeManager(
             val localZip = File(appContext.getExternalFilesDir(null), "runtime.zip")
             if (localZip.isFile) {
                 withContext(Dispatchers.IO) {
-                    installer.installFromZip(localZip, manifest) { p, m ->
+                    val version = installer.installFromZip(localZip, manifest) { p, m ->
                         _state.value = RuntimeState.Installing(p, m)
                     }
+                    _state.value = RuntimeState.Installed(version)
                 }
-                _state.value = RuntimeState.Installed(manifest.runtimeVersion)
                 return
             }
             val zip = withContext(Dispatchers.IO) { download(url) }
-            withContext(Dispatchers.IO) {
+            val version = withContext(Dispatchers.IO) {
                 installer.installFromZip(zip, manifest) { progress, message ->
                     _state.value = RuntimeState.Installing(progress, message)
                 }
             }
             zip.delete()
-            _state.value = RuntimeState.Installed(manifest.runtimeVersion)
+            _state.value = RuntimeState.Installed(version)
         } catch (t: Throwable) {
             _state.value = RuntimeState.Failed(t.message ?: "安装失败")
         }
@@ -101,6 +101,7 @@ class RuntimeManager(
         }
     }
 }
+
 
 
 
