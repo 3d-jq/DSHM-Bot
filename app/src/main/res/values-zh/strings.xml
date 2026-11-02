@@ -134,7 +134,10 @@
     <string name="account_signing_in">登录中…</string>
     <string name="account_sign_out">退出登录</string>
     <string name="account_balance">余额 %1$s</string>
+    <string name="account_top_up">充值</string>
+    <string name="account_usage">用量</string>
 </resources>
+
 
 
 

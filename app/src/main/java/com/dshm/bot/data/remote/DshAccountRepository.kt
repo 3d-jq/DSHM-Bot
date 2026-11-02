@@ -22,6 +22,8 @@ class DshAccountRepository(
         val signedIn: Boolean,
         val authorizeUrl: String?,
         val attemptId: String?,
+        val usageUrl: String? = null,
+        val topUpUrl: String? = null,
     )
 
     suspend fun state(): Snapshot = parse(client.account("getState"))
@@ -50,15 +52,15 @@ class DshAccountRepository(
         Profile(name, value?.optString("avatarUrl")?.trim()?.ifEmpty { null })
     }.getOrNull()
 
-    /** 余额文案（getBalance 的 value[0] / bonusWallets[0]）。 */
+    /** 余额文案（对齐 dsh-Go getBalance：status=ready，value[0].balance/currency）。 */
     suspend fun balanceText(): String? = runCatching {
         val root = client.account("getBalance", JSONObject().put("client", clientMeta()))
+        if (root.optString("status") != "ready") return@runCatching null
         val wallets = root.optJSONArray("value") ?: root.optJSONArray("bonusWallets") ?: return@runCatching null
         val wallet = wallets.optJSONObject(0) ?: return@runCatching null
-        val display = when {
-            wallet.has("displayAmount") -> wallet.optString("displayAmount")
-            else -> wallet.optDouble("amount", Double.NaN).takeUnless { it.isNaN() }?.let { String.format("%.2f", it) }
-        } ?: return@runCatching null
+        val raw = wallet.optString("balance")
+        if (raw.isEmpty()) return@runCatching null
+        val display = raw.toDoubleOrNull()?.let { String.format("%.2f", it) } ?: raw
         val currency = wallet.optString("currency").ifEmpty { "CNY" }
         if (currency == "CNY") "¥$display" else "$display $currency"
     }.getOrNull()
@@ -74,10 +76,13 @@ class DshAccountRepository(
     private fun parse(json: JSONObject): Snapshot {
         val status = json.optString("status")
         val attempt = json.optJSONObject("attempt")
+        val links = json.optJSONObject("links")
         return Snapshot(
             signedIn = status == "credential-stored",
             authorizeUrl = attempt?.optString("authorizeUrl")?.ifEmpty { null },
             attemptId = attempt?.optString("id")?.ifEmpty { null },
+            usageUrl = links?.optString("usageUrl")?.ifEmpty { null },
+            topUpUrl = links?.optString("topUpUrl")?.ifEmpty { null },
         )
     }
 

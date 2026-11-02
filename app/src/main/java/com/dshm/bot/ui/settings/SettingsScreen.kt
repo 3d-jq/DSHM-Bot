@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.res.painterResource
+import coil.compose.AsyncImage
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import com.dshm.bot.BuildConfig
@@ -63,6 +64,9 @@ fun SettingsScreen(
     onOpenChatFont: () -> Unit,
     onOpenLanguage: () -> Unit,
     onOpenAccount: () -> Unit,
+    accountName: String? = null,
+    accountBalance: String? = null,
+    accountAvatarUrl: String? = null,
     chatFontLabel: String,
     languageLabel: String,
     engineStatus: String,
@@ -118,7 +122,14 @@ fun SettingsScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(Dshm.spacing.lg),
             ) {
-                item { OverviewCard(onClick = onOpenAccount) }
+                item {
+                    OverviewCard(
+                        onClick = onOpenAccount,
+                        accountName = accountName,
+                        accountBalance = accountBalance,
+                        accountAvatarUrl = accountAvatarUrl,
+                    )
+                }
 
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_ai)) {
@@ -211,7 +222,12 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun OverviewCard(onClick: () -> Unit) {
+private fun OverviewCard(
+    onClick: () -> Unit,
+    accountName: String?,
+    accountBalance: String?,
+    accountAvatarUrl: String?,
+) {
     SettingsCard {
         Row(
             modifier = Modifier
@@ -220,30 +236,54 @@ private fun OverviewCard(onClick: () -> Unit) {
                 .padding(Dshm.spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(Dshm.spacing.avatar)
-                    .clip(CircleShape)
-                    .background(Dshm.colors.surfaceMuted),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_lucide_bot),
+            if (accountAvatarUrl != null) {
+                AsyncImage(
+                    model = accountAvatarUrl,
                     contentDescription = null,
-                    tint = Dshm.colors.iconTint,
-                    modifier = Modifier.size(Dshm.spacing.avatarGlyph),
+                    modifier = Modifier
+                        .size(Dshm.spacing.avatar)
+                        .clip(CircleShape),
                 )
+            } else if (accountName != null) {
+                Box(
+                    modifier = Modifier
+                        .size(Dshm.spacing.avatar)
+                        .clip(CircleShape)
+                        .background(Dshm.colors.surfaceMuted),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = accountName.trim().take(1).uppercase(),
+                        style = Dshm.typography.rowTitle,
+                        color = Dshm.colors.textSecondary,
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(Dshm.spacing.avatar)
+                        .clip(CircleShape)
+                        .background(Dshm.colors.surfaceMuted),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_lucide_bot),
+                        contentDescription = null,
+                        tint = Dshm.colors.iconTint,
+                        modifier = Modifier.size(Dshm.spacing.avatarGlyph),
+                    )
+                }
             }
             Spacer(Modifier.width(Dshm.spacing.md))
             Column {
                 Text(
-                    text = stringResource(R.string.app_name),
+                    text = accountName ?: stringResource(R.string.app_name),
                     style = Dshm.typography.rowTitle,
                     color = Dshm.colors.textPrimary,
                 )
                 Spacer(Modifier.width(Dshm.spacing.xxs))
                 Text(
-                    text = stringResource(R.string.settings_overview_host),
+                    text = accountBalance ?: stringResource(R.string.settings_overview_host),
                     style = Dshm.typography.rowPreview,
                     color = Dshm.colors.textTertiary,
                 )
@@ -377,6 +417,7 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 
 /** 测试用 tag：设置列表（用于滚动到指定行）。 */
 const val SETTINGS_LIST_TAG = "settings_list"
+
 
 
 

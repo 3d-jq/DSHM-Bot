@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,107 +27,126 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
-import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.ui.settings.SettingsPageScaffold
 
-/** 账号页：接引擎 account 服务；未登录引导登录，已登录显示昵称并可退出。 */
+/** 账号页（对齐 dsh-Go account_page）：资料头 + 余额 + 充值/用量 + 退出登录。 */
 @Composable
-fun AccountScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
-    SettingsPageScaffold(title = stringResource(R.string.settings_account), onBack = onBack) {
-        if (endpoint == null) {
-            Text(
-                text = stringResource(R.string.account_engine_required),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textSecondary,
-            )
-        } else {
-            AccountContent(endpoint)
-        }
-    }
-}
-
-@Composable
-private fun AccountContent(endpoint: RuntimeEndpoint) {
+fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
-    val viewModel: AccountViewModel = viewModel(
-        key = endpoint.baseUrl,
-        factory = AccountViewModel.factory(endpoint),
-    )
     val ui by viewModel.ui.collectAsStateWithLifecycle()
 
     LaunchedEffect(ui.authorizeUrl) {
         val url = ui.authorizeUrl ?: return@LaunchedEffect
-        openAuthorizePage(context, url)
+        openUrl(context, url)
         viewModel.consumeAuthorizeUrl()
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md)) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(Dshm.radius.lg))
-                .background(Dshm.colors.surface)
-                .padding(Dshm.spacing.lg),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(Dshm.spacing.avatar)
-                        .clip(CircleShape)
-                        .background(Dshm.colors.surfaceMuted),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = (ui.name ?: "?").trim().take(1).uppercase(),
-                        style = Dshm.typography.rowTitle,
-                        color = Dshm.colors.textSecondary,
-                    )
-                }
-                Spacer(Modifier.padding(Dshm.spacing.sm))
-                Column {
-                    Text(
-                        text = ui.name ?: stringResource(R.string.account_logged_out),
-                        style = Dshm.typography.rowTitle,
-                        color = Dshm.colors.textPrimary,
-                    )
-                    Text(
-                        text = when {
-                            ui.balance != null -> stringResource(R.string.account_balance, ui.balance.orEmpty())
-                            ui.name == null -> stringResource(R.string.account_login_hint)
-                            else -> stringResource(R.string.account_signed_in)
-                        },
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.textSecondary,
-                    )
-                }
-            }
-            ui.error?.let { error ->
-                Spacer(Modifier.padding(Dshm.spacing.xs))
-                Text(error, style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
-            }
-        }
-        if (ui.name == null) {
-            Button(
-                onClick = viewModel::signIn,
-                enabled = !ui.busy,
-                modifier = Modifier.fillMaxWidth(),
+    SettingsPageScaffold(title = stringResource(R.string.settings_account), onBack = onBack) {
+        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Dshm.radius.lg))
+                    .background(Dshm.colors.surface)
+                    .padding(Dshm.spacing.lg),
             ) {
-                Text(stringResource(if (ui.busy) R.string.account_signing_in else R.string.account_login))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AccountAvatar(name = ui.name, avatarUrl = ui.avatarUrl)
+                    Spacer(Modifier.width(Dshm.spacing.md))
+                    Column {
+                        Text(
+                            text = ui.name ?: stringResource(R.string.account_logged_out),
+                            style = Dshm.typography.sheetTitle,
+                            color = Dshm.colors.textPrimary,
+                        )
+                        Text(
+                            text = when {
+                                ui.balance != null -> stringResource(R.string.account_balance, ui.balance.orEmpty())
+                                ui.name == null -> stringResource(R.string.account_login_hint)
+                                else -> stringResource(R.string.account_signed_in)
+                            },
+                            style = Dshm.typography.rowPreview,
+                            color = Dshm.colors.textSecondary,
+                        )
+                    }
+                }
+                ui.error?.let { error ->
+                    Spacer(Modifier.padding(Dshm.spacing.xs))
+                    Text(error, style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
+                }
             }
-        } else {
-            Button(onClick = viewModel::signOut, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.account_sign_out))
+
+            if (ui.name == null) {
+                Button(
+                    onClick = viewModel::signIn,
+                    enabled = !ui.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(if (ui.busy) R.string.account_signing_in else R.string.account_login))
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm), modifier = Modifier.fillMaxWidth()) {
+                    if (ui.topUpUrl != null) {
+                        Button(
+                            onClick = { openUrl(context, ui.topUpUrl.orEmpty()) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text(stringResource(R.string.account_top_up)) }
+                    }
+                    if (ui.usageUrl != null) {
+                        OutlinedButton(
+                            onClick = { openUrl(context, ui.usageUrl.orEmpty()) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text(stringResource(R.string.account_usage)) }
+                    }
+                }
+                OutlinedButton(onClick = viewModel::signOut, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.account_sign_out))
+                }
+            }
+
+            if (!ui.ready) {
+                Text(
+                    text = stringResource(R.string.account_engine_required),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textTertiary,
+                )
             }
         }
     }
 }
 
-/** 用 Custom Tabs / 浏览器打开授权页（OAuth 不放进 App 内 WebView）。 */
-private fun openAuthorizePage(context: Context, url: String) {
+@Composable
+private fun AccountAvatar(name: String?, avatarUrl: String?) {
+    if (avatarUrl != null) {
+        AsyncImage(
+            model = avatarUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .size(Dshm.spacing.avatar)
+                .clip(CircleShape),
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(Dshm.spacing.avatar)
+                .clip(CircleShape)
+                .background(Dshm.colors.surfaceMuted),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = (name ?: "?").trim().take(1).uppercase(),
+                style = Dshm.typography.rowTitle,
+                color = Dshm.colors.textSecondary,
+            )
+        }
+    }
+}
+
+private fun openUrl(context: Context, url: String) {
+    if (url.isBlank()) return
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }
-

@@ -28,6 +28,7 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmMotion
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.account.AccountScreen
+import com.dshm.bot.ui.account.AccountViewModel
 import com.dshm.bot.ui.chat.BotChatPlaceholderScreen
 import com.dshm.bot.ui.engine.EngineScreen
 import com.dshm.bot.ui.engine.EngineViewModel
@@ -74,10 +75,15 @@ fun DshmBotApp(
     engineViewModel: EngineViewModel = viewModel(
         factory = EngineViewModel.factory(LocalContext.current.applicationContext),
     ),
+    accountViewModel: AccountViewModel = viewModel(factory = AccountViewModel.factory()),
 ) {
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val engineState by engineViewModel.state.collectAsStateWithLifecycle()
+    val accountUi by accountViewModel.ui.collectAsStateWithLifecycle()
+    LaunchedEffect((engineState as? RuntimeState.Running)?.endpoint) {
+        accountViewModel.setEndpoint((engineState as? RuntimeState.Running)?.endpoint)
+    }
     val engineStatusText = when (engineState) {
         is RuntimeState.Running -> stringResource(R.string.engine_value_running)
         is RuntimeState.Installed -> stringResource(R.string.engine_value_installed)
@@ -248,6 +254,9 @@ fun DshmBotApp(
                 onOpenChatFont = { chatFontOpen = true },
                 onOpenLanguage = { languageOpen = true },
                 onOpenAccount = { accountOpen = true },
+                accountName = accountUi.name,
+                accountBalance = accountUi.balance,
+                accountAvatarUrl = accountUi.avatarUrl,
                 chatFontLabel = chatFontLabel(settingsUiState.chatFontSize),
                 languageLabel = languageLabel(settingsUiState.language),
                 engineStatus = engineStatusText,
@@ -272,7 +281,7 @@ fun DshmBotApp(
             )
 
             key == SCREEN_ACCOUNT -> AccountScreen(
-                endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                viewModel = accountViewModel,
                 onBack = { accountOpen = false },
             )
 
@@ -300,6 +309,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 
