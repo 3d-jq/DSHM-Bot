@@ -186,7 +186,7 @@ private fun HeroCard(state: RuntimeState, version: String, nodeVersion: String) 
         else -> Dshm.colors.textTertiary
     }
     val detail = when (state) {
-        is RuntimeState.Running -> state.endpoint.baseUrl
+        is RuntimeState.Running -> stringResource(R.string.engine_value_running) + " · " + state.endpoint.baseUrl
         is RuntimeState.Installed -> stringResource(R.string.engine_value_installed)
         is RuntimeState.Starting -> stringResource(R.string.engine_value_starting)
         is RuntimeState.Installing -> stringResource(R.string.engine_value_installing)

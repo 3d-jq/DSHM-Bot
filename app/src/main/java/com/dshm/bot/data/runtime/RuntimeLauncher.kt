@@ -2,6 +2,8 @@ package com.dshm.bot.data.runtime
 
 import android.content.Context
 import java.io.File
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,7 +31,7 @@ class RuntimeLauncher(
         EngineLog.reset()
         EngineLog.log("launch method: proot")
         val tmp = File(appContext.cacheDir, "proot-tmp").apply { mkdirs() }
-        val actualPort = if (port > 0) port else java.net.ServerSocket(0).use { it.localPort }
+        val actualPort = if (port > 0) port else pickPort()
         val placeholders = mapOf(
             "{NATIVE_LIB_DIR}" to appContext.applicationInfo.nativeLibraryDir,
             "{ROOTFS}" to rootfs.absolutePath,
@@ -92,4 +94,22 @@ class RuntimeLauncher(
 
     val isRunning: Boolean
         get() = process?.isAlive == true
+
+    /**
+     * 与 dsh-Go 一致：先在 3080–3100 找空闲端口（地址稳定），全被占才用系统临时端口。
+     */
+    private fun pickPort(): Int {
+        for (candidate in DEFAULT_PORT..DEFAULT_PORT + 20) {
+            try {
+                ServerSocket(candidate, 1, InetAddress.getByName("127.0.0.1")).close()
+                return candidate
+            } catch (_: Exception) {
+            }
+        }
+        return ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+    }
+
+    private companion object {
+        const val DEFAULT_PORT = 3080
+    }
 }
