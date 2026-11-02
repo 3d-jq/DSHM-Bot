@@ -34,3 +34,10 @@
 - `ThemeModeTest`（JVM）：SYSTEM 跟随系统、LIGHT/DARK 覆盖系统。
 - `SettingsScreenTest`（插桩）：分组与当前值渲染、选深色触发回调。
 - `DshmBotAppNavigationTest.profileOpensSettingsAndPopsBack`：头像进入设置、返回主界面。
+
+## 顶栏规范（必读，踩过的坑）
+
+- edge-to-edge 下，子页 header **必须**放在 `Scaffold(topBar)` 里，并在 header 内加**一次** `statusBarsPadding()`。
+- 内容区只消费 `innerPadding`，**禁止**再加 `statusBarsPadding()`；也不要让 header 跟内容一起滚动。
+- 否则会出现顶栏被状态栏压住（重叠）或整体下移（双重 inset）。
+- 新页面一律使用 `SettingsPageScaffold`（`ui/settings/SettingsPageScaffold.kt`），不要手写 Scaffold + 顶栏。

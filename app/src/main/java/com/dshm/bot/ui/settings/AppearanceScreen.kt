@@ -6,14 +6,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -23,7 +20,6 @@ import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.domain.model.ThemeMode
-import com.dshm.bot.ui.components.FloatingIconButton
 
 /** 外观设置（参照 dsh-Go appearance_page）：主题三选一，后续配色/图标也放这里。 */
 @Composable
@@ -33,18 +29,12 @@ fun AppearanceScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = Dshm.colors.background,
-        topBar = { SettingsPageHeader(title = stringResource(R.string.settings_group_appearance), onBack = onBack) },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = Dshm.spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md),
-        ) {
+    SettingsPageScaffold(
+        title = stringResource(R.string.settings_group_appearance),
+        onBack = onBack,
+        modifier = modifier,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md)) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -80,24 +70,6 @@ fun AppearanceScreen(
 }
 
 @Composable
-internal fun SettingsPageHeader(title: String, onBack: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .statusBarsPadding()
-            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        FloatingIconButton(
-            icon = R.drawable.ic_lucide_arrow_left,
-            contentDescription = stringResource(R.string.action_back),
-            onClick = onBack,
-        )
-        Spacer(Modifier.width(Dshm.spacing.sm))
-        Text(text = title, style = Dshm.typography.pageTitle, color = Dshm.colors.textPrimary)
-    }
-}
-
-@Composable
 internal fun themeLabelOf(mode: ThemeMode): String = stringResource(
     when (mode) {
         ThemeMode.SYSTEM -> R.string.theme_system
@@ -105,5 +77,3 @@ internal fun themeLabelOf(mode: ThemeMode): String = stringResource(
         ThemeMode.DARK -> R.string.theme_dark
     },
 )
-
-
