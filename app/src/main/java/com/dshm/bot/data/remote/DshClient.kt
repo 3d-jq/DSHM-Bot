@@ -83,10 +83,22 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
         }
     }.flowOn(Dispatchers.IO)
 
-    /** 账号服务：POST /api/account/<method>，与 dsh-Go account_api.dart 对齐。 */
-    suspend fun account(method: String, body: JSONObject = JSONObject()): JSONObject = withContext(Dispatchers.IO) {
+    /**
+     * Remote RPC（对齐 dsh-Go `packages/dsh_client/src/carrier.dart` 的 DshHttpCarrier）：
+     * POST /api/<method>，body 为 envelope：
+     * {"type":"client-request","rpcId":uuid,"method":method,"payload":{"args":{...}}}
+     * 响应：{"type":"server-response","rpcId":...,"result":{"ok":true,"value":...}}，
+     * 失败为 ok=false（HTTP 仍 200）。返回 result.value。
+     */
+    suspend fun rpc(method: String, args: JSONObject = JSONObject()): JSONObject = withContext(Dispatchers.IO) {
         val auth = cookie ?: login()
-        val connection = (URL(endpoint.baseUrl + "api/account/" + method).openConnection() as HttpURLConnection).apply {
+        val rpcId = java.util.UUID.randomUUID().toString()
+        val envelope = JSONObject()
+            .put("type", "client-request")
+            .put("rpcId", rpcId)
+            .put("method", method)
+            .put("payload", JSONObject().put("args", args))
+        val connection = (URL(endpoint.baseUrl + "api/" + method).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 15_000
@@ -95,14 +107,26 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
             setRequestProperty("Cookie", auth)
         }
         try {
-            connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            connection.outputStream.use { it.write(envelope.toString().toByteArray()) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
-            require(code in 200..299) { "DSH 账号请求失败：HTTP $code $text" }
-            JSONObject(text)
+            require(code == 200) { "DSH RPC $method 失败：HTTP $code $text" }
+            val response = JSONObject(text)
+            val result = response.optJSONObject("result") ?: error("DSH RPC $method 缺少 result")
+            if (!result.optBoolean("ok", false)) {
+                val error = result.optJSONObject("error")
+                error("DSH RPC $method 失败：${error?.optString("message") ?: result}")
+            }
+            result.optJSONObject("value") ?: JSONObject()
         } finally {
             connection.disconnect()
         }
-    }}
+    }
+
+    /** 账号服务：对齐 dsh-Go account_api.dart 的 Remote 调用。 */
+    suspend fun account(method: String, args: JSONObject = JSONObject()): JSONObject =
+        rpc("account/$method", args)
+}
+
 
