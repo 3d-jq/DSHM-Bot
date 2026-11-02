@@ -36,13 +36,10 @@ fun BotRow(
     ) {
         BotAvatar(inkId = row.inkId, glyph = row.glyph)
         Spacer(Modifier.width(Dshm.spacing.md))
-        // 文字列高度固定为头像高度（44dp），上下两端分布：
-        // 名字贴头像顶部、预览贴头像底部，和头像上下沿水平对齐。
+        // 文字列与头像中线对齐（行级 CenterVertically）；名字与预览之间留 4dp 间隙。
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .height(Dshm.spacing.avatar),
-            verticalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -61,6 +58,7 @@ fun BotRow(
                     maxLines = 1,
                 )
             }
+            Spacer(Modifier.height(Dshm.spacing.xs))
             Text(
                 text = row.preview,
                 style = Dshm.typography.rowPreview,

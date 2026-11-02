@@ -31,3 +31,6 @@ DSHM-Bot-ref/
 # Python
 __pycache__/
 *.pyc
+
+# 构建日志
+build-log.txt
