@@ -34,16 +34,38 @@ class RuntimeLauncher(
 
         val builder = ProcessBuilder(argv).redirectErrorStream(true)
         builder.environment().putAll(env)
+        builder.environment()["PROOT_NO_SECCOMP"] = "1"
         val started = builder.start()
         process = started
 
-        val reader = started.inputStream.bufferedReader()
-        while (true) {
-            val line = reader.readLine() ?: break
+        val logFile = File(appContext.filesDir, "engine.log")
+        logFile.writeText("")
+        val queue = java.util.concurrent.LinkedBlockingQueue<String>()
+        val tail = ArrayDeque<String>()
+        val reader = Thread {
+            runCatching {
+                started.inputStream.bufferedReader().forEachLine { line ->
+                    logFile.appendText(line + "\n")
+                    queue.put(line)
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        val deadline = System.currentTimeMillis() + 120_000
+        while (System.currentTimeMillis() < deadline) {
+            val line = queue.poll(500, TimeUnit.MILLISECONDS)
+            if (line == null) {
+                if (!started.isAlive) break
+                continue
+            }
+            tail.addLast(line)
+            if (tail.size > 30) tail.removeFirst()
             ProotCommand.parseToken(line)?.let { return it }
-            if (!started.isAlive) break
         }
-        throw IllegalStateException("引擎启动失败：未收到 token（进程退出码 ${runCatching { started.exitValue() }.getOrNull()}）")
+        val exit = runCatching { started.exitValue() }.getOrNull()
+        throw IllegalStateException(
+            "引擎启动失败：未收到 token（exit=$exit）\n" + tail.joinToString("\n"),
+        )
     }
 
     /** 停止引擎：先结束 dsh 进程，再强制结束 proot；同时清理引用。 */
@@ -59,3 +81,4 @@ class RuntimeLauncher(
     val isRunning: Boolean
         get() = process?.isAlive == true
 }
+
