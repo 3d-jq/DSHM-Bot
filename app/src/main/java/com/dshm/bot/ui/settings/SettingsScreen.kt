@@ -58,6 +58,7 @@ fun SettingsScreen(
     uiState: SettingsUiState,
     onBack: () -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
+    onOpenEngine: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -154,7 +155,7 @@ fun SettingsScreen(
 
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_host)) {
-                        SettingsRow(R.drawable.ic_lucide_server, stringResource(R.string.settings_local_engine), stringResource(R.string.settings_value_not_running), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_server, stringResource(R.string.settings_local_engine), stringResource(R.string.settings_value_not_running), onOpenEngine)
                         SettingsRow(R.drawable.ic_lucide_sliders_horizontal, stringResource(R.string.settings_engine_params), stringResource(R.string.settings_value_default), comingSoonRow)
                     }
                 }
@@ -368,3 +369,4 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 
 /** 测试用 tag：设置列表（用于滚动到指定行）。 */
 const val SETTINGS_LIST_TAG = "settings_list"
+

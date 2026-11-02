@@ -24,7 +24,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmMotion
+import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.chat.BotChatPlaceholderScreen
+import com.dshm.bot.ui.engine.EngineScreen
+import com.dshm.bot.ui.engine.EngineViewModel
 import com.dshm.bot.ui.home.HomeScreen
 import com.dshm.bot.ui.home.HomeViewModel
 import com.dshm.bot.ui.home.SearchScreen
@@ -34,6 +37,7 @@ import com.dshm.bot.ui.settings.SettingsViewModel
 private const val SCREEN_HOME = "home"
 private const val SCREEN_SEARCH = "search"
 private const val SCREEN_SETTINGS = "settings"
+private const val SCREEN_ENGINE = "engine"
 private const val CHAT_PREFIX = "chat:"
 
 /**
@@ -46,14 +50,21 @@ fun DshmBotApp(
     settingsViewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.factory(LocalContext.current.applicationContext),
     ),
+    engineViewModel: EngineViewModel = viewModel(
+        factory = EngineViewModel.factory(LocalContext.current.applicationContext),
+    ),
 ) {
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val engineState by engineViewModel.state.collectAsStateWithLifecycle()
     var openBotId by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var engineOpen by rememberSaveable { mutableStateOf(false) }
+    var onboardingSkipped by rememberSaveable { mutableStateOf(false) }
 
     val screenKey = when {
+        (engineState is RuntimeState.NotInstalled && !onboardingSkipped) || engineOpen -> SCREEN_ENGINE
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -72,10 +83,12 @@ fun DshmBotApp(
     }
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
-    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen) {
+    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || (engineState is RuntimeState.NotInstalled && !onboardingSkipped)) {
         when {
+            engineOpen -> engineOpen = false
             openBotId != null -> openBotId = null
             settingsOpen -> settingsOpen = false
+            engineState is RuntimeState.NotInstalled && !onboardingSkipped -> onboardingSkipped = true
             else -> {
                 searchOpen = false
                 homeViewModel.setQuery("")
@@ -136,10 +149,20 @@ fun DshmBotApp(
                 }
             }
 
+            key == SCREEN_ENGINE -> EngineScreen(
+                state = engineState,
+                onBack = {
+                    engineOpen = false
+                    onboardingSkipped = true
+                },
+                onInstall = engineViewModel::install,
+            )
+
             key == SCREEN_SETTINGS -> SettingsScreen(
                 uiState = settingsUiState,
                 onBack = { settingsOpen = false },
                 onThemeChange = settingsViewModel::setThemeMode,
+                onOpenEngine = { engineOpen = true },
             )
 
             key == SCREEN_SEARCH -> SearchScreen(
@@ -164,3 +187,5 @@ fun DshmBotApp(
         }
     }
 }
+
+
