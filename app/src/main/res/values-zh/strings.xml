@@ -79,5 +79,11 @@
     <string name="engine_not_installed">运行环境尚未安装</string>
     <string name="engine_installed">运行环境 %1$s 已安装</string>
     <string name="engine_install_action">下载并安装</string>
+    <string name="engine_starting">正在启动引擎…</string>
+    <string name="engine_running">运行中：%1$s</string>
+    <string name="engine_stopped">引擎已停止</string>
+    <string name="engine_start_action">启动引擎</string>
+    <string name="engine_stop_action">停止引擎</string>
 </resources>
+
 

@@ -79,5 +79,11 @@
     <string name="engine_not_installed">Runtime not installed yet</string>
     <string name="engine_installed">Runtime %1$s installed</string>
     <string name="engine_install_action">Download and install</string>
+    <string name="engine_starting">Starting engine…</string>
+    <string name="engine_running">Running at %1$s</string>
+    <string name="engine_stopped">Engine stopped</string>
+    <string name="engine_start_action">Start engine</string>
+    <string name="engine_stop_action">Stop engine</string>
 </resources>
+
 

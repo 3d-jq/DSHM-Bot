@@ -15,6 +15,9 @@ sealed interface RuntimeState {
     data object NotInstalled : RuntimeState
     data class Installing(val progress: Int, val message: String) : RuntimeState
     data class Installed(val version: String) : RuntimeState
+    data object Starting : RuntimeState
+    data class Running(val endpoint: RuntimeEndpoint) : RuntimeState
+    data object Stopped : RuntimeState
     data class Failed(val message: String) : RuntimeState
 }
 
@@ -87,3 +90,4 @@ class RuntimeManager(
         }
     }
 }
+

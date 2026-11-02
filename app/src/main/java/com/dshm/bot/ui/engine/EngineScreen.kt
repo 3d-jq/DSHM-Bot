@@ -41,6 +41,8 @@ fun EngineScreen(
     state: RuntimeState,
     onBack: () -> Unit,
     onInstall: (String) -> Unit,
+    onStart: () -> Unit = {},
+    onStop: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var url by remember { mutableStateOf(DEFAULT_RUNTIME_URL) }
@@ -105,6 +107,12 @@ fun EngineScreen(
 
                 is RuntimeState.Failed -> Text(state.message, style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
 
+                is RuntimeState.Starting -> Text(stringResource(R.string.engine_starting), style = Dshm.typography.rowPreview, color = Dshm.colors.textSecondary)
+
+                is RuntimeState.Running -> Text(stringResource(R.string.engine_running, state.endpoint.baseUrl), style = Dshm.typography.rowPreview, color = Dshm.colors.accent)
+
+                RuntimeState.Stopped -> Text(stringResource(R.string.engine_stopped), style = Dshm.typography.rowPreview, color = Dshm.colors.textSecondary)
+
                 RuntimeState.NotInstalled -> Text(
                     stringResource(R.string.engine_not_installed),
                     style = Dshm.typography.rowPreview,
@@ -112,6 +120,12 @@ fun EngineScreen(
                 )
             }
 
+            if (state is RuntimeState.Running) {
+                Button(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_stop_action)) }
+            }
+            if (state is RuntimeState.Installed || state is RuntimeState.Stopped) {
+                Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_start_action)) }
+            }
             Button(
                 onClick = { onInstall(url) },
                 enabled = state !is RuntimeState.Installing,
@@ -122,3 +136,4 @@ fun EngineScreen(
         }
     }
 }
+
