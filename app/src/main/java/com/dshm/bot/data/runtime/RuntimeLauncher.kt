@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 class RuntimeLauncher(
     context: Context,
     private val installer: RuntimeInstaller = RuntimeInstaller(context),
-    private val port: Int = 3080,
+    private val port: Int = 0,
 ) {
     private val appContext = context.applicationContext
     @Volatile
@@ -23,11 +23,12 @@ class RuntimeLauncher(
         require(rootfs.isDirectory) { "运行时尚未安装" }
 
         val tmp = File(appContext.cacheDir, "proot-tmp").apply { mkdirs() }
+        val actualPort = if (port > 0) port else java.net.ServerSocket(0).use { it.localPort }
         val placeholders = mapOf(
             "{NATIVE_LIB_DIR}" to appContext.applicationInfo.nativeLibraryDir,
             "{ROOTFS}" to rootfs.absolutePath,
             "{TMP}" to tmp.absolutePath,
-            "{PORT}" to port.toString(),
+            "{PORT}" to actualPort.toString(),
         )
         val argv = ProotCommand.buildArgv(manifest.launchArgv, placeholders, guestEnv)
         val env = ProotCommand.buildEnv(manifest.launchEnv, placeholders)
@@ -81,4 +82,5 @@ class RuntimeLauncher(
     val isRunning: Boolean
         get() = process?.isAlive == true
 }
+
 

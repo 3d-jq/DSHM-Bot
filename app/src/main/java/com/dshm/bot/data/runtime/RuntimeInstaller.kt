@@ -124,9 +124,10 @@ class RuntimeInstaller(context: Context) {
 
                             entry.isSymbolicLink -> {
                                 target.parentFile?.mkdirs()
-                                val linkTarget = resolveLinkTarget(dest, entry.name, entry.linkName)
+                                val resolved = resolveLinkTarget(dest, entry.name, entry.linkName)
+                                require(resolved.startsWith(dest.canonicalPath)) { "符号链接越界：${entry.name} -> ${entry.linkName}" }
                                 Files.deleteIfExists(target.toPath())
-                                runCatching { Files.createSymbolicLink(target.toPath(), Paths.get(linkTarget)) }
+                                runCatching { Files.createSymbolicLink(target.toPath(), Paths.get(entry.linkName)) }
                             }
 
                             entry.isLink -> {
@@ -175,5 +176,6 @@ class RuntimeInstaller(context: Context) {
         const val EXECUTABLE_MASK = 0b001_001_001
     }
 }
+
 
 
