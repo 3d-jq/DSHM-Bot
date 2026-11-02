@@ -39,10 +39,11 @@ const val DEFAULT_RUNTIME_URL = "https://github.com/3d-jq/DSHM-Bot/releases/late
 @Composable
 fun EngineScreen(
     state: RuntimeState,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     onInstall: (String) -> Unit,
     onStart: () -> Unit = {},
     onStop: () -> Unit = {},
+    onDone: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var url by remember { mutableStateOf(DEFAULT_RUNTIME_URL) }
@@ -59,12 +60,14 @@ fun EngineScreen(
                 modifier = Modifier.padding(vertical = Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FloatingIconButton(
-                    icon = R.drawable.ic_lucide_arrow_left,
-                    contentDescription = stringResource(R.string.action_back),
-                    onClick = onBack,
-                )
-                Spacer(Modifier.width(Dshm.spacing.sm))
+                if (onBack != null) {
+                    FloatingIconButton(
+                        icon = R.drawable.ic_lucide_arrow_left,
+                        contentDescription = stringResource(R.string.action_back),
+                        onClick = onBack,
+                    )
+                    Spacer(Modifier.width(Dshm.spacing.sm))
+                }
                 Text(stringResource(R.string.engine_title), style = Dshm.typography.pageTitle, color = Dshm.colors.textPrimary)
             }
 
@@ -111,6 +114,7 @@ fun EngineScreen(
 
                 is RuntimeState.Running -> Text(stringResource(R.string.engine_running, state.endpoint.baseUrl), style = Dshm.typography.rowPreview, color = Dshm.colors.accent)
 
+
                 RuntimeState.Stopped -> Text(stringResource(R.string.engine_stopped), style = Dshm.typography.rowPreview, color = Dshm.colors.textSecondary)
 
                 RuntimeState.NotInstalled -> Text(
@@ -121,6 +125,7 @@ fun EngineScreen(
             }
 
             if (state is RuntimeState.Running) {
+                Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_continue)) }
                 Button(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_stop_action)) }
             }
             if (state is RuntimeState.Installed || state is RuntimeState.Stopped) {
@@ -136,4 +141,6 @@ fun EngineScreen(
         }
     }
 }
+
+
 

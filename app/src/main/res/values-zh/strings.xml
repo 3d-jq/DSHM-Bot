@@ -84,6 +84,8 @@
     <string name="engine_stopped">引擎已停止</string>
     <string name="engine_start_action">启动引擎</string>
     <string name="engine_stop_action">停止引擎</string>
+    <string name="engine_continue">进入 DSHM Bot</string>
 </resources>
+
 
 

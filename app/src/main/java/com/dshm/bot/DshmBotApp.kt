@@ -61,10 +61,10 @@ fun DshmBotApp(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var engineOpen by rememberSaveable { mutableStateOf(false) }
-    var onboardingSkipped by rememberSaveable { mutableStateOf(false) }
+    var onboardingDone by rememberSaveable { mutableStateOf(false) }
 
     val screenKey = when {
-        (engineState is RuntimeState.NotInstalled && !onboardingSkipped) || engineOpen -> SCREEN_ENGINE
+        (!onboardingDone && !engineOpen) || engineOpen -> SCREEN_ENGINE
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -83,12 +83,12 @@ fun DshmBotApp(
     }
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
-    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || (engineState is RuntimeState.NotInstalled && !onboardingSkipped)) {
+    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || !onboardingDone) {
         when {
             engineOpen -> engineOpen = false
             openBotId != null -> openBotId = null
             settingsOpen -> settingsOpen = false
-            engineState is RuntimeState.NotInstalled && !onboardingSkipped -> onboardingSkipped = true
+            !onboardingDone -> Unit
             else -> {
                 searchOpen = false
                 homeViewModel.setQuery("")
@@ -151,9 +151,10 @@ fun DshmBotApp(
 
             key == SCREEN_ENGINE -> EngineScreen(
                 state = engineState,
-                onBack = {
+                onBack = if (onboardingDone) ({ engineOpen = false }) else null,
+                onDone = {
+                    onboardingDone = true
                     engineOpen = false
-                    onboardingSkipped = true
                 },
                 onInstall = engineViewModel::install,
                 onStart = engineViewModel::start,
@@ -189,6 +190,9 @@ fun DshmBotApp(
         }
     }
 }
+
+
+
 
 
 

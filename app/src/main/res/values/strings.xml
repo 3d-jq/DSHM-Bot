@@ -84,6 +84,8 @@
     <string name="engine_stopped">Engine stopped</string>
     <string name="engine_start_action">Start engine</string>
     <string name="engine_stop_action">Stop engine</string>
+    <string name="engine_continue">Enter DSHM Bot</string>
 </resources>
+
 
 
