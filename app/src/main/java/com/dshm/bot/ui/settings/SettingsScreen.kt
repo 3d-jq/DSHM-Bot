@@ -93,7 +93,7 @@ fun SettingsScreen(
                 Spacer(Modifier.width(Dshm.spacing.sm))
                 Text(
                     text = stringResource(R.string.settings_title),
-                    style = Dshm.typography.screenTitle,
+                    style = Dshm.typography.pageTitle,
                     color = Dshm.colors.textPrimary,
                 )
             }
