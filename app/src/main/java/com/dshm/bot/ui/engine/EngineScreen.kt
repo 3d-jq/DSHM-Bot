@@ -44,6 +44,7 @@ fun EngineScreen(
     onStart: () -> Unit = {},
     onStop: () -> Unit = {},
     onDone: () -> Unit = {},
+    onRestart: () -> Unit = {},
     showContinue: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -115,7 +116,10 @@ fun EngineScreen(
                 if (showContinue) {
                     Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_continue)) }
                 }
-                Button(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_stop_action)) }
+                Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = onStop, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.engine_stop_action)) }
+                    Button(onClick = onRestart, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.engine_restart_action)) }
+                }
             }
             if (state is RuntimeState.Installed || state is RuntimeState.Stopped) {
                 Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.engine_start_action)) }
@@ -131,6 +135,7 @@ fun EngineScreen(
         }
     }
 }
+
 
 
 

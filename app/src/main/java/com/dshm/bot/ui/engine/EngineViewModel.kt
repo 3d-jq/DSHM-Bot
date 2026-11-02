@@ -46,6 +46,16 @@ class EngineViewModel(
         }
     }
 
+    fun restart() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { launcher.stop() }
+            _state.value = RuntimeState.Starting
+            runCatching { withContext(Dispatchers.IO) { launcher.start(manifest) } }
+                .onSuccess { _state.value = RuntimeState.Running(it) }
+                .onFailure { _state.value = RuntimeState.Failed(it.message ?: "启动失败") }
+        }
+    }
+
     fun stop() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { launcher.stop() }
@@ -66,3 +76,4 @@ class EngineViewModel(
         }
     }
 }
+

@@ -92,7 +92,8 @@
     <string name="engine_value_failed">安装失败</string>
     <string name="engine_value_stopped">已停止</string>
     <string name="engine_value_not_installed">未安装</string>
-</resources>
+    <string name="engine_restart_action">重启引擎</string>\n</resources>
+
 
 
 

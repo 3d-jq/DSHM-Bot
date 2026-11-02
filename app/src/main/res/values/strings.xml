@@ -92,7 +92,8 @@
     <string name="engine_value_failed">Failed</string>
     <string name="engine_value_stopped">Stopped</string>
     <string name="engine_value_not_installed">Not installed</string>
-</resources>
+    <string name="engine_restart_action">Restart</string>\n</resources>
+
 
 
 

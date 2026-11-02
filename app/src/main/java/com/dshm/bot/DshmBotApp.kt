@@ -176,6 +176,7 @@ fun DshmBotApp(
                 onInstall = engineViewModel::install,
                 onStart = engineViewModel::start,
                 onStop = engineViewModel::stop,
+                onRestart = engineViewModel::restart,
             )
 
             key == SCREEN_SETTINGS -> SettingsScreen(
@@ -208,6 +209,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 
