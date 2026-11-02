@@ -12,31 +12,55 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** 页面切换（iOS 整屏 push/pop）：点 Bot 进对话，返回回到主界面。 */
+/** 页面切换（iOS 整屏 push/pop）：点 Bot 进对话，顶栏返回 / 系统返回都能回到主界面。 */
 @RunWith(AndroidJUnit4::class)
 class DshmBotAppNavigationTest {
 
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
 
-    @Test
-    fun pushesIntoChatAndPopsBack() {
+    private val chatTitle = "与 办公专家 的对话"
+
+    private fun launchApp() {
         composeRule.setContent {
             DshmTheme(darkTheme = false) {
                 DshmBotApp()
             }
         }
+    }
 
+    private fun openFirstBot() {
         composeRule.onNodeWithText("办公专家").performClick()
         composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithText("与 办公专家 的对话").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(chatTitle).fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private fun awaitHome() {
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(chatTitle).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    @Test
+    fun topBarBackReturnsHome() {
+        launchApp()
+        openFirstBot()
 
         composeRule
             .onNodeWithContentDescription(composeRule.activity.getString(R.string.action_back))
             .performClick()
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithText("与 办公专家 的对话").fetchSemanticsNodes().isEmpty()
+        awaitHome()
+    }
+
+    @Test
+    fun systemBackFromChatReturnsHome() {
+        launchApp()
+        openFirstBot()
+
+        composeRule.runOnUiThread {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
         }
+        awaitHome()
     }
 }

@@ -1,5 +1,6 @@
 package com.dshm.bot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -29,6 +30,11 @@ fun DshmBotApp(
 ) {
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     var openBotId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // 系统返回手势/返回键：在对话页时先回到主界面，而不是直接退出 App。
+    BackHandler(enabled = openBotId != null) {
+        openBotId = null
+    }
 
     AnimatedContent(
         targetState = openBotId,
