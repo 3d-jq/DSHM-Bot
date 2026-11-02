@@ -9,10 +9,10 @@ import androidx.compose.animation.core.Easing
  */
 object DshmMotion {
     /** 整屏页面切换时长（push / pop）。 */
-    const val screenTransitionMs: Int = 350
+    const val screenTransitionMs: Int = 450
 
     /** 伴随的淡入淡出时长。 */
-    const val fadeMs: Int = 250
+    const val fadeMs: Int = 300
 
     /** 推入/弹出主曲线（iOS 风格的快出慢入）。 */
     val standard: Easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)

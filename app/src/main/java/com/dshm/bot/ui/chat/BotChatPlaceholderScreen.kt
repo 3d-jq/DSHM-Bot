@@ -14,14 +14,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -200,7 +197,7 @@ private fun UserBubble(text: String) {
     }
 }
 
-/** 头像下方的名字胶囊：白底圆角 + 名字 + ›，悬浮效果与主界面按钮一致。 */
+/** 头像下方的名字胶囊：白底圆角，悬浮效果与主界面按钮一致。 */
 @Composable
 private fun BotTitleCapsule(
     name: String,
@@ -228,13 +225,6 @@ private fun BotTitleCapsule(
             color = Dshm.colors.textPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.width(Dshm.spacing.xs))
-        Icon(
-            painter = painterResource(R.drawable.ic_lucide_chevron_right),
-            contentDescription = null,
-            tint = Dshm.colors.textTertiary,
-            modifier = Modifier.size(Dshm.spacing.topBarIcon),
         )
     }
 }
