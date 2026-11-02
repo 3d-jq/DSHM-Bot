@@ -83,4 +83,24 @@ class DshmBotAppNavigationTest {
             composeRule.onAllNodesWithText(placeholder).fetchSemanticsNodes().isEmpty()
         }
     }
+
+    @Test
+    fun profileOpensSettingsAndPopsBack() {
+        launchApp()
+        val title = composeRule.activity.getString(R.string.settings_title)
+
+        composeRule
+            .onNodeWithContentDescription(composeRule.activity.getString(R.string.home_profile))
+            .performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(title).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule
+            .onNodeWithContentDescription(composeRule.activity.getString(R.string.action_back))
+            .performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(title).fetchSemanticsNodes().isEmpty()
+        }
+    }
 }

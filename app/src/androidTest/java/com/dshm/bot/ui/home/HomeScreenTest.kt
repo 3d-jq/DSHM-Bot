@@ -51,6 +51,7 @@ class HomeScreenTest {
         uiState: HomeUiState = loadedState(),
         onOpenBot: (String) -> Unit = {},
         onOpenSearch: () -> Unit = {},
+        onOpenSettings: () -> Unit = {},
     ) {
         composeRule.setContent {
             DshmTheme(darkTheme = false) {
@@ -61,6 +62,7 @@ class HomeScreenTest {
                     onCreateBot = {},
                     onCreateGroup = {},
                     onOpenSearch = onOpenSearch,
+                    onOpenSettings = onOpenSettings,
                 )
             }
         }

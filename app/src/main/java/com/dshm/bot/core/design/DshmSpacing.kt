@@ -40,6 +40,8 @@ data class DshmSpacing(
     val composerSendIcon: Dp = 22.dp,
     /** 顶栏「＋」下拉菜单面板宽度（比默认宽一些）。 */
     val menuWidth: Dp = 220.dp,
+    /** 设置页每行的图标尺寸（与 15sp 文字垂直居中对齐）。 */
+    val settingsRowIcon: Dp = 20.dp,
     /** 输入框胶囊的柔和投影高度（dsh-Go：24 模糊 / 下移 8 / 8% 阴影）。 */
     val composerElevation: Dp = 12.dp,
     /** 1dp 细线（描边、分割线）。 */

@@ -41,6 +41,7 @@ fun HomeScreen(
     onCreateBot: () -> Unit,
     onCreateGroup: () -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -62,7 +63,7 @@ fun HomeScreen(
                 .padding(innerPadding),
         ) {
             HomeTopBar(
-                onProfile = ::showComingSoon,
+                onProfile = onOpenSettings,
                 onSearch = onOpenSearch,
                 onCreateBot = {
                     onCreateBot()

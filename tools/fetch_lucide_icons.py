@@ -33,6 +33,22 @@ ICONS = [
     "chevron-right",
     "square-user",
     "arrow-up",
+    "shield",
+    "palette",
+    "smartphone",
+    "puzzle",
+    "type",
+    "layout-dashboard",
+    "languages",
+    "bell",
+    "mic",
+    "gauge",
+    "server",
+    "info",
+    "file-text",
+    "sliders-horizontal",
+    "battery-charging",
+    "paw-print",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
