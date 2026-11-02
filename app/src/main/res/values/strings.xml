@@ -20,4 +20,7 @@
     <string name="chat_placeholder_title">Chat with %1$s</string>
     <string name="chat_placeholder_hint">This chat is native and runs on DSH. The DS Bot team connects in a later milestone.</string>
     <string name="chat_details">Open bot details</string>
+    <string name="composer_placeholder">Message %1$s</string>
+    <string name="composer_attach">Attach</string>
+    <string name="composer_send">Send</string>
 </resources>

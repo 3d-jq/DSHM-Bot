@@ -22,6 +22,7 @@ class LucideIconResourcesTest {
         "arrow_left",
         "chevron_right",
         "square_user",
+        "arrow_up",
     )
 
     @Test

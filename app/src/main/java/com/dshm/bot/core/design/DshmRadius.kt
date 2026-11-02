@@ -14,6 +14,8 @@ data class DshmRadius(
     val lg: Dp = 20.dp,
     val xl: Dp = 28.dp,
     val pill: Dp = 999.dp,
+    /** 输入框胶囊圆角（= 圆键半径 20 + 间隙 8）。 */
+    val composer: Dp = 28.dp,
 )
 
 val LocalDshmRadius = staticCompositionLocalOf { DshmRadius() }

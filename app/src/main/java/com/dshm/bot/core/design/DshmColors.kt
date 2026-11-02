@@ -27,6 +27,8 @@ data class DshmColors(
     val badge: Color,
     val scrim: Color,
     val shadow: Color,
+    /** 柔和外投影（玻璃件，dsh-Go chrome 玻璃的 8% 阴影）。 */
+    val shadowSoft: Color,
 ) {
     companion object {
         val Light = DshmColors(
@@ -45,6 +47,7 @@ data class DshmColors(
             badge = Color(0xFFFF3E51),
             scrim = Color(0x66000000),
             shadow = Color(0x8F000000),
+            shadowSoft = Color(0x14000000),
         )
 
         val Dark = DshmColors(
@@ -63,6 +66,7 @@ data class DshmColors(
             badge = Color(0xFFFF5A7A),
             scrim = Color(0x99000000),
             shadow = Color(0xE6000000),
+            shadowSoft = Color(0x59000000),
         )
     }
 }

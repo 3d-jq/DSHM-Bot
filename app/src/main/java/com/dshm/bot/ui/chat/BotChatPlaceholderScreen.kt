@@ -5,23 +5,32 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,19 +81,23 @@ fun BotChatPlaceholderScreen(
                         contentDescription = stringResource(R.string.action_back),
                         onClick = onBack,
                     )
-                    // 中间：头像上层、名字胶囊下层，胶囊按内容宽度居中，头像下缘含住胶囊顶部。
+                    // 中间：先用固定空白占住头像高度，再放胶囊，让这一列撑出「头像+胶囊」的真实高度，
+                    // 顶栏因此会给胶囊留足位置，下面的消息不会压到胶囊上。
                     Box(
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.TopCenter,
                     ) {
-                        BotTitleCapsule(
-                            name = bot.name,
-                            onClick = onDetails,
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .wrapContentWidth(Alignment.CenterHorizontally)
-                                .offset(y = Dshm.spacing.avatar - Dshm.spacing.capsuleOverlap),
-                        )
+                        Column(
+                            modifier = Modifier.align(Alignment.TopCenter),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Spacer(Modifier.height(Dshm.spacing.avatar - Dshm.spacing.capsuleOverlap))
+                            BotTitleCapsule(
+                                name = bot.name,
+                                onClick = onDetails,
+                                modifier = Modifier.wrapContentWidth(Alignment.CenterHorizontally),
+                            )
+                        }
                         BotAvatar(
                             inkId = bot.inkId,
                             glyph = bot.glyph,
@@ -103,28 +116,87 @@ fun BotChatPlaceholderScreen(
             }
         },
     ) { innerPadding ->
+        var draft by rememberSaveable { mutableStateOf("") }
+        val sent = remember { mutableStateListOf<String>() }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = Dshm.spacing.xxl),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .consumeWindowInsets(innerPadding)
+                .imePadding(),
         ) {
-            Text(
-                text = stringResource(R.string.chat_placeholder_title, bot.name),
-                style = Dshm.typography.emptyTitle,
-                color = Dshm.colors.textPrimary,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(Dshm.spacing.sm))
-            Text(
-                text = stringResource(R.string.chat_placeholder_hint),
-                style = Dshm.typography.emptyHint,
-                color = Dshm.colors.textSecondary,
-                textAlign = TextAlign.Center,
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (sent.isEmpty()) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = Dshm.spacing.xxl),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.chat_placeholder_title, bot.name),
+                            style = Dshm.typography.emptyTitle,
+                            color = Dshm.colors.textPrimary,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(Dshm.spacing.sm))
+                        Text(
+                            text = stringResource(R.string.chat_placeholder_hint),
+                            style = Dshm.typography.emptyHint,
+                            color = Dshm.colors.textSecondary,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            horizontal = Dshm.spacing.lg,
+                            vertical = Dshm.spacing.md,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                    ) {
+                        items(sent) { message -> UserBubble(message) }
+                    }
+                }
+            }
+            ChatComposer(
+                value = draft,
+                onValueChange = { draft = it },
+                onSend = {
+                    if (ComposerRules.canSend(draft)) {
+                        sent.add(draft.trim())
+                        draft = ""
+                    }
+                },
+                placeholder = stringResource(R.string.composer_placeholder, bot.name),
+                modifier = Modifier
+                    .padding(horizontal = Dshm.spacing.lg)
+                    .padding(bottom = Dshm.spacing.composerBottomInset),
             )
         }
+    }
+}
+
+/** 用户消息气泡（本地占位，接入 DSH 后由真实消息替换）。 */
+@Composable
+private fun UserBubble(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Text(
+            text = text,
+            style = Dshm.typography.composerText,
+            color = Dshm.colors.onAccent,
+            modifier = Modifier
+                .background(Dshm.colors.accent, RoundedCornerShape(Dshm.radius.lg))
+                .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+        )
     }
 }
 
