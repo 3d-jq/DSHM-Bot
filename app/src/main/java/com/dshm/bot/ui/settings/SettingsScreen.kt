@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
@@ -180,44 +182,63 @@ fun SettingsScreen(
     }
 }
 
+/** 设置卡片：柔和阴影悬浮（和顶栏/输入框的悬浮按钮同一质感）。 */
 @Composable
-private fun OverviewCard() {
-    Row(
+private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(Dshm.radius.lg)
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Dshm.radius.lg))
+            .shadow(
+                elevation = Dshm.spacing.cardElevation,
+                shape = shape,
+                ambientColor = Dshm.colors.shadowCard,
+                spotColor = Dshm.colors.shadowCard,
+            )
+            .clip(shape)
             .background(Dshm.colors.surface)
-            .border(Dshm.spacing.hairline, Dshm.colors.divider, RoundedCornerShape(Dshm.radius.lg))
-            .padding(Dshm.spacing.lg),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape),
+        content = content,
+    )
+}
+
+@Composable
+private fun OverviewCard() {
+    SettingsCard {
+        Row(
             modifier = Modifier
-                .size(Dshm.spacing.avatar)
-                .clip(CircleShape)
-                .background(Dshm.colors.surfaceMuted),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .padding(Dshm.spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_lucide_bot),
-                contentDescription = null,
-                tint = Dshm.colors.iconTint,
-                modifier = Modifier.size(Dshm.spacing.avatarGlyph),
-            )
-        }
-        Spacer(Modifier.width(Dshm.spacing.md))
-        Column {
-            Text(
-                text = stringResource(R.string.app_name),
-                style = Dshm.typography.rowTitle,
-                color = Dshm.colors.textPrimary,
-            )
-            Spacer(Modifier.width(Dshm.spacing.xxs))
-            Text(
-                text = stringResource(R.string.settings_overview_host),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textTertiary,
-            )
+            Box(
+                modifier = Modifier
+                    .size(Dshm.spacing.avatar)
+                    .clip(CircleShape)
+                    .background(Dshm.colors.surfaceMuted),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_lucide_bot),
+                    contentDescription = null,
+                    tint = Dshm.colors.iconTint,
+                    modifier = Modifier.size(Dshm.spacing.avatarGlyph),
+                )
+            }
+            Spacer(Modifier.width(Dshm.spacing.md))
+            Column {
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = Dshm.typography.rowTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+                Spacer(Modifier.width(Dshm.spacing.xxs))
+                Text(
+                    text = stringResource(R.string.settings_overview_host),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textTertiary,
+                )
+            }
         }
     }
 }
@@ -231,13 +252,7 @@ private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
             color = Dshm.colors.textSecondary,
             modifier = Modifier.padding(start = Dshm.spacing.sm, bottom = Dshm.spacing.sm),
         )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(Dshm.radius.lg))
-                .background(Dshm.colors.surface)
-                .border(Dshm.spacing.hairline, Dshm.colors.divider, RoundedCornerShape(Dshm.radius.lg)),
-        ) {
+        SettingsCard {
             content()
         }
     }

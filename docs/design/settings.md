@@ -19,6 +19,7 @@
 
 - 行图标 20dp（`spacing.settingsRowIcon`），与 15sp 文字垂直居中。
 - 行高 ≥ 40dp，行间 1dp 发丝分割线（`colors.divider`）。
+- **每个分组是一整块悬浮卡片**（不是按行拆）：`shadowCard` + `spacing.cardElevation = 16dp` 的柔和阴影，与顶栏/输入框的悬浮按钮同一质感。
 - 「主题」是当前真实可用的设置：选择后写入 SharedPreferences 并全局生效。
 
 ## 数据与状态
