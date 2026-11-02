@@ -17,12 +17,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -35,7 +31,7 @@ import kotlinx.coroutines.launch
 
 /**
  * 主界面：Bot 与群聊列表。
- * 「搜索」进入独立搜索页；「＋」在按钮下方弹出新建菜单。
+ * 「搜索」由上层导航到独立搜索页；「＋」在按钮下方弹出新建菜单。
  */
 @Composable
 fun HomeScreen(
@@ -44,29 +40,15 @@ fun HomeScreen(
     onOpenBot: (String) -> Unit,
     onCreateBot: () -> Unit,
     onCreateGroup: () -> Unit,
+    onOpenSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var searchActive by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val comingSoon = stringResource(R.string.home_coming_soon)
 
     fun showComingSoon() {
         scope.launch { snackbarHostState.showSnackbar(comingSoon) }
-    }
-
-    if (searchActive) {
-        SearchScreen(
-            uiState = uiState,
-            onQueryChange = onQueryChange,
-            onOpenBot = onOpenBot,
-            onBack = {
-                onQueryChange("")
-                searchActive = false
-            },
-            modifier = modifier,
-        )
-        return
     }
 
     Scaffold(
@@ -81,7 +63,7 @@ fun HomeScreen(
         ) {
             HomeTopBar(
                 onProfile = ::showComingSoon,
-                onSearch = { searchActive = true },
+                onSearch = onOpenSearch,
                 onCreateBot = {
                     onCreateBot()
                     showComingSoon()

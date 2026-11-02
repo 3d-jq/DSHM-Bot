@@ -47,7 +47,11 @@ class HomeScreenTest {
         ),
     )
 
-    private fun setContent(uiState: HomeUiState = loadedState(), onOpenBot: (String) -> Unit = {}) {
+    private fun setContent(
+        uiState: HomeUiState = loadedState(),
+        onOpenBot: (String) -> Unit = {},
+        onOpenSearch: () -> Unit = {},
+    ) {
         composeRule.setContent {
             DshmTheme(darkTheme = false) {
                 HomeScreen(
@@ -56,6 +60,7 @@ class HomeScreenTest {
                     onOpenBot = onOpenBot,
                     onCreateBot = {},
                     onCreateGroup = {},
+                    onOpenSearch = onOpenSearch,
                 )
             }
         }
@@ -82,12 +87,13 @@ class HomeScreenTest {
     }
 
     @Test
-    fun searchButtonOpensSearchField() {
-        setContent()
+    fun searchButtonRequestsSearchScreen() {
+        var searchOpened = false
+        setContent(onOpenSearch = { searchOpened = true })
 
         composeRule.onNodeWithContentDescription(context.getString(R.string.home_search)).performClick()
 
-        composeRule.onNodeWithText(context.getString(R.string.home_search_placeholder)).assertIsDisplayed()
+        assertEquals(true, searchOpened)
     }
 
     @Test

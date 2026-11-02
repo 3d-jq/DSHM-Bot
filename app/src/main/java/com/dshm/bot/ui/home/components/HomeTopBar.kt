@@ -89,6 +89,7 @@ private fun CreateMenu(
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
+        modifier = Modifier.width(Dshm.spacing.menuWidth),
         offset = DpOffset(x = 0.dp, y = Dshm.spacing.xs),
         shape = RoundedCornerShape(Dshm.radius.md),
         containerColor = Dshm.colors.surface,

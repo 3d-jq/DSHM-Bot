@@ -63,4 +63,24 @@ class DshmBotAppNavigationTest {
         }
         awaitHome()
     }
+
+    @Test
+    fun searchPushesAndPops() {
+        launchApp()
+        val placeholder = composeRule.activity.getString(R.string.home_search_placeholder)
+
+        composeRule
+            .onNodeWithContentDescription(composeRule.activity.getString(R.string.home_search))
+            .performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(placeholder).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule
+            .onNodeWithContentDescription(composeRule.activity.getString(R.string.action_back))
+            .performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(placeholder).fetchSemanticsNodes().isEmpty()
+        }
+    }
 }

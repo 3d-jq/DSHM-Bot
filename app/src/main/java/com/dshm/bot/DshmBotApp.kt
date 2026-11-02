@@ -19,10 +19,15 @@ import com.dshm.bot.core.design.DshmMotion
 import com.dshm.bot.ui.chat.BotChatPlaceholderScreen
 import com.dshm.bot.ui.home.HomeScreen
 import com.dshm.bot.ui.home.HomeViewModel
+import com.dshm.bot.ui.home.SearchScreen
+
+private const val SCREEN_HOME = "home"
+private const val SCREEN_SEARCH = "search"
+private const val CHAT_PREFIX = "chat:"
 
 /**
- * 应用外壳：主界面 ↔ Bot 对话。
- * 路由状态放在这里，页面本身不感知导航；切换用 iOS 风格的整屏 push / pop 动效。
+ * 应用外壳：主界面 ↔ 搜索 ↔ Bot 对话。
+ * 路由状态放在这里，页面本身不感知导航；所有页面切换都用 iOS 风格整屏 push / pop 动效。
  */
 @Composable
 fun DshmBotApp(
@@ -30,16 +35,29 @@ fun DshmBotApp(
 ) {
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     var openBotId by rememberSaveable { mutableStateOf<String?>(null) }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
 
-    // 系统返回手势/返回键：在对话页时先回到主界面，而不是直接退出 App。
-    BackHandler(enabled = openBotId != null) {
-        openBotId = null
+    val screenKey = when {
+        openBotId != null -> CHAT_PREFIX + openBotId
+        searchOpen -> SCREEN_SEARCH
+        else -> SCREEN_HOME
+    }
+
+    // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
+    BackHandler(enabled = openBotId != null || searchOpen) {
+        if (openBotId != null) {
+            openBotId = null
+        } else {
+            searchOpen = false
+            homeViewModel.setQuery("")
+        }
     }
 
     AnimatedContent(
-        targetState = openBotId,
+        targetState = screenKey,
         transitionSpec = {
-            val opening = targetState != null
+            val opening = targetState != SCREEN_HOME &&
+                (initialState == SCREEN_HOME || targetState.startsWith(CHAT_PREFIX))
             val duration = DshmMotion.screenTransitionMs
             val parallax: (Int) -> Int = { fullWidth ->
                 (fullWidth * DshmMotion.outgoingParallaxFraction).toInt()
@@ -54,7 +72,7 @@ fun DshmBotApp(
                         fadeOut(tween(duration)),
                 )
             } else {
-                // pop：聊天页向右滑出，主界面从左侧那一点点位置滑回。
+                // pop：当前页向右滑出，回退页从左侧那一点点位置滑回。
                 (
                     slideInHorizontally(tween(duration, easing = DshmMotion.standard)) { -parallax(it) } +
                         fadeIn(tween(duration))
@@ -65,17 +83,42 @@ fun DshmBotApp(
             }
         },
         label = "screen",
-    ) { botId ->
-        val openBot = uiState.rows.firstOrNull { it.id == botId }
-        if (botId != null && openBot != null) {
-            BotChatPlaceholderScreen(bot = openBot, onBack = { openBotId = null })
-        } else {
-            HomeScreen(
+    ) { key ->
+        when {
+            key.startsWith(CHAT_PREFIX) -> {
+                val botId = key.removePrefix(CHAT_PREFIX)
+                val openBot = uiState.rows.firstOrNull { it.id == botId }
+                if (openBot != null) {
+                    BotChatPlaceholderScreen(bot = openBot, onBack = { openBotId = null })
+                } else {
+                    HomeScreen(
+                        uiState = uiState,
+                        onQueryChange = homeViewModel::setQuery,
+                        onOpenBot = { openBotId = it },
+                        onCreateBot = {},
+                        onCreateGroup = {},
+                        onOpenSearch = { searchOpen = true },
+                    )
+                }
+            }
+
+            key == SCREEN_SEARCH -> SearchScreen(
                 uiState = uiState,
                 onQueryChange = homeViewModel::setQuery,
-                onOpenBot = { id -> openBotId = id },
+                onOpenBot = { openBotId = it },
+                onBack = {
+                    searchOpen = false
+                    homeViewModel.setQuery("")
+                },
+            )
+
+            else -> HomeScreen(
+                uiState = uiState,
+                onQueryChange = homeViewModel::setQuery,
+                onOpenBot = { openBotId = it },
                 onCreateBot = {},
                 onCreateGroup = {},
+                onOpenSearch = { searchOpen = true },
             )
         }
     }
