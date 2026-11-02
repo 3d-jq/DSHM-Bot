@@ -29,6 +29,7 @@ import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.chat.BotChatPlaceholderScreen
 import com.dshm.bot.ui.engine.EngineScreen
 import com.dshm.bot.ui.engine.EngineViewModel
+import com.dshm.bot.ui.engine.OnboardingScreen
 import com.dshm.bot.ui.home.HomeScreen
 import com.dshm.bot.ui.home.HomeViewModel
 import com.dshm.bot.ui.home.SearchScreen
@@ -39,10 +40,11 @@ private const val SCREEN_HOME = "home"
 private const val SCREEN_SEARCH = "search"
 private const val SCREEN_SETTINGS = "settings"
 private const val SCREEN_ENGINE = "engine"
+private const val SCREEN_ONBOARDING = "onboarding"
 private const val CHAT_PREFIX = "chat:"
 
 private fun depthOf(key: String): Int = when {
-    key == SCREEN_HOME -> 0
+    key == SCREEN_HOME || key == SCREEN_ONBOARDING -> 0
     key == SCREEN_SEARCH || key == SCREEN_SETTINGS -> 1
     key == SCREEN_ENGINE || key.startsWith(CHAT_PREFIX) -> 2
     else -> 1
@@ -78,10 +80,22 @@ fun DshmBotApp(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var engineOpen by rememberSaveable { mutableStateOf(false) }
-    var onboardingDone by rememberSaveable { mutableStateOf(false) }
+    // 已装运行时（含已停止）就不再走开屏引导：启动 App 直接进主界面。
+    var onboardingDone by rememberSaveable { mutableStateOf(engineState !is RuntimeState.NotInstalled) }
+
+    // 打开 App 自动拉起本机引擎（已安装/已停止时），不挡主界面。
+    LaunchedEffect(Unit) {
+        if (engineState is RuntimeState.Installed || engineState is RuntimeState.Stopped) {
+            engineViewModel.start()
+        }
+    }
+
+    // 顶栏只显示「启动中」：运行中后不再占用位置（用户要求）。
+    val enginePill = if (engineState is RuntimeState.Starting) stringResource(R.string.engine_value_starting) else null
 
     val screenKey = when {
-        (!onboardingDone && !engineOpen) || engineOpen -> SCREEN_ENGINE
+        !onboardingDone -> SCREEN_ONBOARDING
+        engineOpen -> SCREEN_ENGINE
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -100,12 +114,13 @@ fun DshmBotApp(
     }
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
+    // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
     BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || !onboardingDone) {
         when {
+            !onboardingDone -> Unit
             engineOpen -> engineOpen = false
             openBotId != null -> openBotId = null
             settingsOpen -> settingsOpen = false
-            !onboardingDone -> Unit
             else -> {
                 searchOpen = false
                 homeViewModel.setQuery("")
@@ -147,6 +162,13 @@ fun DshmBotApp(
         label = "screen",
     ) { key ->
         when {
+            key == SCREEN_ONBOARDING -> OnboardingScreen(
+                state = engineState,
+                onInstall = engineViewModel::install,
+                onStart = engineViewModel::start,
+                onDone = { onboardingDone = true },
+            )
+
             key.startsWith(CHAT_PREFIX) -> {
                 val botId = key.removePrefix(CHAT_PREFIX)
                 val openBot = uiState.rows.firstOrNull { it.id == botId }
@@ -161,22 +183,24 @@ fun DshmBotApp(
                         onCreateGroup = {},
                         onOpenSearch = { searchOpen = true },
                         onOpenSettings = { settingsOpen = true },
+                        engineLabel = enginePill,
+                        onEngineClick = { engineOpen = true },
                     )
                 }
             }
 
             key == SCREEN_ENGINE -> EngineScreen(
                 state = engineState,
-                onBack = if (onboardingDone) ({ engineOpen = false }) else null,
-                showContinue = !onboardingDone,
-                onDone = {
-                    onboardingDone = true
-                    engineOpen = false
-                },
+                onBack = { engineOpen = false },
                 onInstall = engineViewModel::install,
                 onStart = engineViewModel::start,
                 onStop = engineViewModel::stop,
                 onRestart = engineViewModel::restart,
+                version = engineViewModel.version,
+                nodeVersion = engineViewModel.nodeVersion,
+                abi = engineViewModel.abi,
+                logText = engineViewModel::logText,
+                onReset = engineViewModel::reset,
             )
 
             key == SCREEN_SETTINGS -> SettingsScreen(
@@ -205,10 +229,16 @@ fun DshmBotApp(
                 onCreateGroup = {},
                 onOpenSearch = { searchOpen = true },
                 onOpenSettings = { settingsOpen = true },
+                        engineLabel = enginePill,
+                        onEngineClick = { engineOpen = true },
             )
         }
     }
 }
+
+
+
+
 
 
 

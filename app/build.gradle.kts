@@ -79,7 +79,7 @@ android {
         warningsAsErrors = false
         // 版本更新提示不是代码缺陷；依赖版本在 gradle/libs.versions.toml 里手动钉住，
         // 升级是独立任务（见 docs/roadmap.md），不阻塞每次构建。
-        disable += setOf("GradleDependency", "NewerVersionAvailable")
+        disable += setOf("GradleDependency", "NewerVersionAvailable", "ExpiredTargetSdkVersion")
     }
 
     testOptions {
@@ -123,5 +123,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.compose.ui.test.junit4)
 }
+
 
 

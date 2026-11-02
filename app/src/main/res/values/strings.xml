@@ -92,7 +92,37 @@
     <string name="engine_value_failed">Failed</string>
     <string name="engine_value_stopped">Stopped</string>
     <string name="engine_value_not_installed">Not installed</string>
-    <string name="engine_restart_action">Restart</string>\n</resources>
+    <string name="engine_restart_action">Restart</string>\n    <string name="engine_local_title">Local engine</string>
+    <string name="engine_logs">Startup log</string>
+    <string name="engine_logs_copy">Copy</string>
+    <string name="engine_logs_copied">Copied</string>
+    <string name="engine_logs_empty">No log yet. Start the engine to see output.</string>
+    <string name="engine_more">More</string>
+    <string name="engine_keep_alive_hint">Keep the app running in the background so the system does not stop the engine.</string>
+    <string name="engine_diagnostics_hint">If something fails, copy the startup log and send it for troubleshooting.</string>
+    <string name="engine_runtime_info">Runtime</string>
+    <string name="engine_version">Version</string>
+    <string name="engine_arch">Architecture</string>
+    <string name="engine_method">Launch method</string>
+    <string name="engine_reset_title">Reset runtime?</string>
+    <string name="engine_reset_body">The downloaded and unpacked rootfs will be deleted. You will need to download it again next time. App settings are kept.</string>
+    <string name="engine_reset_hint">Only use this when the engine is broken. App settings are kept.</string>
+    <string name="engine_reset">Reset runtime</string>
+    <string name="onboarding_title">Welcome to DSHM Bot</string>
+    <string name="onboarding_intro">Before the bots can work, the app needs a local runtime on this phone (Ubuntu + Node + DSH). It is downloaded once and then runs offline.</string>
+    <string name="onboarding_download_hint">About 150 MB. Keep the app open during download and installation.</string>
+    <string name="engine_background">Background running</string>
+    <string name="engine_diagnostics">Diagnostics</string>
+    <string name="engine_lines">%1$d lines</string>
+    <string name="engine_start_short">Start</string>
+    <string name="engine_stop_short">Stop</string>
+    <string name="engine_restart_short">Restart</string>
+</resources>
+
+
+
+
+
 
 
 

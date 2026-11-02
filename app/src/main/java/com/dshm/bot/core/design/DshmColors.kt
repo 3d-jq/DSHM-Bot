@@ -33,6 +33,14 @@ data class DshmColors(
     val shadowCard: Color,
     /** 错误/危险提示文字。 */
     val danger: Color,
+    /** 运行中/成功状态点。 */
+    val success: Color,
+    /** 启动中/安装中等进行中状态点。 */
+    val warning: Color,
+    /** 终端/日志井底色（明暗主题都保持深色）。 */
+    val terminalBackground: Color,
+    /** 终端文字。 */
+    val terminalText: Color,
 ) {
     companion object {
         val Light = DshmColors(
@@ -54,6 +62,10 @@ data class DshmColors(
             shadowSoft = Color(0x14000000),
             shadowCard = Color(0x40000000),
             danger = Color(0xFFD93025),
+            success = Color(0xFF2E7D32),
+            warning = Color(0xFFB26A00),
+            terminalBackground = Color(0xFF15161A),
+            terminalText = Color(0xFFE8E8EA),
         )
 
         val Dark = DshmColors(
@@ -75,9 +87,15 @@ data class DshmColors(
             shadowSoft = Color(0x59000000),
             shadowCard = Color(0xA6000000),
             danger = Color(0xFFFF6B60),
+            success = Color(0xFF6FD07A),
+            warning = Color(0xFFFFC46B),
+            terminalBackground = Color(0xFF0B0C0E),
+            terminalText = Color(0xFFE8E8EA),
         )
     }
 }
 
 val LocalDshmColors = staticCompositionLocalOf { DshmColors.Light }
+
+
 

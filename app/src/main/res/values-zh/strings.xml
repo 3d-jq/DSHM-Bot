@@ -92,7 +92,37 @@
     <string name="engine_value_failed">安装失败</string>
     <string name="engine_value_stopped">已停止</string>
     <string name="engine_value_not_installed">未安装</string>
-    <string name="engine_restart_action">重启引擎</string>\n</resources>
+    <string name="engine_restart_action">重启引擎</string>\n    <string name="engine_local_title">本机引擎</string>
+    <string name="engine_logs">启动日志</string>
+    <string name="engine_logs_copy">复制</string>
+    <string name="engine_logs_copied">已复制</string>
+    <string name="engine_logs_empty">暂无日志，启动引擎后这里会显示输出。</string>
+    <string name="engine_more">更多</string>
+    <string name="engine_keep_alive_hint">保持 App 在后台运行，避免系统把引擎停掉。</string>
+    <string name="engine_diagnostics_hint">遇到问题可复制启动日志反馈。</string>
+    <string name="engine_runtime_info">运行时</string>
+    <string name="engine_version">版本</string>
+    <string name="engine_arch">架构</string>
+    <string name="engine_method">启动方式</string>
+    <string name="engine_reset_title">重置运行环境？</string>
+    <string name="engine_reset_body">将删除已下载并解压的 rootfs，下次需要重新下载安装。App 设置会保留。</string>
+    <string name="engine_reset_hint">仅在引擎异常时使用。App 设置会保留。</string>
+    <string name="engine_reset">重置运行环境</string>
+    <string name="onboarding_title">欢迎使用 DSHM Bot</string>
+    <string name="onboarding_intro">Bot 要在本机工作，需要先准备一套运行环境（Ubuntu + Node + DSH）。只需下载一次，之后离线运行。</string>
+    <string name="onboarding_download_hint">约 150 MB，下载和安装期间请保持 App 打开。</string>
+    <string name="engine_background">后台保活</string>
+    <string name="engine_diagnostics">诊断</string>
+    <string name="engine_lines">%1$d 行</string>
+    <string name="engine_start_short">启动</string>
+    <string name="engine_stop_short">停止</string>
+    <string name="engine_restart_short">重启</string>
+</resources>
+
+
+
+
+
 
 
 

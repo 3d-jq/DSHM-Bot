@@ -42,6 +42,8 @@ fun HomeScreen(
     onCreateGroup: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
+    engineLabel: String? = null,
+    onEngineClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -69,6 +71,8 @@ fun HomeScreen(
                     onCreateBot()
                     showComingSoon()
                 },
+                engineLabel = engineLabel,
+                onEngineClick = onEngineClick,
                 onCreateGroup = {
                     onCreateGroup()
                     showComingSoon()
@@ -148,3 +152,4 @@ private fun StateMessage(title: String, hint: String) {
         }
     }
 }
+
