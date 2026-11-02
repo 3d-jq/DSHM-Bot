@@ -27,3 +27,7 @@ DS-Bot/
 DS-Bot-mobile-api/
 dsh-Go/
 DSHM-Bot-ref/
+
+# Python
+__pycache__/
+*.pyc
