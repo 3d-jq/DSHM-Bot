@@ -22,3 +22,6 @@
 - `BotInks` 的 `defaultColor` / FNV-1a 算法移植自 DS-Bot（Apache-2.0, Copyright 2026 Fei2411），
   并与 dsh-Go 的 Dart 实现对照验证（`BotInkTest` 内置参考向量）。
 - 主界面的占位头像使用 Lucide 图标（ISC），非 DS-Bot 的角色美术。
+
+- rootfs 构建脚本（untime/build-runtime.sh、untime/lib/rtbuild.py、untime/patches/）移植自 dsh-Go v1.0.9（AGPL-3.0，Copyright 2026 ccch1mneyyy），用于构建我们自己的 Android rootfs。
+
