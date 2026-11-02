@@ -9,10 +9,13 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.DshmMotion
@@ -41,6 +44,17 @@ fun DshmBotApp(
         openBotId != null -> CHAT_PREFIX + openBotId
         searchOpen -> SCREEN_SEARCH
         else -> SCREEN_HOME
+    }
+
+    // 离开搜索页时立刻清焦点并收起输入法：不等 450ms 退场动画结束，
+    // 否则键盘会拖到动画末尾才消失，看起来"关得慢"。
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(screenKey) {
+        if (screenKey != SCREEN_SEARCH) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
     }
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
