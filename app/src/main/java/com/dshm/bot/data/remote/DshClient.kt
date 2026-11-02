@@ -82,4 +82,27 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
             connection.disconnect()
         }
     }.flowOn(Dispatchers.IO)
-}
+
+    /** 账号服务：POST /api/account/<method>，与 dsh-Go account_api.dart 对齐。 */
+    suspend fun account(method: String, body: JSONObject = JSONObject()): JSONObject = withContext(Dispatchers.IO) {
+        val auth = cookie ?: login()
+        val connection = (URL(endpoint.baseUrl + "api/account/" + method).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Cookie", auth)
+        }
+        try {
+            connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+            require(code in 200..299) { "DSH 账号请求失败：HTTP $code $text" }
+            JSONObject(text)
+        } finally {
+            connection.disconnect()
+        }
+    }}
+
