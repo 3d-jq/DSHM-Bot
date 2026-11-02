@@ -31,6 +31,8 @@ data class DshmColors(
     val shadowSoft: Color,
     /** 卡片悬浮投影（设置卡等大块面板，比 soft 明显一些）。 */
     val shadowCard: Color,
+    /** 错误/危险提示文字。 */
+    val danger: Color,
 ) {
     companion object {
         val Light = DshmColors(
@@ -51,6 +53,7 @@ data class DshmColors(
             shadow = Color(0x8F000000),
             shadowSoft = Color(0x14000000),
             shadowCard = Color(0x40000000),
+            danger = Color(0xFFD93025),
         )
 
         val Dark = DshmColors(
@@ -71,8 +74,10 @@ data class DshmColors(
             shadow = Color(0xE6000000),
             shadowSoft = Color(0x59000000),
             shadowCard = Color(0xA6000000),
+            danger = Color(0xFFFF6B60),
         )
     }
 }
 
 val LocalDshmColors = staticCompositionLocalOf { DshmColors.Light }
+

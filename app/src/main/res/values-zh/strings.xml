@@ -73,4 +73,11 @@
     <string name="theme_dark">深色</string>
     <string name="settings_theme_dialog_title">选择主题</string>
     <string name="settings_coming_soon">即将上线</string>
+    <string name="engine_title">本机引擎</string>
+    <string name="engine_intro">在本机运行 Bot 需要一套运行环境（Ubuntu + Node + DSH），只需下载一次，之后离线可用。</string>
+    <string name="engine_intro_hint">下载约 150 MB，请保持 App 打开直到完成。</string>
+    <string name="engine_not_installed">运行环境尚未安装</string>
+    <string name="engine_installed">运行环境 %1$s 已安装</string>
+    <string name="engine_install_action">下载并安装</string>
 </resources>
+

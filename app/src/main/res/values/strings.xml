@@ -73,4 +73,11 @@
     <string name="theme_dark">Dark</string>
     <string name="settings_theme_dialog_title">Choose theme</string>
     <string name="settings_coming_soon">Coming soon</string>
+    <string name="engine_title">Local engine</string>
+    <string name="engine_intro">This phone needs a small runtime (Ubuntu + Node + DSH) to run bots locally. It downloads once, then works offline.</string>
+    <string name="engine_intro_hint">Download is about 150 MB. Keep the app open until it finishes.</string>
+    <string name="engine_not_installed">Runtime not installed yet</string>
+    <string name="engine_installed">Runtime %1$s installed</string>
+    <string name="engine_install_action">Download and install</string>
 </resources>
+
