@@ -13,6 +13,8 @@
 
 系统返回键 / 返回手势：对话页用 `BackHandler` 拦截，回到主界面（不退出 App）；只有已经在主界面时返回才交给系统。
 
+深色模式：转场容器（`AnimatedContent`）铺当前主题背景 `colors.background`，窗口底色与状态栏图标也跟随 App 主题，滑动过程中两页之间不会露出白色。
+
 - 时长/曲线/视差比例全部来自 `DshmMotion`（`screenTransitionMs`、`fadeMs`、`standard`、`exit`、
   `outgoingParallaxFraction`），界面不写裸数值。
 - 两页各自带顶栏，一起参与滑动，视觉上是"整页"切换；状态栏区域由各自页面的 `statusBarsPadding` 处理。

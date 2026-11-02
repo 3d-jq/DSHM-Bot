@@ -8,17 +8,21 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmMotion
 import com.dshm.bot.ui.chat.BotChatPlaceholderScreen
 import com.dshm.bot.ui.home.HomeScreen
@@ -81,6 +85,9 @@ fun DshmBotApp(
 
     AnimatedContent(
         targetState = screenKey,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Dshm.colors.background),
         transitionSpec = {
             val opening = targetState != SCREEN_HOME &&
                 (initialState == SCREEN_HOME || targetState.startsWith(CHAT_PREFIX))
