@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "runtimeVersion": "r15-dsh0.2.1-rc.4-node24.22.1-ubuntu24.04.5-6c5ff4454b59",
+  "abi": "arm64-v8a",
+  "rootfs": "rootfs-arm64-v8a.tar.xz",
+  "rootfsFormat": "tar.xz",
+  "rootfsSha256": "f3b26ec9f3391b6402a11e36cac7d3be50fbaecfc67bd55633e48dd549072672",
+  "rootfsBytes": 158276592,
+  "tarBytes": 810629120,
+  "tarSha256": "669339259695175b728ac0dfc412d7bc0fff89b4abf80858ab1301d39fb3cba6",
+  "uncompressedBytes": 786065073,
+  "entries": {
+    "dir": 5225,
+    "file": 25238,
+    "symlink": 1680
+  },
+  "archiveNotes": "GNU tar; names relative (no ./); only dirs, regular files and symlinks; hard links already converted to copies; every symlink is relative and stays inside the rootfs; no member lies under a symlink; setuid/setgid cleared; uid/gid 0; sorted parent-before-child",
+  "dshVersion": "0.2.1-rc.4",
+  "nodeVersion": "24.22.1",
+  "pnpmVersion": "11.28.5",
+  "ubuntuVersion": "24.04.5",
+  "prootVersion": "5.1.107.98",
+  "dshPatches": [
+    "file-upload-resolver-dispose.diff",
+    "fs-create-exclusive.diff",
+    "install-log-redaction.diff",
+    "plugin-manager-active-run-guard.diff",
+    "plugin-manager-cancel-tree-confirmation.diff",
+    "route-guard.diff",
+    "zz-direct-runtime.diff",
+    "zzz-config-editor-path.diff",
+    "zzz-title-cache-refresh.diff",
+    "zzzz-plugin-config-readability.diff",
+    "zzzzz-plugin-config-bundles.diff",
+    "zzzzzz-session-deletion.diff",
+    "zzzzzzz-input-recovery.diff"
+  ],
+  "dshGoBridge": {
+    "version": "0.4.0",
+    "path": "/opt/dsh-go/dsh-go-bridge"
+  },
+  "tallocVersion": "2.5.0",
+  "androidShmemVersion": "0.7",
+  "npmRegistry": "https://registry.npmmirror.com",
+  "pnpmRegistry": "https://registry.npmmirror.com/",
+  "pluginRegistries": {
+    "order": [
+      "https://registry.npmmirror.com/",
+      "https://registry.npmjs.org/"
+    ],
+    "note": "pluginManager asks pnpm's own registry (pnpm_config_registry in launch.argv) and then the fallbackRegistries set by /etc/dsh-app/dsh-web.patch.yml (passed with --patch)"
+  },
+  "nativeMinSdk": 24,
+  "jniLibs": {
+    "libproot.so": {
+      "sha256": "68f1280728dd5e108f59c1a878f97b176e85e00e197ec0e68a5a47b0b0016b2e",
+      "bytes": 255240,
+      "source": "termux-main proot 5.1.107.98 (proot_5.1.107.98_aarch64.deb:/data/data/com.termux/files/usr/bin/proot)",
+      "patch": "DT_NEEDED libtalloc.so.2 -> libtalloc.so",
+      "originalSha256": "0af404853712b1c25dd143346b9b1b717f8888f051ab7fed4743c20c54edc9eb",
+      "machine": "aarch64",
+      "type": "DYN",
+      "needed": [
+        "libtalloc.so",
+        "libandroid-shmem.so",
+        "libc.so"
+      ],
+      "soname": null,
+      "minLoadAlign": 16384
+    },
+    "libproot-loader.so": {
+      "sha256": "1da54355333cca3fb6ee10e3b82a24df24fb230c99241ce83809bf9e240609b5",
+      "bytes": 18136,
+      "source": "termux-main proot 5.1.107.98 (proot_5.1.107.98_aarch64.deb:/data/data/com.termux/files/usr/libexec/proot/loader)",
+      "patch": null,
+      "originalSha256": null,
+      "machine": "aarch64",
+      "type": "EXEC",
+      "needed": [],
+      "soname": null,
+      "minLoadAlign": 16384
+    },
+    "libtalloc.so": {
+      "sha256": "160d39bc0d7ed946f22310d1d6f20addda21b02b0972dffe929fe49951543941",
+      "bytes": 33592,
+      "source": "termux-main libtalloc 2.5.0 (libtalloc_2.5.0_aarch64.deb:/data/data/com.termux/files/usr/lib/libtalloc.so.2.5.0)",
+      "patch": "DT_SONAME libtalloc.so.2 -> libtalloc.so",
+      "originalSha256": "742b438c4d09e276985a61d44164c9de207b6d8cc268f3018cb3001961bcb309",
+      "machine": "aarch64",
+      "type": "DYN",
+      "needed": [
+        "libc.so"
+      ],
+      "soname": "libtalloc.so",
+      "minLoadAlign": 16384
+    },
+    "libandroid-shmem.so": {
+      "sha256": "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731",
+      "bytes": 14432,
+      "source": "termux-main libandroid-shmem 0.7 (libandroid-shmem_0.7_aarch64.deb:/data/data/com.termux/files/usr/lib/libandroid-shmem.so)",
+      "patch": null,
+      "originalSha256": null,
+      "machine": "aarch64",
+      "type": "DYN",
+      "needed": [
+        "liblog.so",
+        "libc.so"
+      ],
+      "soname": null,
+      "minLoadAlign": 16384
+    }
+  },
+  "directEngine": {
+    "schema": 2,
+    "defaultEnabled": false,
+    "preload": "/opt/dsh-go/direct/preload.mjs",
+    "loader": "/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1",
+    "paths": "typed guest/physical path seams; same-path PRoot alias only for direct or a prior direct preparation",
+    "safeMode": "proot",
+    "tls": "Node bundled CA defaults; explicit extra CA environment retained",
+    "pnpmPackageImportMethod": "copy",
+    "moduleIdentity": "uncached physical identity at load; source and pinned bundled native addons use verified descriptors",
+    "nativeAddonInventory": "/opt/dsh-go/direct/native-addons.json",
+    "compatibilityGate": "nonempty or unreadable PRoot hard-link backing store selects proot; late L2S targets are refused without data migration"
+  },
+  "launch": {
+    "argv": [
+      "{NATIVE_LIB_DIR}/libproot.so",
+      "--kill-on-exit",
+      "--link2symlink",
+      "--sysvipc",
+      "-L",
+      "-0",
+      "--rootfs={ROOTFS}",
+      "--cwd=/root",
+      "-b",
+      "/dev",
+      "-b",
+      "/dev/urandom:/dev/random",
+      "-b",
+      "/proc",
+      "-b",
+      "/proc/self/fd:/dev/fd",
+      "-b",
+      "/proc/self/fd/0:/dev/stdin",
+      "-b",
+      "/proc/self/fd/1:/dev/stdout",
+      "-b",
+      "/proc/self/fd/2:/dev/stderr",
+      "-b",
+      "/sys",
+      "-b",
+      "{ROOTFS}/var/lib/dsh-app/empty:/sys/fs/selinux",
+      "-b",
+      "{ROOTFS}/var/lib/dsh-app/shm:/dev/shm",
+      "-b",
+      "/system",
+      "-b",
+      "/apex",
+      "/usr/bin/env",
+      "-i",
+      "HOME=/root",
+      "USER=root",
+      "LOGNAME=root",
+      "SHELL=/bin/bash",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "TERM=xterm-256color",
+      "TMPDIR=/tmp",
+      "DSH_HOME=/root/.dsh",
+      "pnpm_config_registry=https://registry.npmmirror.com/",
+      "UV_USE_IO_URING=0",
+      "NARB_DISABLE_NATIVE_CACHE=1",
+      "NODE_OPTIONS=--dns-result-order=ipv4first",
+      "{GUEST_ENV}",
+      "/bin/sh",
+      "-c",
+      "echo $$ > /tmp/dsh-web.pid; exec /usr/local/bin/dsh web --patch /etc/dsh-app/dsh-web.patch.yml --host 127.0.0.1 --port {PORT} --no-open"
+    ],
+    "env": {
+      "PROOT_LOADER": "{NATIVE_LIB_DIR}/libproot-loader.so",
+      "PROOT_TMP_DIR": "{TMP}",
+      "PROOT_L2S_DIR": "{ROOTFS}/root/.l2s",
+      "LD_LIBRARY_PATH": "{NATIVE_LIB_DIR}"
+    },
+    "placeholders": {
+      "{NATIVE_LIB_DIR}": "applicationInfo.nativeLibraryDir (libs must be extracted: useLegacyPackaging=true)",
+      "{ROOTFS}": "filesDir/runtime/rootfs",
+      "{TMP}": "app-private writable dir for PROOT_TMP_DIR (e.g. cacheDir/proot-tmp)",
+      "{FILES_DIR}": "context.filesDir (unused by this template)",
+      "{PORT}": "loopback port chosen by the app",
+      "{GUEST_ENV}": "standalone element -> zero or more KEY=VALUE from the app (DEEPSEEK_API_KEY, TZ, ...); later assignments override the fixed ones"
+    },
+    "tokenLine": {
+      "stream": "stdout",
+      "regex": "^dsh web: (http://127\\.0\\.0\\.1:[0-9]+/)\\?token=([A-Za-z0-9_-]+)",
+      "example": "dsh web: http://127.0.0.1:3080/?token=<43 base64url chars>",
+      "note": "printed once, after every plugin has loaded; the server is listening by then"
+    },
+    "auth": {
+      "exchange": "GET /?token=<token> -> 303 Location ./ + Set-Cookie dsh-auth-<id>=v1.<...>; Path=/; HttpOnly; SameSite=Strict",
+      "webview": "either load the token URL directly, or exchange it natively and CookieManager.setCookie(baseUrl, cookie + '; Path=/; HttpOnly; SameSite=Strict')"
+    },
+    "health": {
+      "tcp": "127.0.0.1:{PORT} accepts",
+      "http": "GET / without cookie -> 401 (server up, unauthenticated); with the dsh-auth cookie -> 200"
+    },
+    "stop": {
+      "pidFile": "{ROOTFS}/tmp/dsh-web.pid",
+      "graceful": "Os.kill(pid from pidFile, SIGTERM): dsh disposes plugins and exits 0; --kill-on-exit then reaps the rest and proot exits",
+      "fallback": "Os.kill(prootPid, SIGQUIT) kills every tracee; proot IGNORES SIGTERM/SIGINT/SIGHUP, so Process.destroy() alone does nothing and destroyForcibly() orphans node"
+    },
+    "files": {
+      "resolvConf": "{ROOTFS}/etc/resolv.conf",
+      "dshHome": "{ROOTFS}/root/.dsh",
+      "credentials": "{ROOTFS}/root/.dsh/.credentials.yaml (mode 0600; 'version: 1' + 'refs: {DEEPSEEK_API_KEY: ...}')",
+      "l2sDir": "{ROOTFS}/root/.l2s (must exist; created by the archive)"
+    }
+  },
+  "build": {
+    "inputsSha256_12": "6c5ff4454b59",
+    "ubuntuBaseSha256": "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
+    "nodeSha256": "dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e",
+    "dshLockSha256": "9b61c5b60c82a3b64fb252af5c142d40d0c86aff30a17cdd5e1ca9d73df9a25c",
+    "pnpmIntegrity": "sha512-SEVj0wtMKtJ8tIqpT/KzAtvOvI/2vyiBbCWJiG4UbOf3bzVPO8GkOOb16XaMMCqgpvet2CMpA81M+BQmy8FNng==",
+    "sourceDateEpoch": 1767225600
+  }
+}
