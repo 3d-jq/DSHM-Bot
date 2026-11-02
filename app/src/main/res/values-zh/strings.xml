@@ -23,4 +23,5 @@
     <string name="composer_placeholder">给%1$s发消息…</string>
     <string name="composer_attach">附件</string>
     <string name="composer_send">发送</string>
+    <string name="search_hint">输入关键词搜索 Bot 与群聊</string>
 </resources>

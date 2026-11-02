@@ -1,6 +1,7 @@
 package com.dshm.bot.ui.home.components
 
-import androidx.compose.foundation.background
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,37 +11,38 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.ui.components.FloatingIconButton
 
 /**
  * 顶栏：左侧个人资料，右侧搜索与新建。
- * 三个入口都是「底色 + 四周阴影」的悬浮圆钮：填充和页面底色一致，靠阴影浮起来。
+ * 搜索进入独立搜索页；「＋」在按钮下方弹出新建菜单（带出现动画）。
  */
 @Composable
 fun HomeTopBar(
     onProfile: () -> Unit,
     onSearch: () -> Unit,
-    onNew: () -> Unit,
+    onCreateBot: () -> Unit,
+    onCreateGroup: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -60,84 +62,78 @@ fun HomeTopBar(
             onClick = onSearch,
         )
         Spacer(Modifier.width(Dshm.spacing.sm))
-        FloatingIconButton(
-            icon = R.drawable.ic_lucide_plus,
-            contentDescription = stringResource(R.string.home_new),
-            onClick = onNew,
+        Box {
+            FloatingIconButton(
+                icon = R.drawable.ic_lucide_plus,
+                contentDescription = stringResource(R.string.home_new),
+                onClick = { menuOpen = true },
+            )
+            CreateMenu(
+                expanded = menuOpen,
+                onDismiss = { menuOpen = false },
+                onCreateBot = onCreateBot,
+                onCreateGroup = onCreateGroup,
+            )
+        }
+    }
+}
+
+/** 「＋」下方的下拉菜单：新建 Bot / 新建群聊。DropdownMenu 自带缩放+淡入的出现动画。 */
+@Composable
+private fun CreateMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onCreateBot: () -> Unit,
+    onCreateGroup: () -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        offset = DpOffset(x = 0.dp, y = Dshm.spacing.xs),
+        shape = RoundedCornerShape(Dshm.radius.md),
+        containerColor = Dshm.colors.surface,
+        tonalElevation = 0.dp,
+        shadowElevation = Dshm.spacing.floatingElevation,
+    ) {
+        MenuRow(
+            icon = R.drawable.ic_lucide_bot,
+            label = stringResource(R.string.home_new_bot),
+            onClick = {
+                onDismiss()
+                onCreateBot()
+            },
+        )
+        MenuRow(
+            icon = R.drawable.ic_lucide_users,
+            label = stringResource(R.string.home_new_group),
+            onClick = {
+                onDismiss()
+                onCreateGroup()
+            },
         )
     }
 }
 
-/** 搜索态顶栏：圆角输入框 + 取消。进入时自动聚焦。 */
 @Composable
-fun HomeSearchBar(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
-
+private fun MenuRow(@DrawableRes icon: Int, label: String, onClick: () -> Unit) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = Dshm.spacing.topBarHeight)
-            .padding(horizontal = Dshm.spacing.lg),
+            .clickable(onClick = onClick)
+            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BasicTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            singleLine = true,
-            textStyle = Dshm.typography.rowPreview.copy(color = Dshm.colors.textPrimary),
-            cursorBrush = SolidColor(Dshm.colors.accent),
-            modifier = Modifier
-                .weight(1f)
-                .focusRequester(focusRequester)
-                .padding(vertical = Dshm.spacing.md),
-            decorationBox = { innerTextField ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(
-                            elevation = Dshm.spacing.floatingElevation,
-                            shape = RoundedCornerShape(Dshm.radius.pill),
-                            ambientColor = Dshm.colors.shadow,
-                            spotColor = Dshm.colors.shadow,
-                        )
-                        .clip(RoundedCornerShape(Dshm.radius.pill))
-                        .background(Dshm.colors.background)
-                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_lucide_search),
-                        contentDescription = null,
-                        tint = Dshm.colors.textSecondary,
-                        modifier = Modifier.size(Dshm.spacing.topBarIcon),
-                    )
-                    Spacer(Modifier.width(Dshm.spacing.sm))
-                    Box(Modifier.weight(1f)) {
-                        if (query.isEmpty()) {
-                            Text(
-                                text = stringResource(R.string.home_search_placeholder),
-                                style = Dshm.typography.rowPreview,
-                                color = Dshm.colors.textTertiary,
-                            )
-                        }
-                        innerTextField()
-                    }
-                }
-            },
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = null,
+            tint = Dshm.colors.iconTint,
+            modifier = Modifier.size(Dshm.spacing.topBarIcon),
         )
         Spacer(Modifier.width(Dshm.spacing.sm))
-        TextButton(onClick = onCancel) {
-            Text(
-                text = stringResource(R.string.home_search_cancel),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.accent,
-            )
-        }
+        Text(
+            text = label,
+            style = Dshm.typography.sheetAction,
+            color = Dshm.colors.textPrimary,
+        )
     }
 }

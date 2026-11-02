@@ -91,6 +91,16 @@ class HomeScreenTest {
     }
 
     @Test
+    fun plusButtonOpensCreateMenu() {
+        setContent()
+
+        composeRule.onNodeWithContentDescription(context.getString(R.string.home_new)).performClick()
+
+        composeRule.onNodeWithText(context.getString(R.string.home_new_bot)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.home_new_group)).assertIsDisplayed()
+    }
+
+    @Test
     fun emptyStateIsShownWhenThereAreNoBots() {
         setContent(HomeUiState(isLoading = false))
 

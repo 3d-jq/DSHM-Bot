@@ -23,4 +23,5 @@
     <string name="composer_placeholder">Message %1$s</string>
     <string name="composer_attach">Attach</string>
     <string name="composer_send">Send</string>
+    <string name="search_hint">Type to search bots and groups</string>
 </resources>
