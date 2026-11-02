@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSHM Bot</string>
+
+    <string name="action_back">Back</string>
+
+    <string name="home_profile">Profile and settings</string>
+    <string name="home_search">Search bots</string>
+    <string name="home_new">New bot or group</string>
+    <string name="home_search_placeholder">Search bots and groups</string>
+    <string name="home_search_cancel">Cancel</string>
+    <string name="home_empty_title">Nothing here yet</string>
+    <string name="home_empty_hint">Bots and group chats will show up here.</string>
+    <string name="home_no_results">No bots match “%1$s”</string>
+    <string name="home_error_title">Bots couldn’t load</string>
+    <string name="home_error_hint">Check the connection and try again later.</string>
+    <string name="home_new_bot">New bot</string>
+    <string name="home_new_group">New group chat</string>
+    <string name="home_coming_soon">Coming soon</string>
+    <string name="chat_placeholder_title">Chat with %1$s</string>
+    <string name="chat_placeholder_hint">This chat is native and runs on DSH. The DS Bot team connects in a later milestone.</string>
+</resources>

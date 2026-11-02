@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSHM Bot</string>
+
+    <string name="action_back">返回</string>
+
+    <string name="home_profile">个人资料与设置</string>
+    <string name="home_search">搜索</string>
+    <string name="home_new">新建</string>
+    <string name="home_search_placeholder">搜索 Bot 与群聊</string>
+    <string name="home_search_cancel">取消</string>
+    <string name="home_empty_title">还没有内容</string>
+    <string name="home_empty_hint">Bot 和群聊会显示在这里。</string>
+    <string name="home_no_results">没有找到“%1$s”</string>
+    <string name="home_error_title">Bot 列表加载失败</string>
+    <string name="home_error_hint">请检查连接后重试。</string>
+    <string name="home_new_bot">新建 Bot</string>
+    <string name="home_new_group">新建群聊</string>
+    <string name="home_coming_soon">即将上线</string>
+    <string name="chat_placeholder_title">与 %1$s 的对话</string>
+    <string name="chat_placeholder_hint">原生对话界面，底层由 DSH 驱动；DS Bot 团队能力将在后续里程碑接入。</string>
+</resources>

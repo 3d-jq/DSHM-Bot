@@ -1,0 +1,29 @@
+# Gradle / Android
+.gradle/
+build/
+app/build/
+local.properties
+captures/
+*.iml
+.idea/
+.DS_Store
+Thumbs.db
+
+# 签名与本地密钥（绝不入库）
+keystore/
+*.jks
+*.keystore
+key.properties
+
+# 构建产物
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# 参考基线仓库（只读放在本地，不属于本项目）
+DS-Bot/
+DS-Bot-mobile-api/
+dsh-Go/
+DSHM-Bot-ref/
