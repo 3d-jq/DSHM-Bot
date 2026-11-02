@@ -38,7 +38,6 @@ fun AppearanceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .statusBarsPadding()
                 .padding(horizontal = Dshm.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md),
         ) {
@@ -101,3 +100,4 @@ internal fun themeLabelOf(mode: ThemeMode): String = stringResource(
         ThemeMode.DARK -> R.string.theme_dark
     },
 )
+
