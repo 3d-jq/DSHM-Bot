@@ -166,7 +166,16 @@
     <string name="personalization_save">Save</string>
     <string name="personalization_saved">Saved</string>
     <string name="composer_voice">Voice input</string>
+    <string name="composer_voice_cancel">Cancel dictation</string>
+    <string name="composer_voice_stop">Stop dictation</string>
+    <string name="composer_voice_listening">Listening…</string>
+    <string name="providers_count">%1$d providers</string>
+    <string name="providers_group_official">Official</string>
+    <string name="providers_group_subscription">Subscriptions</string>
+    <string name="providers_group_custom">Custom</string>
 </resources>
+
+
 
 
 

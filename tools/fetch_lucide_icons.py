@@ -49,6 +49,9 @@ ICONS = [
     "sliders-horizontal",
     "battery-charging",
     "paw-print",
+    "x",
+    "square",
+    "audio-lines",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -209,3 +212,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

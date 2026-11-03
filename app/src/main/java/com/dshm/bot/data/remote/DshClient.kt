@@ -90,7 +90,11 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
      * 响应：{"type":"server-response","rpcId":...,"result":{"ok":true,"value":...}}，
      * 失败为 ok=false（HTTP 仍 200）。返回 result.value。
      */
-    suspend fun rpc(method: String, args: JSONObject = JSONObject()): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun rpc(method: String, args: JSONObject = JSONObject()): JSONObject =
+        rpcValue(method, args) as? JSONObject ?: JSONObject()
+
+    /** 同 [rpc]，但返回原始 value（数组/对象/布尔都保留），供列表类接口使用。 */
+    suspend fun rpcValue(method: String, args: JSONObject = JSONObject()): Any? = withContext(Dispatchers.IO) {
         val auth = cookie ?: login()
         val rpcId = java.util.UUID.randomUUID().toString()
         val envelope = JSONObject()
@@ -118,7 +122,7 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                 val error = result.optJSONObject("error")
                 error("DSH RPC $method 失败：${error?.optString("message") ?: result}")
             }
-            result.optJSONObject("value") ?: JSONObject()
+            result.opt("value")
         } finally {
             connection.disconnect()
         }
@@ -128,5 +132,7 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
     suspend fun account(method: String, args: JSONObject = JSONObject()): JSONObject =
         rpc("account/$method", args)
 }
+
+
 
 

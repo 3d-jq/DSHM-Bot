@@ -59,6 +59,8 @@ import com.dshm.bot.ui.settings.settingsPageInfo
 import com.dshm.bot.ui.settings.EngineSettingsScreen
 import com.dshm.bot.ui.settings.EngineNamespacesScreen
 import com.dshm.bot.ui.settings.PluginsScreen
+import com.dshm.bot.ui.settings.ProvidersScreen
+import com.dshm.bot.ui.settings.ProvidersViewModel
 import com.dshm.bot.ui.settings.PersonalizationScreen
 import com.dshm.bot.ui.settings.WebHostScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
@@ -104,6 +106,7 @@ fun DshmBotApp(
     ),
     accountViewModel: AccountViewModel = viewModel(factory = AccountViewModel.factory(LocalContext.current.applicationContext)),
     engineSettingsViewModel: EngineSettingsViewModel = viewModel(factory = EngineSettingsViewModel.factory()),
+    providersViewModel: ProvidersViewModel = viewModel(factory = ProvidersViewModel.factory()),
 ) {
     val appContext = LocalContext.current
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -129,6 +132,7 @@ fun DshmBotApp(
         val endpoint = (engineState as? RuntimeState.Running)?.endpoint
         accountViewModel.setEndpoint(endpoint)
         engineSettingsViewModel.setEndpoint(endpoint)
+        providersViewModel.setEndpoint(endpoint)
     }
     val engineStatusText = when (engineState) {
         is RuntimeState.Running -> stringResource(R.string.engine_value_running)
@@ -363,13 +367,7 @@ fun DshmBotApp(
 
                     SettingsPageId.PERSONALIZATION -> PersonalizationScreen(onBack = close)
 
-                    SettingsPageId.MODEL -> EngineNamespacesScreen(
-                        viewModel = engineSettingsViewModel,
-                        title = stringResource(R.string.settings_model),
-                        filter = { ns -> ns.contains("model", true) || ns.contains("llm", true) || ns.contains("provider", true) },
-                        emptyHint = stringResource(R.string.info_engine_required),
-                        onBack = close,
-                    )
+                    SettingsPageId.MODEL -> ProvidersScreen(viewModel = providersViewModel, onBack = close)
 
                     SettingsPageId.PERMISSION -> EngineNamespacesScreen(
                         viewModel = engineSettingsViewModel,
@@ -472,6 +470,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 

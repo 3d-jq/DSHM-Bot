@@ -31,6 +31,7 @@ class SettingsScreenTest {
     private fun setContent(
         themeMode: ThemeMode = ThemeMode.SYSTEM,
         onThemeChange: (ThemeMode) -> Unit = {},
+        onOpenAppearance: () -> Unit = {},
     ) {
         composeRule.setContent {
             DshmTheme(darkTheme = false) {
@@ -39,11 +40,12 @@ class SettingsScreenTest {
                     onBack = {},
                     onThemeChange = onThemeChange,
                     onOpenEngine = {},
-                    onOpenAppearance = {},
+                    onOpenAppearance = onOpenAppearance,
                     onOpenChatFont = {},
                     onOpenLanguage = {},
                     chatFontLabel = "标准",
                     languageLabel = "跟随系统",
+                    engineStatus = "运行中",
                     onOpenAccount = {},
                 )
             }
@@ -67,14 +69,13 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun pickingDarkThemeCallsCallback() {
-        var picked: ThemeMode? = null
-        setContent(onThemeChange = { picked = it })
+    fun themeRowOpensAppearancePage() {
+        var opened = false
+        setContent(onOpenAppearance = { opened = true })
 
         composeRule.onNode(hasText(context.getString(R.string.settings_theme))).performClick()
-        composeRule.onNodeWithText(context.getString(R.string.theme_dark)).performClick()
 
-        assertEquals(ThemeMode.DARK, picked)
+        assertEquals(true, opened)
     }
 }
 
@@ -86,6 +87,8 @@ internal fun ThemeMode.label(context: android.content.Context): String = context
         ThemeMode.DARK -> R.string.theme_dark
     },
 )
+
+
 
 
 

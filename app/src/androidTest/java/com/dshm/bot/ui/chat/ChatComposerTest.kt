@@ -51,9 +51,10 @@ class ChatComposerTest {
     private fun sendNode() = composeRule.onNodeWithContentDescription(context.getString(R.string.composer_send))
 
     @Test
-    fun sendIsDisabledWhenEmpty() {
+    fun emptyDraftShowsVoiceButton() {
         setContent()
-        sendNode().assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.composer_voice))
+            .assertIsDisplayed()
     }
 
     @Test
@@ -78,3 +79,4 @@ class ChatComposerTest {
         assertEquals(1, attachCount)
     }
 }
+
