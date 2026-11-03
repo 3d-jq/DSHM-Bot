@@ -136,7 +136,15 @@
     <string name="account_balance">Balance %1$s</string>
     <string name="account_top_up">Top up</string>
     <string name="account_usage">Usage</string>
+    <string name="api_key_title">DeepSeek API Key</string>
+    <string name="api_key_not_set">Not set</string>
+    <string name="api_key_set">Set</string>
+    <string name="api_key_replace">Replace</string>
+    <string name="api_key_clear">Clear</string>
+    <string name="api_key_save">Save</string>
+    <string name="api_key_hint">Paste your DeepSeek API Key. It is stored encrypted on this phone and passed to the local engine at launch.</string>
 </resources>
+
 
 
 

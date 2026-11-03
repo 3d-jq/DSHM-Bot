@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.account
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -8,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.DshAccountRepository
 import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import com.dshm.bot.data.settings.ApiKeyStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +20,10 @@ import kotlinx.coroutines.launch
  * 账号状态层（外壳层共享：设置概览卡 + 账号页共用），对齐 dsh-Go account_state：
  * 登录走 startSignIn + 轮询 getState，登录后拉 profile/balance。
  */
-class AccountViewModel(initialEndpoint: RuntimeEndpoint? = null) : ViewModel() {
+class AccountViewModel(
+    private val apiKeyStore: ApiKeyStore,
+    initialEndpoint: RuntimeEndpoint? = null,
+) : ViewModel() {
 
     data class UiState(
         val ready: Boolean = false,
@@ -29,6 +34,8 @@ class AccountViewModel(initialEndpoint: RuntimeEndpoint? = null) : ViewModel() {
         val usageUrl: String? = null,
         val topUpUrl: String? = null,
         val authorizeUrl: String? = null,
+        val hasApiKey: Boolean = false,
+        val maskedApiKey: String = "",
         val busy: Boolean = false,
         val error: String? = null,
     )
@@ -39,7 +46,21 @@ class AccountViewModel(initialEndpoint: RuntimeEndpoint? = null) : ViewModel() {
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     init {
+        _ui.value = _ui.value.copy(
+            hasApiKey = apiKeyStore.key() != null,
+            maskedApiKey = apiKeyStore.masked(),
+        )
         setEndpoint(initialEndpoint)
+    }
+
+    fun saveApiKey(value: String) {
+        apiKeyStore.save(value)
+        _ui.value = _ui.value.copy(hasApiKey = true, maskedApiKey = apiKeyStore.masked())
+    }
+
+    fun clearApiKey() {
+        apiKeyStore.clear()
+        _ui.value = _ui.value.copy(hasApiKey = false, maskedApiKey = "")
     }
 
     /** 引擎运行/停止时由外壳调用；null 表示引擎不可用。 */
@@ -132,8 +153,10 @@ class AccountViewModel(initialEndpoint: RuntimeEndpoint? = null) : ViewModel() {
     }
 
     companion object {
-        fun factory(): ViewModelProvider.Factory = viewModelFactory {
-            initializer { AccountViewModel() }
+        fun factory(context: Context): ViewModelProvider.Factory = viewModelFactory {
+            initializer { AccountViewModel(ApiKeyStore(context.applicationContext)) }
         }
     }
 }
+
+

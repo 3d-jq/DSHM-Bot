@@ -15,12 +15,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +42,8 @@ import com.dshm.bot.ui.settings.SettingsPageScaffold
 @Composable
 fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
+    var showKeyDialog by remember { mutableStateOf(false) }
+    var keyDraft by remember { mutableStateOf("") }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
 
     LaunchedEffect(ui.authorizeUrl) {
@@ -77,6 +85,85 @@ fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                     Spacer(Modifier.padding(Dshm.spacing.xs))
                     Text(error, style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
                 }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Dshm.radius.lg))
+                    .background(Dshm.colors.surface)
+                    .padding(Dshm.spacing.lg),
+            ) {
+                Text(
+                    text = stringResource(R.string.api_key_title),
+                    style = Dshm.typography.rowTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+                Spacer(Modifier.padding(Dshm.spacing.xxs))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (ui.hasApiKey) ui.maskedApiKey else stringResource(R.string.api_key_not_set),
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.textSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        keyDraft = ""
+                        showKeyDialog = true
+                    }) {
+                        Text(stringResource(if (ui.hasApiKey) R.string.api_key_replace else R.string.api_key_set))
+                    }
+                }
+            }
+
+            if (showKeyDialog) {
+                AlertDialog(
+                    onDismissRequest = { showKeyDialog = false },
+                    containerColor = Dshm.colors.surface,
+                    title = { Text(stringResource(R.string.api_key_title), color = Dshm.colors.textPrimary) },
+                    text = {
+                        Column {
+                            Text(
+                                text = stringResource(R.string.api_key_hint),
+                                style = Dshm.typography.rowPreview,
+                                color = Dshm.colors.textSecondary,
+                            )
+                            Spacer(Modifier.padding(Dshm.spacing.xs))
+                            BasicTextField(
+                                value = keyDraft,
+                                onValueChange = { keyDraft = it },
+                                singleLine = true,
+                                textStyle = Dshm.typography.rowPreview.copy(color = Dshm.colors.textPrimary),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(Dshm.radius.sm))
+                                    .background(Dshm.colors.surfaceMuted)
+                                    .padding(Dshm.spacing.sm),
+                            )
+                            if (ui.hasApiKey) {
+                                TextButton(onClick = {
+                                    viewModel.clearApiKey()
+                                    showKeyDialog = false
+                                }) {
+                                    Text(stringResource(R.string.api_key_clear), color = Dshm.colors.danger)
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                if (keyDraft.isNotBlank()) viewModel.saveApiKey(keyDraft)
+                                showKeyDialog = false
+                            },
+                        ) { Text(stringResource(R.string.api_key_save)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showKeyDialog = false }) {
+                            Text(stringResource(android.R.string.cancel))
+                        }
+                    },
+                )
             }
 
             if (ui.name == null) {
@@ -150,3 +237,4 @@ private fun openUrl(context: Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }
+

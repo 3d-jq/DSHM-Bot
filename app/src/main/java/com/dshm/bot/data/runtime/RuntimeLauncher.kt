@@ -4,6 +4,7 @@ import android.content.Context
 import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
+import com.dshm.bot.data.settings.ApiKeyStore
 import java.util.concurrent.TimeUnit
 
 /**
@@ -49,6 +50,10 @@ class RuntimeLauncher(
 
         val builder = ProcessBuilder(argv).redirectErrorStream(true)
         builder.environment().putAll(env)
+        ApiKeyStore(appContext).key()?.let { key ->
+            builder.environment()["DEEPSEEK_API_KEY"] = key
+            EngineLog.log("api key: injected")
+        }
         builder.environment()["PROOT_NO_SECCOMP"] = "1"
         val started = builder.start()
         process = started
@@ -118,4 +123,5 @@ class RuntimeLauncher(
         const val DEFAULT_PORT = 3080
     }
 }
+
 

@@ -75,7 +75,7 @@ fun DshmBotApp(
     engineViewModel: EngineViewModel = viewModel(
         factory = EngineViewModel.factory(LocalContext.current.applicationContext),
     ),
-    accountViewModel: AccountViewModel = viewModel(factory = AccountViewModel.factory()),
+    accountViewModel: AccountViewModel = viewModel(factory = AccountViewModel.factory(LocalContext.current.applicationContext)),
 ) {
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
@@ -309,6 +309,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 

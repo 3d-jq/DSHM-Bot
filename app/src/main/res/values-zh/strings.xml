@@ -136,7 +136,15 @@
     <string name="account_balance">余额 %1$s</string>
     <string name="account_top_up">充值</string>
     <string name="account_usage">用量</string>
+    <string name="api_key_title">DeepSeek API Key</string>
+    <string name="api_key_not_set">未设置</string>
+    <string name="api_key_set">设置</string>
+    <string name="api_key_replace">更换</string>
+    <string name="api_key_clear">清除</string>
+    <string name="api_key_save">保存</string>
+    <string name="api_key_hint">粘贴 DeepSeek API Key。它加密保存在本机，并在启动本机引擎时注入。</string>
 </resources>
+
 
 
 
