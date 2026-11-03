@@ -13,7 +13,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -60,11 +60,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            CompositionLocalProvider(LocalContext provides localizedContext) {
-                DshmTheme(darkTheme = dark) {
-                    DshmBotApp(settingsViewModel = settingsViewModel)
+            // 只覆盖字符串资源（LocalResources），保留 Activity 的 LocalContext，
+                // 否则 rememberLauncherForActivityResult 会因拿不到 Activity 而崩溃。
+                CompositionLocalProvider(LocalResources provides localizedContext.resources) {
+                    DshmTheme(darkTheme = dark) {
+                        DshmBotApp(settingsViewModel = settingsViewModel)
+                    }
                 }
-            }
         }
     }
 }
+
