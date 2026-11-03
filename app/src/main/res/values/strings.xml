@@ -143,7 +143,19 @@
     <string name="api_key_clear">Clear</string>
     <string name="api_key_save">Save</string>
     <string name="api_key_hint">Paste your DeepSeek API Key. It is stored encrypted on this phone and passed to the local engine at launch.</string>
+    <string name="interface_web">Web</string>
+    <string name="voice_system">System</string>
+    <string name="voice_engine">Engine</string>
+    <string name="performance_full">Full</string>
+    <string name="performance_light">Light</string>
+    <string name="info_engine_required">Connect the local engine to configure this.</string>
+    <string name="info_privacy">Chats and credentials stay on this phone. Nothing is uploaded unless you turn it on in DSH.</string>
+    <string name="info_pets">Pet support will be ported from dsh-Go later.</string>
+    <string name="info_licenses">DSHM Bot is released under AGPL-3.0. Runtime build recipe from dsh-Go (AGPL-3.0). Bot team semantics from DS-Bot (Apache-2.0). Icons from Lucide (ISC).</string>
+    <string name="settings_privacy">Privacy &amp; sharing</string>
 </resources>
+
+
 
 
 

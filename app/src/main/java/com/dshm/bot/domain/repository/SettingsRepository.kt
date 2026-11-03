@@ -1,6 +1,9 @@
 package com.dshm.bot.domain.repository
 
 import com.dshm.bot.domain.model.AppLanguage
+import com.dshm.bot.domain.model.InterfaceMode
+import com.dshm.bot.domain.model.VoiceMode
+import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.domain.model.ChatFontSize
 import com.dshm.bot.domain.model.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -18,4 +21,21 @@ interface SettingsRepository {
     fun observeLanguage(): Flow<AppLanguage>
 
     fun setLanguage(language: AppLanguage)
+
+    fun observeInterfaceMode(): Flow<InterfaceMode>
+
+    fun setInterfaceMode(mode: InterfaceMode)
+
+    fun observeNotificationsEnabled(): Flow<Boolean>
+
+    fun setNotificationsEnabled(enabled: Boolean)
+
+    fun observeVoiceMode(): Flow<VoiceMode>
+
+    fun setVoiceMode(mode: VoiceMode)
+
+    fun observePerformanceMode(): Flow<PerformanceMode>
+
+    fun setPerformanceMode(mode: PerformanceMode)
 }
+

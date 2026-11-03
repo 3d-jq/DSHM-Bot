@@ -63,6 +63,7 @@ fun SettingsScreen(
     onOpenAppearance: () -> Unit,
     onOpenChatFont: () -> Unit,
     onOpenLanguage: () -> Unit,
+    onOpenPage: (SettingsPageId) -> Unit = {},
     onOpenAccount: () -> Unit,
     accountName: String? = null,
     accountBalance: String? = null,
@@ -133,17 +134,17 @@ fun SettingsScreen(
 
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_ai)) {
-                        SettingsRow(R.drawable.ic_lucide_sparkles, stringResource(R.string.settings_model), stringResource(R.string.settings_value_not_set), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_shield, stringResource(R.string.settings_permission), stringResource(R.string.settings_value_default), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_palette, stringResource(R.string.settings_personalization), stringResource(R.string.settings_value_not_set), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_sparkles, stringResource(R.string.settings_model), stringResource(R.string.settings_value_not_set), { onOpenPage(SettingsPageId.MODEL) })
+                        SettingsRow(R.drawable.ic_lucide_shield, stringResource(R.string.settings_permission), stringResource(R.string.settings_value_default), { onOpenPage(SettingsPageId.PERMISSION) })
+                        SettingsRow(R.drawable.ic_lucide_palette, stringResource(R.string.settings_personalization), stringResource(R.string.settings_value_not_set), { onOpenPage(SettingsPageId.PERSONALIZATION) })
                     }
                 }
 
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_capability)) {
-                        SettingsRow(R.drawable.ic_lucide_smartphone, stringResource(R.string.settings_phone_control), stringResource(R.string.settings_value_off), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_search, stringResource(R.string.settings_web_search), stringResource(R.string.settings_value_not_configured), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_puzzle, stringResource(R.string.settings_plugins), stringResource(R.string.settings_value_plugins_count, 0), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_smartphone, stringResource(R.string.settings_phone_control), stringResource(R.string.settings_value_off), { onOpenPage(SettingsPageId.PHONE_CONTROL) })
+                        SettingsRow(R.drawable.ic_lucide_search, stringResource(R.string.settings_web_search), stringResource(R.string.settings_value_not_configured), { onOpenPage(SettingsPageId.WEB_SEARCH) })
+                        SettingsRow(R.drawable.ic_lucide_puzzle, stringResource(R.string.settings_plugins), stringResource(R.string.settings_value_plugins_count, 0), { onOpenPage(SettingsPageId.PLUGINS) })
                     }
                 }
 
@@ -156,25 +157,26 @@ fun SettingsScreen(
                             onClick = onOpenAppearance,
                         )
                         SettingsRow(R.drawable.ic_lucide_type, stringResource(R.string.settings_chat_font), chatFontLabel, onOpenChatFont)
-                        SettingsRow(R.drawable.ic_lucide_paw_print, stringResource(R.string.settings_pets), stringResource(R.string.settings_value_not_set), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_paw_print, stringResource(R.string.settings_pets), stringResource(R.string.settings_value_not_set), { onOpenPage(SettingsPageId.PETS) })
                     }
                 }
 
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_general)) {
-                        SettingsRow(R.drawable.ic_lucide_layout_dashboard, stringResource(R.string.settings_interface), stringResource(R.string.settings_value_native), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_layout_dashboard, stringResource(R.string.settings_interface), interfaceLabel(uiState.interfaceMode), { onOpenPage(SettingsPageId.INTERFACE) })
                         SettingsRow(R.drawable.ic_lucide_languages, stringResource(R.string.settings_language), languageLabel, onOpenLanguage)
-                        SettingsRow(R.drawable.ic_lucide_bell, stringResource(R.string.settings_notifications), stringResource(R.string.settings_value_on), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_mic, stringResource(R.string.settings_voice), stringResource(R.string.settings_value_auto), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_gauge, stringResource(R.string.settings_performance), stringResource(R.string.settings_value_auto), comingSoonRow)
-                        SettingsRow(R.drawable.ic_lucide_battery_charging, stringResource(R.string.settings_background_running), stringResource(R.string.settings_value_needs_setup), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_bell, stringResource(R.string.settings_notifications), stringResource(if (uiState.notificationsEnabled) R.string.settings_value_on else R.string.settings_value_off), { onOpenPage(SettingsPageId.NOTIFICATIONS) })
+                        SettingsRow(R.drawable.ic_lucide_mic, stringResource(R.string.settings_voice), voiceLabel(uiState.voiceMode), { onOpenPage(SettingsPageId.VOICE) })
+                        SettingsRow(R.drawable.ic_lucide_gauge, stringResource(R.string.settings_performance), performanceLabel(uiState.performanceMode), { onOpenPage(SettingsPageId.PERFORMANCE) })
+                        SettingsRow(R.drawable.ic_lucide_battery_charging, stringResource(R.string.settings_background_running), stringResource(R.string.settings_value_needs_setup), { onOpenPage(SettingsPageId.BACKGROUND) })
+                        SettingsRow(R.drawable.ic_lucide_shield, stringResource(R.string.settings_privacy), null, { onOpenPage(SettingsPageId.PRIVACY) })
                     }
                 }
 
                 item {
                     SettingsGroup(stringResource(R.string.settings_group_host)) {
                         SettingsRow(R.drawable.ic_lucide_server, stringResource(R.string.settings_local_engine), engineStatus, onOpenEngine)
-                        SettingsRow(R.drawable.ic_lucide_sliders_horizontal, stringResource(R.string.settings_engine_params), stringResource(R.string.settings_value_default), comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_sliders_horizontal, stringResource(R.string.settings_engine_params), stringResource(R.string.settings_value_default), { onOpenPage(SettingsPageId.PERMISSION) })
                     }
                 }
 
@@ -182,7 +184,7 @@ fun SettingsScreen(
                     SettingsGroup(stringResource(R.string.settings_group_about)) {
                         SettingsRow(R.drawable.ic_lucide_info, stringResource(R.string.settings_version), BuildConfig.VERSION_NAME, null)
                         SettingsRow(R.drawable.ic_lucide_bot, stringResource(R.string.settings_dsh_version), stringResource(R.string.settings_value_not_linked), null)
-                        SettingsRow(R.drawable.ic_lucide_file_text, stringResource(R.string.settings_licenses), null, comingSoonRow)
+                        SettingsRow(R.drawable.ic_lucide_file_text, stringResource(R.string.settings_licenses), null, { onOpenPage(SettingsPageId.LICENSES) })
                     }
                 }
             }
@@ -417,6 +419,8 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 
 /** 测试用 tag：设置列表（用于滚动到指定行）。 */
 const val SETTINGS_LIST_TAG = "settings_list"
+
+
 
 
 

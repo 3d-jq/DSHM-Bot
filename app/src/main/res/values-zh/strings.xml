@@ -143,7 +143,19 @@
     <string name="api_key_clear">清除</string>
     <string name="api_key_save">保存</string>
     <string name="api_key_hint">粘贴 DeepSeek API Key。它加密保存在本机，并在启动本机引擎时注入。</string>
+    <string name="interface_web">网页</string>
+    <string name="voice_system">系统</string>
+    <string name="voice_engine">引擎</string>
+    <string name="performance_full">完整</string>
+    <string name="performance_light">轻量</string>
+    <string name="info_engine_required">连接本机引擎后可配置。</string>
+    <string name="info_privacy">对话与凭证都保存在本机，除非你在 DSH 里主动开启，否则不会上传。</string>
+    <string name="info_pets">宠物功能将按 dsh-Go 后续移植。</string>
+    <string name="info_licenses">DSHM Bot 以 AGPL-3.0 开源。运行时构建配方来自 dsh-Go（AGPL-3.0），Bot 团队语义参考 DS-Bot（Apache-2.0），图标来自 Lucide（ISC）。</string>
+    <string name="settings_privacy">隐私与分享</string>
 </resources>
+
+
 
 
 

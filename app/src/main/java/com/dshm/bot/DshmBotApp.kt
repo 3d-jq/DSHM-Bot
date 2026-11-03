@@ -42,6 +42,17 @@ import com.dshm.bot.ui.settings.chatFontLabel
 import com.dshm.bot.ui.settings.languageLabel
 import com.dshm.bot.ui.settings.LanguageScreen
 import com.dshm.bot.ui.settings.SettingsScreen
+import com.dshm.bot.ui.settings.SettingsPageId
+import com.dshm.bot.ui.settings.OptionSettingsPage
+import com.dshm.bot.ui.settings.InfoSettingsPage
+import com.dshm.bot.ui.settings.interfaceLabel
+import com.dshm.bot.ui.settings.voiceLabel
+import com.dshm.bot.ui.settings.performanceLabel
+import com.dshm.bot.ui.settings.settingsPageTitle
+import com.dshm.bot.ui.settings.settingsPageInfo
+import com.dshm.bot.domain.model.InterfaceMode
+import com.dshm.bot.domain.model.VoiceMode
+import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.ui.settings.SettingsViewModel
 
 private const val SCREEN_HOME = "home"
@@ -53,12 +64,13 @@ private const val SCREEN_APPEARANCE = "appearance"
 private const val SCREEN_CHAT_FONT = "chat-font"
 private const val SCREEN_LANGUAGE = "language"
 private const val SCREEN_ACCOUNT = "account"
+private const val SCREEN_SETTINGS_PAGE = "settings-page"
 private const val CHAT_PREFIX = "chat:"
 
 private fun depthOf(key: String): Int = when {
     key == SCREEN_HOME || key == SCREEN_ONBOARDING -> 0
     key == SCREEN_SEARCH || key == SCREEN_SETTINGS -> 1
-    key == SCREEN_ENGINE || key == SCREEN_APPEARANCE || key == SCREEN_CHAT_FONT || key == SCREEN_LANGUAGE || key == SCREEN_ACCOUNT || key.startsWith(CHAT_PREFIX) -> 2
+    key == SCREEN_ENGINE || key == SCREEN_APPEARANCE || key == SCREEN_CHAT_FONT || key == SCREEN_LANGUAGE || key == SCREEN_ACCOUNT || key == SCREEN_SETTINGS_PAGE || key.startsWith(CHAT_PREFIX) -> 2
     else -> 1
 }
 
@@ -101,6 +113,7 @@ fun DshmBotApp(
     var chatFontOpen by rememberSaveable { mutableStateOf(false) }
     var languageOpen by rememberSaveable { mutableStateOf(false) }
     var accountOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsPageName by rememberSaveable { mutableStateOf<String?>(null) }
     // 已装运行时（含已停止）就不再走开屏引导：启动 App 直接进主界面。
     var onboardingDone by rememberSaveable { mutableStateOf(engineState !is RuntimeState.NotInstalled) }
 
@@ -134,6 +147,7 @@ fun DshmBotApp(
         chatFontOpen -> SCREEN_CHAT_FONT
         languageOpen -> SCREEN_LANGUAGE
         accountOpen -> SCREEN_ACCOUNT
+        settingsPageName != null -> SCREEN_SETTINGS_PAGE
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -153,13 +167,14 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsPageName != null || !onboardingDone) {
         when {
             !onboardingDone -> Unit
             engineOpen -> engineOpen = false
             appearanceOpen -> appearanceOpen = false
             chatFontOpen -> chatFontOpen = false
             languageOpen -> languageOpen = false
+            settingsPageName != null -> settingsPageName = null
             accountOpen -> accountOpen = false
             openBotId != null -> openBotId = null
             settingsOpen -> settingsOpen = false
@@ -245,6 +260,66 @@ fun DshmBotApp(
                 onReset = engineViewModel::reset,
             )
 
+            key == SCREEN_SETTINGS_PAGE -> {
+                val page = settingsPageName?.let { name ->
+                    runCatching { SettingsPageId.valueOf(name) }.getOrNull()
+                }
+                val close = { settingsPageName = null }
+                when (page) {
+                    SettingsPageId.INTERFACE -> OptionSettingsPage(
+                        title = stringResource(R.string.settings_interface),
+                        options = listOf(
+                            stringResource(R.string.settings_value_native),
+                            stringResource(R.string.interface_web),
+                        ),
+                        selectedIndex = settingsUiState.interfaceMode.ordinal,
+                        onPick = { settingsViewModel.setInterfaceMode(InterfaceMode.entries[it]) },
+                        onBack = close,
+                    )
+
+                    SettingsPageId.NOTIFICATIONS -> OptionSettingsPage(
+                        title = stringResource(R.string.settings_notifications),
+                        options = listOf(
+                            stringResource(R.string.settings_value_on),
+                            stringResource(R.string.settings_value_off),
+                        ),
+                        selectedIndex = if (settingsUiState.notificationsEnabled) 0 else 1,
+                        onPick = { settingsViewModel.setNotificationsEnabled(it == 0) },
+                        onBack = close,
+                    )
+
+                    SettingsPageId.VOICE -> OptionSettingsPage(
+                        title = stringResource(R.string.settings_voice),
+                        options = listOf(
+                            stringResource(R.string.settings_value_auto),
+                            stringResource(R.string.voice_system),
+                            stringResource(R.string.voice_engine),
+                        ),
+                        selectedIndex = settingsUiState.voiceMode.ordinal,
+                        onPick = { settingsViewModel.setVoiceMode(VoiceMode.entries[it]) },
+                        onBack = close,
+                    )
+
+                    SettingsPageId.PERFORMANCE -> OptionSettingsPage(
+                        title = stringResource(R.string.settings_performance),
+                        options = listOf(
+                            stringResource(R.string.settings_value_auto),
+                            stringResource(R.string.performance_full),
+                            stringResource(R.string.performance_light),
+                        ),
+                        selectedIndex = settingsUiState.performanceMode.ordinal,
+                        onPick = { settingsViewModel.setPerformanceMode(PerformanceMode.entries[it]) },
+                        onBack = close,
+                    )
+
+                    else -> InfoSettingsPage(
+                        title = settingsPageTitle(page),
+                        lines = settingsPageInfo(page, engineViewModel.version),
+                        onBack = close,
+                    )
+                }
+            }
+
             key == SCREEN_SETTINGS -> SettingsScreen(
                 uiState = settingsUiState,
                 onBack = { settingsOpen = false },
@@ -253,6 +328,7 @@ fun DshmBotApp(
                 onOpenAppearance = { appearanceOpen = true },
                 onOpenChatFont = { chatFontOpen = true },
                 onOpenLanguage = { languageOpen = true },
+                onOpenPage = { settingsPageName = it.name },
                 onOpenAccount = { accountOpen = true },
                 accountName = accountUi.name,
                 accountBalance = accountUi.balance,
@@ -309,6 +385,10 @@ fun DshmBotApp(
         }
     }
 }
+
+
+
+
 
 
 
