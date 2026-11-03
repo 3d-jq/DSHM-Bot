@@ -36,7 +36,7 @@ fun FloatingIconButton(
                 spotColor = Dshm.colors.shadow,
             )
             .clip(CircleShape)
-            .background(Dshm.colors.background)
+            .background(Dshm.colors.surface)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

@@ -5,7 +5,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.dshm.bot.data.demo.DemoBotRepository
+import com.dshm.bot.data.remote.DsBotRepository
+import com.dshm.bot.data.remote.DshClient
+import com.dshm.bot.data.remote.EmptyBotRepository
+import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.domain.model.BotInks
 import com.dshm.bot.domain.model.BotSummary
 import com.dshm.bot.domain.repository.BotRepository
@@ -19,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -26,12 +30,14 @@ import kotlinx.coroutines.launch
  * UI 只消费 [uiState]。搜索/排序规则集中在这里，便于单测。
  */
 class HomeViewModel(
-    private val repository: BotRepository,
+    repository: BotRepository = EmptyBotRepository(),
     clock: Clock = Clock.systemDefaultZone(),
     zoneId: ZoneId = ZoneId.systemDefault(),
     locale: Locale = Locale.getDefault(),
 ) : ViewModel() {
 
+    private var repository: BotRepository = repository
+    private var collectJob: Job? = null
     private val bots = MutableStateFlow<List<BotSummary>>(emptyList())
     private val query = MutableStateFlow("")
     private val loading = MutableStateFlow(true)
@@ -53,7 +59,21 @@ class HomeViewModel(
     )
 
     init {
-        viewModelScope.launch {
+        start(repository)
+    }
+
+    /** 本机引擎端点变化时切换到真实 DS Bot 数据源；null 表示引擎未运行。 */
+    fun setEndpoint(endpoint: RuntimeEndpoint?) {
+        start(if (endpoint == null) EmptyBotRepository() else DsBotRepository(DshClient(endpoint)))
+    }
+
+    private fun start(source: BotRepository) {
+        collectJob?.cancel()
+        repository = source
+        bots.value = emptyList()
+        loading.value = true
+        failed.value = false
+        collectJob = viewModelScope.launch {
             repository.observeBots()
                 .catch {
                     failed.value = true
@@ -96,12 +116,14 @@ class HomeViewModel(
                     pinned = bot.pinned,
                     isGroup = bot.isGroup,
                     unreadCount = bot.unreadCount,
+                    avatarImage = bot.avatarImage,
+                    avatarShape = bot.avatarShape,
                 )
             }
     }
 
     companion object {
-        fun factory(repository: BotRepository = DemoBotRepository()): ViewModelProvider.Factory = viewModelFactory {
+        fun factory(repository: BotRepository = EmptyBotRepository()): ViewModelProvider.Factory = viewModelFactory {
             initializer { HomeViewModel(repository) }
         }
     }

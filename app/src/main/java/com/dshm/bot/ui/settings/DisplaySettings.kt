@@ -1,24 +1,10 @@
 package com.dshm.bot.ui.settings
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
-import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ChatFontSize
 
@@ -29,17 +15,21 @@ fun ChatFontScreen(
     onSelect: (ChatFontSize) -> Unit,
     onBack: () -> Unit,
 ) {
-    SettingsPageScaffold(title = stringResource(R.string.settings_chat_font), onBack = onBack) {
-        OptionCard {
-            ChatFontSize.entries.forEach { size ->
-                OptionRow(
-                    label = chatFontLabel(size),
-                    selected = size == current,
-                    onClick = { onSelect(size) },
-                )
+    SettingsPage(title = stringResource(R.string.settings_chat_font), onBack = onBack) {
+        item {
+            SettingsSection {
+                ChatFontSize.entries.forEachIndexed { index, size ->
+                    if (index > 0) SettingsRowDivider()
+                    SettingsRow(
+                        title = chatFontLabel(size),
+                        trailing = {
+                            RadioButton(selected = size == current, onClick = { onSelect(size) })
+                        },
+                        onClick = { onSelect(size) },
+                    )
+                }
             }
         }
-        Spacer(Modifier.padding(Dshm.spacing.xs))
     }
 }
 
@@ -50,45 +40,21 @@ fun LanguageScreen(
     onSelect: (AppLanguage) -> Unit,
     onBack: () -> Unit,
 ) {
-    SettingsPageScaffold(title = stringResource(R.string.settings_language), onBack = onBack) {
-        OptionCard {
-            AppLanguage.entries.forEach { language ->
-                OptionRow(
-                    label = languageLabel(language),
-                    selected = language == current,
-                    onClick = { onSelect(language) },
-                )
+    SettingsPage(title = stringResource(R.string.settings_language), onBack = onBack) {
+        item {
+            SettingsSection {
+                AppLanguage.entries.forEachIndexed { index, language ->
+                    if (index > 0) SettingsRowDivider()
+                    SettingsRow(
+                        title = languageLabel(language),
+                        trailing = {
+                            RadioButton(selected = language == current, onClick = { onSelect(language) })
+                        },
+                        onClick = { onSelect(language) },
+                    )
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun OptionCard(content: @Composable () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Dshm.radius.lg))
-            .background(Dshm.colors.surface)
-            .padding(vertical = Dshm.spacing.xs),
-        verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
-    ) {
-        content()
-    }
-}
-
-@Composable
-private fun OptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Spacer(Modifier.width(Dshm.spacing.sm))
-        Text(text = label, style = Dshm.typography.rowTitle, color = Dshm.colors.textPrimary)
     }
 }
 

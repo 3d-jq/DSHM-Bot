@@ -18,6 +18,8 @@ data class DshmSpacing(
     val xxxl: Dp = 32.dp,
     val topBarHeight: Dp = 60.dp,
     val avatar: Dp = 44.dp,
+    /** 设置首页账号卡头像。 */
+    val settingsAvatar: Dp = 56.dp,
     val avatarGlyph: Dp = 20.dp,
     val icon: Dp = 24.dp,
     val topBarIcon: Dp = 20.dp,

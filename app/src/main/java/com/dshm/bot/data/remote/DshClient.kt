@@ -1,7 +1,11 @@
 package com.dshm.bot.data.remote
 
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -10,6 +14,16 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
+
+/** DS Bot SSE 的一条事件（`event:` + `data:`）。 */
+data class BotFeedEvent(val event: String, val data: String)
+
+/** 引擎 RPC 的业务错误（HTTP 200 + result.ok=false）。 */
+class DshRpcException(
+    val code: String?,
+    message: String,
+    val details: JSONObject?,
+) : Exception(message)
 
 /**
  * 本机 DSH 的最小客户端：
@@ -41,45 +55,87 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
         }
     }
 
-    /** 调 `/api/bot`；[body] 是 JSON 对象（如 {"type":"state"}）。 */
-    suspend fun bot(body: JSONObject): JSONObject = withContext(Dispatchers.IO) {
-        val auth = cookie ?: login()
-        val connection = (URL(endpoint.baseUrl + "api/bot").openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Cookie", auth)
-        }
-        try {
-            connection.outputStream.use { it.write(body.toString().toByteArray()) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
-            require(code in 200..299) { "DSH 请求失败：HTTP $code $text" }
-            JSONObject(text)
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    /** 订阅 Bot 事件流（SSE 的 `data:` 行）。 */
-    fun feed(): Flow<String> = flow {
-        val auth = cookie ?: login()
-        val connection = (URL(endpoint.baseUrl + "api/bot/feed").openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 0
-            setRequestProperty("Accept", "text/event-stream")
-            setRequestProperty("Cookie", auth)
-        }
-        try {
-            connection.inputStream.bufferedReader().useLines { lines ->
-                lines.filter { it.startsWith("data:") }
-                    .forEach { emit(it.removePrefix("data:").trim()) }
+    /**
+     * 调 `/api/bot`：body 是 `{endpoint, payload}`，响应是 `{ok, value|error}`。
+     * 与 dsh_client 的 DsBot API 一致。
+     */
+    suspend fun bot(endpoint: String, payload: JSONObject = JSONObject()): JSONObject =
+        withContext(Dispatchers.IO) {
+            val auth = cookie ?: login()
+            val body = JSONObject()
+                .put("endpoint", endpoint)
+                .put("payload", payload)
+            val connection = (URL(this@DshClient.endpoint.baseUrl + "api/bot").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Cookie", auth)
             }
-        } finally {
-            connection.disconnect()
+            try {
+                connection.outputStream.use { it.write(body.toString().toByteArray()) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+                require(code in 200..299) { "DS Bot 请求失败：HTTP $code $text" }
+                val response = JSONObject(text)
+                if (!response.optBoolean("ok", false)) {
+                    val error = response.optJSONObject("error")
+                    throw DshRpcException(
+                        code = error?.anyOrNull("code") as? String,
+                        message = error?.anyOrNull("message") as? String ?: "DS Bot 请求失败",
+                        details = error?.optJSONObject("details"),
+                    )
+                }
+                response.optJSONObject("value") ?: JSONObject()
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+    /** 订阅 DS Bot SSE；断线自动重连，保留 event 名。 */
+    fun feed(): Flow<BotFeedEvent> = flow {
+        while (currentCoroutineContext().isActive) {
+            try {
+                val auth = cookie ?: login()
+                val connection = (URL(endpoint.baseUrl + "api/bot/feed").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15_000
+                    readTimeout = 0
+                    setRequestProperty("Accept", "text/event-stream")
+                    setRequestProperty("Cookie", auth)
+                }
+                try {
+                    connection.inputStream.bufferedReader().use { reader ->
+                        var event = "message"
+                        val data = StringBuilder()
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            when {
+                                line.startsWith("event:") -> event = line.removePrefix("event:").trim()
+                                line.startsWith("data:") -> {
+                                    if (data.isNotEmpty()) data.append("\n")
+                                    data.append(line.removePrefix("data:").trim())
+                                }
+                                line.isBlank() -> {
+                                    if (data.isNotEmpty()) {
+                                        emit(BotFeedEvent(event, data.toString()))
+                                        data.clear()
+                                    }
+                                    event = "message"
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                cookie = null
+                delay(2_000)
+            }
         }
     }.flowOn(Dispatchers.IO)
 
@@ -120,7 +176,11 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
             val result = response.optJSONObject("result") ?: error("DSH RPC $method 缺少 result")
             if (!result.optBoolean("ok", false)) {
                 val error = result.optJSONObject("error")
-                error("DSH RPC $method 失败：${error?.optString("message") ?: result}")
+                throw DshRpcException(
+                    code = error?.anyOrNull("code") as? String,
+                    message = error?.anyOrNull("message") as? String ?: "DSH RPC $method 失败：$result",
+                    details = error?.optJSONObject("details"),
+                )
             }
             result.opt("value")
         } finally {

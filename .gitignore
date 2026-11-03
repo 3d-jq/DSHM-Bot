@@ -23,10 +23,10 @@ key.properties
 *.class
 
 # 参考基线仓库（只读放在本地，不属于本项目）
-DS-Bot/
-DS-Bot-mobile-api/
-dsh-Go/
-DSHM-Bot-ref/
+/DS-Bot/
+/DS-Bot-mobile-api/
+/dsh-Go/
+/DSHM-Bot-ref/
 
 # Python
 __pycache__/

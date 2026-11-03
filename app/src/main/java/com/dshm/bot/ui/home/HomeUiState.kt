@@ -13,6 +13,8 @@ data class ChatRowUi(
     val pinned: Boolean,
     val isGroup: Boolean,
     val unreadCount: Int,
+    val avatarImage: String? = null,
+    val avatarShape: String? = null,
 )
 
 /** 主界面状态：单一数据源，UI 只渲染，不判断业务。 */

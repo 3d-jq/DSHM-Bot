@@ -13,6 +13,8 @@
 | [proot](https://proot-me.github.io/) | GPL-2.0 | 本机运行时用它模拟 rootfs；`app/jniLibs/arm64-v8a/libproot*.so` 及 `app/src/main/assets/runtime/licenses/proot-COPYING.txt` |
 | [talloc](https://talloc.samba.org/) | LGPL-3.0-or-later | proot 依赖；`libtalloc.so` 与 `licenses/libtalloc-notice.txt` |
 | [libandroid-shmem](https://github.com/termux/libandroid-shmem) | Apache-2.0 | proot 依赖；`libandroid-shmem.so` 与版权文件 |
+| [org.json](https://github.com/stleary/JSON-java) | Public Domain | 仅 JVM 单元测试使用；`app/libs/json-20231013.jar`（Android 运行时用系统自带实现） |
+| dsh-Go 宠物美术（Deepy 小鲸鱼 / 鲸娘） | 作者授权 dsh-Go 使用（见 dsh-Go `app/assets/pets/*/pack.json`） | 宠物设置与 App 内浮层；`app/src/main/res/drawable-nodpi/pet_*_idle.png` 取自 dsh-Go |
 
 ## 说明
 

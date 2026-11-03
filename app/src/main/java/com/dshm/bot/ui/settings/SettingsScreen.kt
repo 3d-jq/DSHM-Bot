@@ -1,69 +1,54 @@
 package com.dshm.bot.ui.settings
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import coil.compose.AsyncImage
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.dshm.bot.BuildConfig
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ThemeMode
-import com.dshm.bot.ui.components.FloatingIconButton
-import kotlinx.coroutines.launch
 
 /**
- * 设置页（参照 dsh-Go 的信息架构：按意图分组、每行带图标且右侧显示当前值）。
- * 目前可用的真实设置是「主题」；其余行为 DSH 接入后的占位入口。
+ * 设置首页（对齐 dsh-Go 设置 IA）：
+ * 搜索、账号概览，然后 AI / 能力 / 外观 / 通用 / 主机 / 关于六组。
+ * 每一行的右侧值都来自真实状态，不再有写死的占位文案。
  */
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
+    engineSettings: EngineSettingsViewModel,
     onBack: () -> Unit,
-    onThemeChange: (ThemeMode) -> Unit,
     onOpenEngine: () -> Unit,
-    onOpenAppearance: () -> Unit,
+    onThemeChange: (ThemeMode) -> Unit,
     onOpenChatFont: () -> Unit,
-    onOpenLanguage: () -> Unit,
-    onOpenPage: (SettingsPageId) -> Unit = {},
+    onLanguageChange: (AppLanguage) -> Unit,
+    onOpenPage: (SettingsPageId) -> Unit,
     onOpenAccount: () -> Unit,
     accountName: String? = null,
     accountBalance: String? = null,
@@ -71,199 +56,343 @@ fun SettingsScreen(
     chatFontLabel: String,
     languageLabel: String,
     engineStatus: String,
-    modifier: Modifier = Modifier,
+    dshVersion: String? = null,
+    reduceMotion: Boolean = false,
 ) {
-    var showThemeDialog by remember { mutableStateOf(false) }
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val comingSoon = stringResource(R.string.settings_coming_soon)
+    val context = LocalContext.current
+    val engineState by engineSettings.ui.collectAsStateWithLifecycle()
+    val language = settingsLanguage()
+    val annotations = rememberAgentsSummary(context, engineState.description?.namespaces?.size)
+    val providers = engineSettings.providers()
+    val permission = engineSettings.permissionDefault()
+    val permissionName = permission?.let { SettingsCopy.permissionLabel(it, language) }
+    val webApi = engineState.description?.namespace("web")?.valueOf(listOf("searchProvider")) == "deepseek-search-api"
+    val webServed = engineState.description?.served("web") == true
+    val pluginCount = engineState.bundles.takeIf { it.isNotEmpty() }?.count { it.installed }
+    val batteryExempt = rememberBatteryExempt()
+    val notificationsAllowed = rememberNotificationsAllowed()
+    val accessibilityEnabled = rememberAccessibilityServiceEnabled()
+    var showThemeMenu by remember { mutableStateOf(false) }
+    var showLanguageMenu by remember { mutableStateOf(false) }
+    var themeAnchorHeight by remember { mutableStateOf(0) }
+    var languageAnchorHeight by remember { mutableStateOf(0) }
 
-    val comingSoonRow: () -> Unit = {
-        scope.launch { snackbarHostState.showSnackbar(comingSoon) }
+
+    val customRoutes = providers.profiles.map { it.route }.toSet()
+    val providerCount = providers.profiles.size + engineState.listedProviders.count { it.id !in customRoutes }
+    val modelValue = if (providerCount == 0) null else {
+        stringResource(R.string.settings_model_channels, providerCount)
+    }
+    val personalizationValue = annotations ?: stringResource(R.string.settings_value_not_set)
+    val webValue = when {
+        !webServed -> null
+        webApi -> stringResource(R.string.settings_web_search_api_short)
+        else -> stringResource(R.string.settings_value_default)
+    }
+    val pluginValue = pluginCount?.let { stringResource(R.string.settings_plugin_count, it) }
+    val phoneValue = when {
+        !accessibilityEnabled -> stringResource(R.string.phone_control_service_disabled)
+        uiState.phoneControlEnabled -> stringResource(R.string.settings_value_on)
+        else -> stringResource(R.string.settings_value_off)
+    }
+    val notificationValue = when {
+        !uiState.notificationsEnabled -> stringResource(R.string.settings_value_off)
+        notificationsAllowed == false -> stringResource(R.string.settings_notifications_denied)
+        notificationsAllowed == true -> stringResource(R.string.settings_value_on)
+        else -> null
+    }
+    val backgroundValue = when (batteryExempt) {
+        true -> stringResource(R.string.settings_background_allowed)
+        false -> stringResource(R.string.settings_background_needs_setup)
+        null -> null
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = Dshm.colors.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                FloatingIconButton(
-                    icon = R.drawable.ic_lucide_arrow_left,
-                    contentDescription = stringResource(R.string.action_back),
-                    onClick = onBack,
+    SettingsPage(
+        title = stringResource(R.string.settings_title),
+        onBack = onBack,
+    ) {
+        item {
+            AccountOverviewCard(
+                onClick = onOpenAccount,
+                name = accountName,
+                balance = accountBalance,
+                avatarUrl = accountAvatarUrl,
+                engineStatus = engineStatus,
+            )
+        }
+
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_model),
+                    icon = R.drawable.ic_lucide_sparkles,
+                    value = modelValue,
+                    onClick = { onOpenPage(SettingsPageId.MODEL) },
                 )
-                Spacer(Modifier.width(Dshm.spacing.sm))
-                Text(
-                    text = stringResource(R.string.settings_title),
-                    style = Dshm.typography.pageTitle,
-                    color = Dshm.colors.textPrimary,
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_permission),
+                    icon = R.drawable.ic_lucide_shield,
+                    value = permissionName,
+                    onClick = { onOpenPage(SettingsPageId.PERMISSION) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_personalization),
+                    icon = R.drawable.ic_lucide_palette,
+                    value = personalizationValue,
+                    onClick = { onOpenPage(SettingsPageId.PERSONALIZATION) },
                 )
             }
+        }
 
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag(SETTINGS_LIST_TAG),
-                contentPadding = PaddingValues(
-                    start = Dshm.spacing.lg,
-                    end = Dshm.spacing.lg,
-                    top = Dshm.spacing.sm,
-                    bottom = Dshm.spacing.xxl,
-                ),
-                verticalArrangement = Arrangement.spacedBy(Dshm.spacing.lg),
-            ) {
-                item {
-                    OverviewCard(
-                        onClick = onOpenAccount,
-                        accountName = accountName,
-                        accountBalance = accountBalance,
-                        accountAvatarUrl = accountAvatarUrl,
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_web_search),
+                    icon = R.drawable.ic_lucide_search,
+                    value = webValue,
+                    onClick = { onOpenPage(SettingsPageId.WEB_SEARCH) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_phone_control),
+                    icon = R.drawable.ic_lucide_smartphone,
+                    value = phoneValue,
+                    valueColor = if (!accessibilityEnabled) Dshm.colors.textTertiary else null,
+                    onClick = { onOpenPage(SettingsPageId.PHONE_CONTROL) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_plugins),
+                    icon = R.drawable.ic_lucide_puzzle,
+                    value = pluginValue,
+                    onClick = { onOpenPage(SettingsPageId.PLUGINS) },
+                )
+            }
+        }
+
+        item {
+            SettingsSection {
+                Box(Modifier.onGloballyPositioned { themeAnchorHeight = it.size.height }) {
+                    SettingsRow(
+                        title = stringResource(R.string.settings_group_appearance),
+                        icon = R.drawable.ic_lucide_palette,
+                        value = themeLabel(uiState.themeMode),
+                        trailing = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_lucide_chevrons_up_down),
+                                contentDescription = null,
+                                tint = Dshm.colors.textTertiary,
+                                modifier = Modifier.size(Dshm.spacing.topBarIcon),
+                            )
+                        },
+                        onClick = { showThemeMenu = true },
                     )
-                }
-
-                item {
-                    SettingsGroup(stringResource(R.string.settings_group_ai)) {
-                        SettingsRow(R.drawable.ic_lucide_sparkles, stringResource(R.string.settings_model), stringResource(R.string.settings_value_not_set), { onOpenPage(SettingsPageId.MODEL) })
-                        SettingsRow(R.drawable.ic_lucide_shield, stringResource(R.string.settings_permission), stringResource(R.string.settings_value_default), { onOpenPage(SettingsPageId.PERMISSION) })
-                        SettingsRow(R.drawable.ic_lucide_palette, stringResource(R.string.settings_personalization), stringResource(R.string.settings_value_not_set), { onOpenPage(SettingsPageId.PERSONALIZATION) })
+                    SettingsAnchoredMenu(
+                        expanded = showThemeMenu,
+                        onDismiss = { showThemeMenu = false },
+                        anchorHeightPx = themeAnchorHeight,
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            SettingsMenuItem(
+                                text = themeLabel(mode),
+                                selected = mode == uiState.themeMode,
+                                onClick = {
+                                    onThemeChange(mode)
+                                    showThemeMenu = false
+                                },
+                            )
+                        }
                     }
                 }
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_chat_font),
+                    icon = R.drawable.ic_lucide_type,
+                    value = chatFontLabel,
+                    onClick = onOpenChatFont,
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_pets),
+                    icon = R.drawable.ic_lucide_paw_print,
+                    value = if (uiState.petEnabled) {
+                        SettingsCopy.petLabel(uiState.petStyle, language)
+                    } else {
+                        stringResource(R.string.settings_value_off)
+                    },
+                    onClick = { onOpenPage(SettingsPageId.PETS) },
+                )
+            }
+        }
 
-                item {
-                    SettingsGroup(stringResource(R.string.settings_group_capability)) {
-                        SettingsRow(R.drawable.ic_lucide_smartphone, stringResource(R.string.settings_phone_control), stringResource(R.string.settings_value_off), { onOpenPage(SettingsPageId.PHONE_CONTROL) })
-                        SettingsRow(R.drawable.ic_lucide_search, stringResource(R.string.settings_web_search), stringResource(R.string.settings_value_not_configured), { onOpenPage(SettingsPageId.WEB_SEARCH) })
-                        SettingsRow(R.drawable.ic_lucide_puzzle, stringResource(R.string.settings_plugins), stringResource(R.string.settings_value_plugins_count, 0), { onOpenPage(SettingsPageId.PLUGINS) })
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_interface),
+                    icon = R.drawable.ic_lucide_layout_dashboard,
+                    value = interfaceLabel(uiState.interfaceMode),
+                    onClick = { onOpenPage(SettingsPageId.INTERFACE) },
+                )
+                SettingsRowDivider()
+                Box(Modifier.onGloballyPositioned { languageAnchorHeight = it.size.height }) {
+                    SettingsRow(
+                        title = stringResource(R.string.settings_language),
+                        icon = R.drawable.ic_lucide_languages,
+                        value = languageLabel,
+                        trailing = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_lucide_chevrons_up_down),
+                                contentDescription = null,
+                                tint = Dshm.colors.textTertiary,
+                                modifier = Modifier.size(Dshm.spacing.topBarIcon),
+                            )
+                        },
+                        onClick = { showLanguageMenu = true },
+                    )
+                    SettingsAnchoredMenu(
+                        expanded = showLanguageMenu,
+                        onDismiss = { showLanguageMenu = false },
+                        anchorHeightPx = languageAnchorHeight,
+                    ) {
+                        AppLanguage.entries.forEach { language ->
+                            SettingsMenuItem(
+                                text = languageLabel(language),
+                                selected = language == uiState.language,
+                                onClick = {
+                                    onLanguageChange(language)
+                                    showLanguageMenu = false
+                                },
+                            )
+                        }
                     }
                 }
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_notifications),
+                    icon = R.drawable.ic_lucide_bell,
+                    value = notificationValue,
+                    valueColor = if (notificationsAllowed == false) Dshm.colors.warning else null,
+                    onClick = { onOpenPage(SettingsPageId.NOTIFICATIONS) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_voice),
+                    icon = R.drawable.ic_lucide_mic,
+                    value = voiceLabel(uiState.voiceMode),
+                    onClick = { onOpenPage(SettingsPageId.VOICE) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_performance),
+                    icon = R.drawable.ic_lucide_gauge,
+                    value = performanceLabel(uiState.performanceMode),
+                    onClick = { onOpenPage(SettingsPageId.PERFORMANCE) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_background_running),
+                    icon = R.drawable.ic_lucide_battery_charging,
+                    value = backgroundValue,
+                    valueColor = if (batteryExempt == false) Dshm.colors.warning else null,
+                    onClick = { onOpenPage(SettingsPageId.BACKGROUND) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_privacy),
+                    icon = R.drawable.ic_lucide_shield,
+                    onClick = { onOpenPage(SettingsPageId.PRIVACY) },
+                )
+            }
+        }
 
-                item {
-                    SettingsGroup(stringResource(R.string.settings_group_appearance)) {
-                        SettingsRow(
-                            icon = R.drawable.ic_lucide_palette,
-                            title = stringResource(R.string.settings_theme),
-                            value = themeLabel(uiState.themeMode),
-                            onClick = onOpenAppearance,
-                        )
-                        SettingsRow(R.drawable.ic_lucide_type, stringResource(R.string.settings_chat_font), chatFontLabel, onOpenChatFont)
-                        SettingsRow(R.drawable.ic_lucide_paw_print, stringResource(R.string.settings_pets), stringResource(R.string.settings_value_not_set), { onOpenPage(SettingsPageId.PETS) })
-                    }
-                }
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_local_engine),
+                    icon = R.drawable.ic_lucide_server,
+                    value = engineStatus,
+                    onClick = onOpenEngine,
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_engine_params),
+                    icon = R.drawable.ic_lucide_sliders_horizontal,
+                    value = stringResource(R.string.settings_this_phone),
+                    onClick = { onOpenPage(SettingsPageId.ENGINE_PARAMS) },
+                )
+            }
+        }
 
-                item {
-                    SettingsGroup(stringResource(R.string.settings_group_general)) {
-                        SettingsRow(R.drawable.ic_lucide_layout_dashboard, stringResource(R.string.settings_interface), interfaceLabel(uiState.interfaceMode), { onOpenPage(SettingsPageId.INTERFACE) })
-                        SettingsRow(R.drawable.ic_lucide_languages, stringResource(R.string.settings_language), languageLabel, onOpenLanguage)
-                        SettingsRow(R.drawable.ic_lucide_bell, stringResource(R.string.settings_notifications), stringResource(if (uiState.notificationsEnabled) R.string.settings_value_on else R.string.settings_value_off), { onOpenPage(SettingsPageId.NOTIFICATIONS) })
-                        SettingsRow(R.drawable.ic_lucide_mic, stringResource(R.string.settings_voice), voiceLabel(uiState.voiceMode), { onOpenPage(SettingsPageId.VOICE) })
-                        SettingsRow(R.drawable.ic_lucide_gauge, stringResource(R.string.settings_performance), performanceLabel(uiState.performanceMode), { onOpenPage(SettingsPageId.PERFORMANCE) })
-                        SettingsRow(R.drawable.ic_lucide_battery_charging, stringResource(R.string.settings_background_running), stringResource(R.string.settings_value_needs_setup), { onOpenPage(SettingsPageId.BACKGROUND) })
-                        SettingsRow(R.drawable.ic_lucide_shield, stringResource(R.string.settings_privacy), null, { onOpenPage(SettingsPageId.PRIVACY) })
-                    }
-                }
-
-                item {
-                    SettingsGroup(stringResource(R.string.settings_group_host)) {
-                        SettingsRow(R.drawable.ic_lucide_server, stringResource(R.string.settings_local_engine), engineStatus, onOpenEngine)
-                        SettingsRow(R.drawable.ic_lucide_sliders_horizontal, stringResource(R.string.settings_engine_params), stringResource(R.string.settings_value_default), { onOpenPage(SettingsPageId.PERMISSION) })
-                    }
-                }
-
-                item {
-                    SettingsGroup(stringResource(R.string.settings_group_about)) {
-                        SettingsRow(R.drawable.ic_lucide_info, stringResource(R.string.settings_version), BuildConfig.VERSION_NAME, null)
-                        SettingsRow(R.drawable.ic_lucide_bot, stringResource(R.string.settings_dsh_version), stringResource(R.string.settings_value_not_linked), null)
-                        SettingsRow(R.drawable.ic_lucide_file_text, stringResource(R.string.settings_licenses), null, { onOpenPage(SettingsPageId.LICENSES) })
-                    }
-                }
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_version),
+                    icon = R.drawable.ic_lucide_info,
+                    value = BuildConfig.VERSION_NAME,
+                    onClick = { onOpenPage(SettingsPageId.ABOUT) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_dsh_version),
+                    icon = R.drawable.ic_lucide_bot,
+                    value = dshVersion ?: stringResource(R.string.settings_value_not_linked),
+                    onClick = { onOpenPage(SettingsPageId.ABOUT) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_licenses),
+                    icon = R.drawable.ic_lucide_file_text,
+                    onClick = { onOpenPage(SettingsPageId.LICENSES) },
+                )
             }
         }
     }
-
-    if (showThemeDialog) {
-        ThemeDialog(
-            current = uiState.themeMode,
-            onPick = { mode ->
-                onThemeChange(mode)
-                showThemeDialog = false
-            },
-            onDismiss = { showThemeDialog = false },
-        )
-    }
-}
-
-/** 设置卡片：柔和阴影悬浮（和顶栏/输入框的悬浮按钮同一质感）。 */
-@Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(Dshm.radius.lg)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = Dshm.spacing.cardElevation,
-                shape = shape,
-                ambientColor = Dshm.colors.shadowCard,
-                spotColor = Dshm.colors.shadowCard,
-            )
-            .clip(shape)
-            .background(Dshm.colors.surface)
-            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape),
-        content = content,
-    )
 }
 
 @Composable
-private fun OverviewCard(
+private fun AccountOverviewCard(
     onClick: () -> Unit,
-    accountName: String?,
-    accountBalance: String?,
-    accountAvatarUrl: String?,
+    name: String?,
+    balance: String?,
+    avatarUrl: String?,
+    engineStatus: String,
 ) {
-    SettingsCard {
+    SettingsSection {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
-                .padding(Dshm.spacing.lg),
+                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (accountAvatarUrl != null) {
+            if (avatarUrl != null) {
                 AsyncImage(
-                    model = accountAvatarUrl,
+                    model = avatarUrl,
                     contentDescription = null,
                     modifier = Modifier
-                        .size(Dshm.spacing.avatar)
+                        .size(Dshm.spacing.settingsAvatar)
                         .clip(CircleShape),
                 )
-            } else if (accountName != null) {
+            } else if (name != null) {
                 Box(
                     modifier = Modifier
-                        .size(Dshm.spacing.avatar)
+                        .size(Dshm.spacing.settingsAvatar)
                         .clip(CircleShape)
                         .background(Dshm.colors.surfaceMuted),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = accountName.trim().take(1).uppercase(),
-                        style = Dshm.typography.rowTitle,
+                        text = name.trim().take(1).uppercase(),
+                        style = Dshm.typography.sheetTitle,
                         color = Dshm.colors.textSecondary,
                     )
                 }
             } else {
                 Box(
                     modifier = Modifier
-                        .size(Dshm.spacing.avatar)
+                        .size(Dshm.spacing.settingsAvatar)
                         .clip(CircleShape)
                         .background(Dshm.colors.surfaceMuted),
                     contentAlignment = Alignment.Center,
@@ -277,156 +406,25 @@ private fun OverviewCard(
                 }
             }
             Spacer(Modifier.width(Dshm.spacing.md))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(
-                    text = accountName ?: stringResource(R.string.app_name),
-                    style = Dshm.typography.rowTitle,
+                    text = name ?: stringResource(R.string.app_name),
+                    style = Dshm.typography.sheetTitle,
                     color = Dshm.colors.textPrimary,
                 )
-                Spacer(Modifier.width(Dshm.spacing.xxs))
                 Text(
-                    text = accountBalance ?: stringResource(R.string.settings_overview_host),
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.textTertiary,
+                    text = balance ?: stringResource(R.string.settings_overview_engine, engineStatus),
+                    style = Dshm.typography.settingsRowValue,
+                    color = Dshm.colors.textSecondary,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
-    Column {
-        Text(
-            text = title,
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textSecondary,
-            modifier = Modifier.padding(start = Dshm.spacing.sm, bottom = Dshm.spacing.sm),
-        )
-        SettingsCard {
-            content()
-        }
-    }
-}
-
-@Composable
-private fun SettingsRow(
-    @DrawableRes icon: Int,
-    title: String,
-    value: String?,
-    onClick: (() -> Unit)?,
-) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = Dshm.spacing.composerKey)
-                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
             Icon(
-                painter = painterResource(icon),
+                painter = painterResource(R.drawable.ic_lucide_chevron_right),
                 contentDescription = null,
-                tint = Dshm.colors.iconTint,
-                modifier = Modifier.size(Dshm.spacing.settingsRowIcon),
+                tint = Dshm.colors.textTertiary,
+                modifier = Modifier.size(Dshm.spacing.topBarIcon),
             )
-            Spacer(Modifier.width(Dshm.spacing.md))
-            Text(
-                text = title,
-                style = Dshm.typography.rowTitle,
-                color = Dshm.colors.textPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            if (value != null) {
-                Text(
-                    text = value,
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.textTertiary,
-                )
-            }
-            if (onClick != null) {
-                Spacer(Modifier.width(Dshm.spacing.xs))
-                Icon(
-                    painter = painterResource(R.drawable.ic_lucide_chevron_right),
-                    contentDescription = null,
-                    tint = Dshm.colors.textTertiary,
-                    modifier = Modifier.size(Dshm.spacing.topBarIcon),
-                )
-            }
         }
-        HorizontalDivider(
-            modifier = Modifier.padding(start = Dshm.spacing.lg, end = Dshm.spacing.lg),
-            thickness = Dshm.spacing.hairline,
-            color = Dshm.colors.divider,
-        )
     }
 }
-
-@Composable
-private fun ThemeDialog(
-    current: ThemeMode,
-    onPick: (ThemeMode) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Dshm.colors.surface,
-        title = {
-            Text(
-                text = stringResource(R.string.settings_theme_dialog_title),
-                style = Dshm.typography.sheetTitle,
-                color = Dshm.colors.textPrimary,
-            )
-        },
-        text = {
-            Column {
-                ThemeMode.entries.forEach { mode ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onPick(mode) }
-                            .padding(vertical = Dshm.spacing.sm),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = mode == current, onClick = { onPick(mode) })
-                        Spacer(Modifier.width(Dshm.spacing.sm))
-                        Text(
-                            text = themeLabel(mode),
-                            style = Dshm.typography.rowTitle,
-                            color = Dshm.colors.textPrimary,
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = stringResource(android.R.string.cancel), color = Dshm.colors.accent)
-            }
-        },
-    )
-}
-
-@Composable
-private fun themeLabel(mode: ThemeMode): String = stringResource(
-    when (mode) {
-        ThemeMode.SYSTEM -> R.string.theme_system
-        ThemeMode.LIGHT -> R.string.theme_light
-        ThemeMode.DARK -> R.string.theme_dark
-    },
-)
-
-/** 测试用 tag：设置列表（用于滚动到指定行）。 */
-const val SETTINGS_LIST_TAG = "settings_list"
-
-
-
-
-
-
-
-
-
-
 

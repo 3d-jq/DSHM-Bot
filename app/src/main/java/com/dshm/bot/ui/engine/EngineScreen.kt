@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,7 +64,7 @@ const val DEFAULT_RUNTIME_URL =
 
 /**
  * 本机引擎页（参照 dsh-Go `engine_screen.dart` + `TerminalCard`）：
- * hero 状态卡 → 启动/停止/重启 → 启动日志终端卡 → 更多 → 运行时信息 → 危险区。
+ * hero 状态卡 → 启动/停止/重启 → 日志终端卡 → 更多 → 运行时信息 → 危险区。
  */
 @Composable
 fun EngineScreen(
@@ -81,11 +82,17 @@ fun EngineScreen(
     modifier: Modifier = Modifier,
 ) {
     var showResetDialog by remember { mutableStateOf(false) }
-    val logs = remember(state) { logText() }
+    var logs by remember { mutableStateOf(logText()) }
+    LaunchedEffect(state) {
+        while (true) {
+            logs = logText()
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = Dshm.colors.background,
+        containerColor = Dshm.colors.pageBackground,
         topBar = { EngineHeader(onBack) },
     ) { padding ->
         Column(
@@ -154,25 +161,26 @@ fun EngineScreen(
 
 @Composable
 private fun EngineHeader(onBack: (() -> Unit)?) {
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
             .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
             FloatingIconButton(
                 icon = R.drawable.ic_lucide_arrow_left,
                 contentDescription = stringResource(R.string.action_back),
                 onClick = onBack,
+                modifier = Modifier.align(Alignment.CenterStart),
             )
-            Spacer(Modifier.width(Dshm.spacing.sm))
         }
         Text(
             text = stringResource(R.string.engine_title),
             style = Dshm.typography.pageTitle,
             color = Dshm.colors.textPrimary,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.align(Alignment.Center),
         )
     }
 }
@@ -293,6 +301,10 @@ private fun TerminalCard(logs: String) {
     val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     var copied by remember { mutableStateOf(false) }
     val lines = remember(logs) { logs.lines().filter { it.isNotBlank() } }
+    val logState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) logState.scrollToItem(lines.lastIndex)
+    }
     val shape = RoundedCornerShape(Dshm.radius.lg)
     Column(
         modifier = Modifier
@@ -328,29 +340,39 @@ private fun TerminalCard(logs: String) {
                     .padding(Dshm.spacing.xs),
             )
         }
-        // 只展示最新 20 行（最新在上），避免超长启动命令把日志井撑满。
-        Column(
+        // 完整日志：固定高度懒加载滚动，最新日志自动滚到底。
+        LazyColumn(
+            state = logState,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(Dshm.spacing.xxl * 6)
+                .height(Dshm.spacing.xxl * 10)
                 .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
         ) {
-            val tail = if (lines.isEmpty()) {
-                listOf(stringResource(R.string.engine_logs_empty))
+            if (lines.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.engine_logs_empty),
+                        style = Dshm.typography.rowPreview.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                        ),
+                        color = Dshm.colors.textTertiary,
+                    )
+                }
             } else {
-                lines.takeLast(20).reversed()
-            }
-            tail.forEach { line ->
-                Text(
-                    text = line,
-                    style = Dshm.typography.rowPreview.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                    ),
-                    color = if (lines.isEmpty()) Dshm.colors.textTertiary else Dshm.colors.terminalText,
-                )
+                items(lines.size) { index ->
+                    Text(
+                        text = lines[index],
+                        style = Dshm.typography.rowPreview.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                        ),
+                        color = Dshm.colors.terminalText,
+                    )
+                }
             }
         }
     }

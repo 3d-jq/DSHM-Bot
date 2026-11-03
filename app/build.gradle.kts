@@ -118,6 +118,8 @@ dependencies {
 
     testImplementation(libs.junit4)
     testImplementation(libs.kotlinx.coroutines.test)
+    // 单元测试用 org.json（Android 的 android.jar 里是 stub）；从本地 jar 提供，离线可用。
+    testImplementation(files("libs/json-20231013.jar"))
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)

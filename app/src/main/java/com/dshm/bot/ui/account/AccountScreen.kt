@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,13 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,9 +31,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
-import com.dshm.bot.ui.settings.SettingsPageScaffold
+import com.dshm.bot.ui.settings.SettingsError
+import com.dshm.bot.ui.settings.SettingsHint
+import com.dshm.bot.ui.settings.SettingsInput
+import com.dshm.bot.ui.settings.SettingsPage
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsRow
+import com.dshm.bot.ui.settings.SettingsRowDivider
+import com.dshm.bot.ui.settings.SettingsSection
 
-/** 账号页（对齐 dsh-Go account_page）：资料头 + 余额 + 充值/用量 + 退出登录。 */
+/** 账号页（对齐 dsh-Go account_page）：资料头 + 余额 + API Key + 充值/用量 + 退出登录。 */
 @Composable
 fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -52,19 +54,18 @@ fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
         viewModel.consumeAuthorizeUrl()
     }
 
-    SettingsPageScaffold(title = stringResource(R.string.settings_account), onBack = onBack) {
-        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md)) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Dshm.radius.lg))
-                    .background(Dshm.colors.surface)
-                    .padding(Dshm.spacing.lg),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+    SettingsPage(title = stringResource(R.string.settings_account), onBack = onBack) {
+        item {
+            SettingsSection {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     AccountAvatar(name = ui.name, avatarUrl = ui.avatarUrl)
                     Spacer(Modifier.width(Dshm.spacing.md))
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text(
                             text = ui.name ?: stringResource(R.string.account_logged_out),
                             style = Dshm.typography.sheetTitle,
@@ -81,128 +82,144 @@ fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                         )
                     }
                 }
-                ui.error?.let { error ->
-                    Spacer(Modifier.padding(Dshm.spacing.xs))
-                    Text(error, style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Dshm.radius.lg))
-                    .background(Dshm.colors.surface)
-                    .padding(Dshm.spacing.lg),
-            ) {
-                Text(
-                    text = stringResource(R.string.api_key_title),
-                    style = Dshm.typography.rowTitle,
-                    color = Dshm.colors.textPrimary,
-                )
-                Spacer(Modifier.padding(Dshm.spacing.xxs))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (ui.hasApiKey) ui.maskedApiKey else stringResource(R.string.api_key_not_set),
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.textSecondary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = {
-                        keyDraft = ""
-                        showKeyDialog = true
-                    }) {
-                        Text(stringResource(if (ui.hasApiKey) R.string.api_key_replace else R.string.api_key_set))
-                    }
-                }
-            }
-
-            if (showKeyDialog) {
-                AlertDialog(
-                    onDismissRequest = { showKeyDialog = false },
-                    containerColor = Dshm.colors.surface,
-                    title = { Text(stringResource(R.string.api_key_title), color = Dshm.colors.textPrimary) },
-                    text = {
-                        Column {
-                            Text(
-                                text = stringResource(R.string.api_key_hint),
-                                style = Dshm.typography.rowPreview,
-                                color = Dshm.colors.textSecondary,
-                            )
-                            Spacer(Modifier.padding(Dshm.spacing.xs))
-                            BasicTextField(
-                                value = keyDraft,
-                                onValueChange = { keyDraft = it },
-                                singleLine = true,
-                                textStyle = Dshm.typography.rowPreview.copy(color = Dshm.colors.textPrimary),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(Dshm.radius.sm))
-                                    .background(Dshm.colors.surfaceMuted)
-                                    .padding(Dshm.spacing.sm),
-                            )
-                            if (ui.hasApiKey) {
-                                TextButton(onClick = {
-                                    viewModel.clearApiKey()
-                                    showKeyDialog = false
-                                }) {
-                                    Text(stringResource(R.string.api_key_clear), color = Dshm.colors.danger)
-                                }
-                            }
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                if (keyDraft.isNotBlank()) viewModel.saveApiKey(keyDraft)
-                                showKeyDialog = false
-                            },
-                        ) { Text(stringResource(R.string.api_key_save)) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showKeyDialog = false }) {
-                            Text(stringResource(android.R.string.cancel))
-                        }
-                    },
-                )
-            }
-
-            if (ui.name == null) {
-                Button(
-                    onClick = viewModel::signIn,
-                    enabled = !ui.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(if (ui.busy) R.string.account_signing_in else R.string.account_login))
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm), modifier = Modifier.fillMaxWidth()) {
-                    if (ui.topUpUrl != null) {
-                        Button(
-                            onClick = { openUrl(context, ui.topUpUrl.orEmpty()) },
-                            modifier = Modifier.weight(1f),
-                        ) { Text(stringResource(R.string.account_top_up)) }
-                    }
-                    if (ui.usageUrl != null) {
-                        OutlinedButton(
-                            onClick = { openUrl(context, ui.usageUrl.orEmpty()) },
-                            modifier = Modifier.weight(1f),
-                        ) { Text(stringResource(R.string.account_usage)) }
-                    }
-                }
-                OutlinedButton(onClick = viewModel::signOut, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.account_sign_out))
-                }
-            }
-
-            if (!ui.ready) {
-                Text(
-                    text = stringResource(R.string.account_engine_required),
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.textTertiary,
-                )
             }
         }
+
+        item {
+            SettingsSection(title = stringResource(R.string.api_key_title)) {
+                SettingsRow(
+                    title = stringResource(R.string.api_key_title),
+                    subtitle = stringResource(R.string.api_key_hint),
+                    value = if (ui.hasApiKey) ui.maskedApiKey else stringResource(R.string.api_key_not_set),
+                    trailing = {
+                        TextButton(onClick = {
+                            keyDraft = ""
+                            showKeyDialog = true
+                        }) {
+                            Text(
+                                stringResource(if (ui.hasApiKey) R.string.api_key_replace else R.string.api_key_set),
+                                color = Dshm.colors.accent,
+                            )
+                        }
+                    },
+                )
+                if (ui.hasApiKey) {
+                    SettingsRowDivider()
+                    SettingsRow(
+                        title = stringResource(R.string.api_key_clear),
+                        onClick = { viewModel.clearApiKey() },
+                    )
+                }
+            }
+        }
+
+        item {
+            if (ui.name == null) {
+                SettingsPrimaryButton(
+                    text = stringResource(if (ui.busy) R.string.account_signing_in else R.string.account_login),
+                    enabled = !ui.busy && ui.ready,
+                    onClick = viewModel::signIn,
+                )
+            } else {
+                SettingsSection {
+                    if (ui.topUpUrl != null) {
+                        SettingsRow(
+                            title = stringResource(R.string.account_top_up),
+                            onClick = { openUrl(context, ui.topUpUrl.orEmpty()) },
+                        )
+                    }
+                    if (ui.usageUrl != null) {
+                        if (ui.topUpUrl != null) SettingsRowDivider()
+                        SettingsRow(
+                            title = stringResource(R.string.account_usage),
+                            onClick = { openUrl(context, ui.usageUrl.orEmpty()) },
+                        )
+                    }
+                    SettingsRowDivider()
+                    SettingsRow(
+                        title = stringResource(R.string.account_sign_out),
+                        onClick = viewModel::signOut,
+                    )
+                }
+            }
+        }
+
+        if (ui.error != null) {
+            item { SettingsError(ui.error.orEmpty()) }
+        }
+        if (!ui.ready) {
+            item { SettingsHint(stringResource(R.string.account_engine_required)) }
+        }
     }
+
+    if (showKeyDialog) {
+        KeyDialog(
+            hasKey = ui.hasApiKey,
+            value = keyDraft,
+            onValueChange = { keyDraft = it },
+            onDismiss = { showKeyDialog = false },
+            onSave = {
+                if (keyDraft.isNotBlank()) viewModel.saveApiKey(keyDraft)
+                showKeyDialog = false
+            },
+            onClear = {
+                viewModel.clearApiKey()
+                showKeyDialog = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun KeyDialog(
+    hasKey: Boolean,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+    onClear: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Dshm.colors.surface,
+        title = {
+            Text(
+                text = stringResource(R.string.api_key_title),
+                style = Dshm.typography.sheetTitle,
+                color = Dshm.colors.textPrimary,
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = stringResource(R.string.api_key_hint),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                )
+                Spacer(Modifier.padding(Dshm.spacing.xs))
+                SettingsInput(
+                    value = value,
+                    onValueChange = onValueChange,
+                    placeholder = "sk-…",
+                )
+                if (hasKey) {
+                    TextButton(onClick = onClear) {
+                        Text(stringResource(R.string.api_key_clear), color = Dshm.colors.danger)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSave, enabled = value.isNotBlank()) {
+                Text(stringResource(R.string.api_key_save), color = Dshm.colors.accent)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(android.R.string.cancel), color = Dshm.colors.textSecondary)
+            }
+        },
+    )
 }
 
 @Composable
@@ -237,4 +254,3 @@ private fun openUrl(context: Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }
-

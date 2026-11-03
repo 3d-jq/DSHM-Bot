@@ -34,7 +34,7 @@ fun BotRow(
             .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BotAvatar(inkId = row.inkId, glyph = row.glyph)
+        BotAvatar(inkId = row.inkId, glyph = row.glyph, avatarImage = row.avatarImage, avatarShape = row.avatarShape)
         Spacer(Modifier.width(Dshm.spacing.md))
         // 文字列与头像中线对齐（行级 CenterVertically）；名字与预览之间留 4dp 间隙。
         Column(

@@ -1,76 +1,203 @@
 package com.dshm.bot.ui.settings
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.remote.PluginBundle
+import com.dshm.bot.data.remote.PluginBundleGroup
+import kotlin.math.abs
 
-/** 插件页：引擎 `pluginInventory/list` 的真实插件清单（名称 + 生效状态）。 */
+/** 插件：DSH 官方可选包 + 第三方已安装包，结构与 dsh-Go 一致（分组、官方徽标、开关）。 */
 @Composable
 fun PluginsScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
-    val ui by viewModel.ui.collectAsStateWithLifecycle()
-    SettingsPageScaffold(title = stringResource(R.string.settings_plugins), onBack = onBack) {
+    val state by viewModel.ui.collectAsStateWithLifecycle()
+    val language = settingsLanguage()
+    var openNs by rememberSaveable { mutableStateOf<String?>(null) }
+    var actionError by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val namespace = openNs?.let { viewModel.namespace(it) }
+    if (namespace != null) {
+        EngineNamespaceScreen(
+            viewModel = viewModel,
+            ns = namespace.ns,
+            language = language,
+            onBack = { openNs = null },
+        )
+        return
+    }
+
+    val bundles = state.bundles
+    val installed = bundles.filter { it.group == PluginBundleGroup.INSTALLED }
+    val official = bundles.filter { it.group == PluginBundleGroup.OFFICIAL }
+
+    SettingsPage(
+        title = stringResource(R.string.settings_plugins),
+        subtitle = stringResource(R.string.plugins_manage_hint),
+        onBack = onBack,
+        actions = { SettingsRefreshButton(onClick = viewModel::refresh) },
+    ) {
         when {
-            ui.loading -> CircularProgressIndicator(color = Dshm.colors.accent)
-            ui.error != null -> Text(ui.error.orEmpty(), style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
-            ui.plugins.isEmpty() -> Text(
-                text = stringResource(R.string.info_engine_required),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textSecondary,
-            )
-        }
-        val shape = RoundedCornerShape(Dshm.radius.lg)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(Dshm.colors.surface)
-                .border(Dshm.spacing.hairline, Dshm.colors.divider, shape),
-        ) {
-            ui.plugins.forEachIndexed { index, plugin ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = plugin.moduleName.ifEmpty { plugin.entryId },
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.textPrimary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = stringResource(
-                            if (plugin.enabled) R.string.settings_value_on else R.string.settings_value_off,
-                        ),
-                        style = Dshm.typography.rowPreview,
-                        color = if (plugin.enabled) Dshm.colors.accent else Dshm.colors.textTertiary,
-                    )
+            state.loading && bundles.isEmpty() -> item { SettingsLoading() }
+            state.error != null && bundles.isEmpty() -> item {
+                SettingsError(state.error.orEmpty(), onRetry = viewModel::refresh)
+            }
+            bundles.isEmpty() -> item {
+                SettingsEmpty(stringResource(R.string.settings_plugins_read_only))
+            }
+            else -> {
+                if (actionError != null) {
+                    item { SettingsError(actionError.orEmpty()) }
                 }
-                if (index != ui.plugins.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = Dshm.spacing.lg),
-                        thickness = Dshm.spacing.hairline,
-                        color = Dshm.colors.divider,
-                    )
+                if (installed.isNotEmpty()) {
+                    item {
+                        SettingsSection(title = stringResource(R.string.plugins_group_installed)) {
+                            installed.forEachIndexed { index, bundle ->
+                                if (index > 0) SettingsRowDivider()
+                                BundleRow(
+                                    bundle = bundle,
+                                    language = language,
+                                    hasSettings = viewModel.namespace(bundle.name) != null,
+                                    onOpenSettings = { openNs = bundle.name },
+                                    onToggle = { enabled ->
+                                        actionError = null
+                                        viewModel.setPluginEnabled(bundle.name, enabled) { error ->
+                                            if (error != null) actionError = error
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (official.isNotEmpty()) {
+                    item {
+                        SettingsSection(
+                            title = stringResource(R.string.plugins_group_official),
+                            footer = stringResource(R.string.plugins_official_hint),
+                        ) {
+                            official.forEachIndexed { index, bundle ->
+                                if (index > 0) SettingsRowDivider()
+                                BundleRow(
+                                    bundle = bundle,
+                                    language = language,
+                                    hasSettings = viewModel.namespace(bundle.name) != null,
+                                    onOpenSettings = { openNs = bundle.name },
+                                    onToggle = { enabled ->
+                                        actionError = null
+                                        viewModel.setPluginEnabled(bundle.name, enabled) { error ->
+                                            if (error != null) actionError = error
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BundleRow(
+    bundle: PluginBundle,
+    language: String,
+    hasSettings: Boolean,
+    onOpenSettings: () -> Unit,
+    onToggle: (Boolean) -> Unit,
+) {
+    val title = bundle.meta?.title?.resolve(language)?.takeIf { it.isNotBlank() }
+        ?: SettingsCopy.humanize(bundle.name)
+    val description = bundle.meta?.description?.resolve(language)?.takeIf { it.isNotBlank() }
+        ?: bundle.description
+    val subtitle = listOfNotNull(bundle.version, bundle.error ?: description).joinToString(" · ")
+    SettingsRow(
+        title = title,
+        leading = { PluginAvatar(name = bundle.name, title = title) },
+        badge = if (bundle.official) {
+            { OfficialBadge() }
+        } else {
+            null
+        },
+        subtitle = subtitle.takeIf { it.isNotBlank() },
+        subtitleColor = if (bundle.error != null) Dshm.colors.danger else null,
+        trailing = {
+            if (bundle.switchable) {
+                Switch(checked = bundle.enabled, onCheckedChange = onToggle)
+            } else {
+                Text(
+                    text = stringResource(
+                        if (bundle.readOnlyReason != null) {
+                            R.string.plugins_read_only_badge
+                        } else {
+                            R.string.plugins_not_installed
+                        },
+                    ),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textTertiary,
+                )
+            }
+        },
+        onClick = if (hasSettings) onOpenSettings else null,
+    )
+}
+
+@Composable
+private fun OfficialBadge() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(Dshm.radius.xs))
+            .background(Dshm.colors.surfaceMuted)
+            .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xxs),
+    ) {
+        Text(
+            text = stringResource(R.string.plugins_badge_official),
+            style = Dshm.typography.rowTime,
+            color = Dshm.colors.textSecondary,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun PluginAvatar(name: String, title: String) {
+    val palette = listOf(
+        Dshm.colors.accent,
+        Dshm.colors.success,
+        Dshm.colors.warning,
+        Dshm.colors.danger,
+        Dshm.colors.textSecondary,
+    )
+    val index = abs(name.hashCode()) % palette.size
+    val color = palette[index]
+    Box(
+        modifier = Modifier
+            .size(Dshm.spacing.composerKey)
+            .clip(RoundedCornerShape(Dshm.radius.sm))
+            .background(color.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = title.trim().take(1).uppercase().ifEmpty { "?" },
+            style = Dshm.typography.rowTitle,
+            color = color,
+        )
     }
 }

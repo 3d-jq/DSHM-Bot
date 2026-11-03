@@ -56,7 +56,7 @@ fun HomeScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = Dshm.colors.background,
+        containerColor = Dshm.colors.pageBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(

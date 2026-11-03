@@ -29,4 +29,8 @@ data class BotSummary(
     val unreadCount: Int = 0,
     val pinned: Boolean = false,
     val isGroup: Boolean = false,
+    /** DS Bot `avatar.image`（data URL）；有则优先显示。 */
+    val avatarImage: String? = null,
+    /** DS Bot 角色形状（`whale` 等）。 */
+    val avatarShape: String? = null,
 )

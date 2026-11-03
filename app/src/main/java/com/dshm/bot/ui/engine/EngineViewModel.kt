@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.data.runtime.DsBotPluginInstaller
+import com.dshm.bot.data.runtime.EngineLog
 import com.dshm.bot.data.runtime.RuntimeInstaller
 import com.dshm.bot.data.runtime.RuntimeLauncher
 import com.dshm.bot.data.runtime.RuntimeManager
@@ -48,7 +50,13 @@ class EngineViewModel(
         if (launcher.isRunning) return
         _state.value = RuntimeState.Starting
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { launcher.start(manifest) } }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
+                        .onFailure { EngineLog.log("ds-bot install failed: ${it.message}") }
+                    launcher.start(manifest)
+                }
+            }
                 .onSuccess { _state.value = RuntimeState.Running(it) }
                 .onFailure { _state.value = RuntimeState.Failed(it.message ?: "启动失败") }
         }
@@ -58,7 +66,13 @@ class EngineViewModel(
         viewModelScope.launch {
             withContext(Dispatchers.IO) { launcher.stop() }
             _state.value = RuntimeState.Starting
-            runCatching { withContext(Dispatchers.IO) { launcher.start(manifest) } }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
+                        .onFailure { EngineLog.log("ds-bot install failed: ${it.message}") }
+                    launcher.start(manifest)
+                }
+            }
                 .onSuccess { _state.value = RuntimeState.Running(it) }
                 .onFailure { _state.value = RuntimeState.Failed(it.message ?: "启动失败") }
         }
@@ -82,15 +96,20 @@ class EngineViewModel(
         }
     }
 
-    /** 启动日志（尾部最多 20000 字符），供 Terminal 卡片展示/复制。 */
+    /** 完整运行日志：stdout 的 engine.log + DSH 自己写下的全部日志文件，供日志卡展示/复制。 */
     fun logText(): String = runCatching {
         val engineLog = File(appContext.filesDir, "engine.log")
             .takeIf { it.isFile }?.readText().orEmpty()
-        // DSH 自己的启动日志比 stdout 丰富，取最新一份一起展示。
+        // DSH 的运行日志比 stdout 丰富；目录里可能有多份，按修改时间全部拼上。
         val dshLogs = File(appContext.filesDir, "runtime/rootfs/root/.dsh/logs")
-            .listFiles()?.filter { it.isFile }?.maxByOrNull { it.lastModified() }
-            ?.readText()?.takeLast(12_000).orEmpty()
-        TextMasking.maskSecrets((engineLog + "\n" + dshLogs).trim().takeLast(20_000))
+            .listFiles()
+            ?.filter { it.isFile }
+            ?.sortedBy { it.lastModified() }
+            ?.joinToString("\n") { file ->
+                "===== ${file.name} =====\n" + file.readText()
+            }
+            .orEmpty()
+        TextMasking.maskSecrets((engineLog + "\n" + dshLogs).trim().takeLast(300_000))
     }.getOrDefault("")
 
     override fun onCleared() {

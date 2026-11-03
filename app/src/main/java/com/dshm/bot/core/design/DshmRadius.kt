@@ -12,6 +12,8 @@ data class DshmRadius(
     val sm: Dp = 10.dp,
     val md: Dp = 14.dp,
     val lg: Dp = 20.dp,
+    /** 设置页大卡片（参考设计的长圆角白卡）。 */
+    val settingsCard: Dp = 24.dp,
     val xl: Dp = 28.dp,
     val pill: Dp = 999.dp,
     /** 输入框胶囊圆角（= 圆键半径 20 + 间隙 8）。 */

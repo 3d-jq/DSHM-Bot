@@ -11,8 +11,11 @@ import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ChatFontSize
 import com.dshm.bot.domain.model.InterfaceMode
 import com.dshm.bot.domain.model.PerformanceMode
-import com.dshm.bot.domain.model.VoiceMode
+import com.dshm.bot.domain.model.PetSize
+import com.dshm.bot.domain.model.PetStyle
+import com.dshm.bot.domain.model.PhoneConfirmMode
 import com.dshm.bot.domain.model.ThemeMode
+import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +31,11 @@ data class SettingsUiState(
     val notificationsEnabled: Boolean = true,
     val voiceMode: VoiceMode = VoiceMode.AUTO,
     val performanceMode: PerformanceMode = PerformanceMode.AUTO,
+    val petEnabled: Boolean = false,
+    val petStyle: PetStyle = PetStyle.DEEPY_WHALE,
+    val petSize: PetSize = PetSize.MEDIUM,
+    val phoneControlEnabled: Boolean = false,
+    val phoneConfirmMode: PhoneConfirmMode = PhoneConfirmMode.ASK,
 )
 
 /** 设置页状态层：读/写设置，界面只消费 [uiState]。 */
@@ -35,19 +43,32 @@ class SettingsViewModel(
     private val repository: SettingsRepository,
 ) : ViewModel() {
 
-    val uiState: StateFlow<SettingsUiState> = combine(
-        combine(
-            repository.observeThemeMode(),
-            repository.observeChatFontSize(),
-            repository.observeLanguage(),
-            repository.observeInterfaceMode(),
-            repository.observeNotificationsEnabled(),
-        ) { theme, font, language, interfaceMode, notifications ->
-            listOf(theme, font, language, interfaceMode, notifications)
-        },
+    private val core = combine(
+        repository.observeThemeMode(),
+        repository.observeChatFontSize(),
+        repository.observeLanguage(),
+        repository.observeInterfaceMode(),
+        repository.observeNotificationsEnabled(),
+    ) { theme, font, language, interfaceMode, notifications ->
+        listOf(theme, font, language, interfaceMode, notifications)
+    }
+
+    private val extended = combine(
         repository.observeVoiceMode(),
         repository.observePerformanceMode(),
-    ) { base, voice, performance ->
+        repository.observePetEnabled(),
+        repository.observePetStyle(),
+        repository.observePetSize(),
+    ) { voice, performance, petEnabled, petStyle, petSize ->
+        listOf(voice, performance, petEnabled, petStyle, petSize)
+    }
+
+    private val phone = combine(
+        repository.observePhoneControlEnabled(),
+        repository.observePhoneConfirmMode(),
+    ) { enabled, mode -> listOf(enabled, mode) }
+
+    val uiState: StateFlow<SettingsUiState> = combine(core, extended, phone) { base, extra, phoneValues ->
         @Suppress("UNCHECKED_CAST")
         SettingsUiState(
             themeMode = base[0] as ThemeMode,
@@ -55,8 +76,13 @@ class SettingsViewModel(
             language = base[2] as AppLanguage,
             interfaceMode = base[3] as InterfaceMode,
             notificationsEnabled = base[4] as Boolean,
-            voiceMode = voice,
-            performanceMode = performance,
+            voiceMode = extra[0] as VoiceMode,
+            performanceMode = extra[1] as PerformanceMode,
+            petEnabled = extra[2] as Boolean,
+            petStyle = extra[3] as PetStyle,
+            petSize = extra[4] as PetSize,
+            phoneControlEnabled = phoneValues[0] as Boolean,
+            phoneConfirmMode = phoneValues[1] as PhoneConfirmMode,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -84,6 +110,16 @@ class SettingsViewModel(
 
     fun setPerformanceMode(mode: PerformanceMode) = repository.setPerformanceMode(mode)
 
+    fun setPetEnabled(enabled: Boolean) = repository.setPetEnabled(enabled)
+
+    fun setPetStyle(style: PetStyle) = repository.setPetStyle(style)
+
+    fun setPetSize(size: PetSize) = repository.setPetSize(size)
+
+    fun setPhoneControlEnabled(enabled: Boolean) = repository.setPhoneControlEnabled(enabled)
+
+    fun setPhoneConfirmMode(mode: PhoneConfirmMode) = repository.setPhoneConfirmMode(mode)
+
     companion object {
         fun factory(context: Context): ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -92,4 +128,3 @@ class SettingsViewModel(
         }
     }
 }
-

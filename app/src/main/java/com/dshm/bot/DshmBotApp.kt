@@ -1,11 +1,6 @@
 package com.dshm.bot
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -14,19 +9,24 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.Dshm
@@ -35,40 +35,43 @@ import com.dshm.bot.data.notify.EngineNotifier
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.account.AccountScreen
 import com.dshm.bot.ui.account.AccountViewModel
-import com.dshm.bot.ui.chat.BotChatPlaceholderScreen
+import com.dshm.bot.ui.chat.BotChatScreen
+import com.dshm.bot.ui.components.PetOverlay
 import com.dshm.bot.ui.engine.EngineScreen
 import com.dshm.bot.ui.engine.EngineViewModel
 import com.dshm.bot.ui.engine.OnboardingScreen
 import com.dshm.bot.ui.home.HomeScreen
 import com.dshm.bot.ui.home.HomeViewModel
 import com.dshm.bot.ui.home.SearchScreen
+import com.dshm.bot.ui.settings.AboutScreen
 import com.dshm.bot.ui.settings.AppearanceScreen
+import com.dshm.bot.ui.settings.BackgroundSettingsScreen
 import com.dshm.bot.ui.settings.ChatFontScreen
+import com.dshm.bot.ui.settings.EngineSettingsScreen
+import com.dshm.bot.ui.settings.EngineSettingsViewModel
+import com.dshm.bot.ui.settings.InterfaceSettingsScreen
+import com.dshm.bot.ui.settings.LanguageScreen
+import com.dshm.bot.ui.settings.LicensesScreen
+import com.dshm.bot.ui.settings.ModelProvidersScreen
+import com.dshm.bot.ui.settings.NotificationSettingsScreen
+import com.dshm.bot.ui.settings.PerformanceSettingsScreen
+import com.dshm.bot.ui.settings.PermissionScreen
+import com.dshm.bot.ui.settings.PersonalizationScreen
+import com.dshm.bot.ui.settings.PetsSettingsScreen
+import com.dshm.bot.ui.settings.PhoneControlSettingsScreen
+import com.dshm.bot.ui.settings.PluginsScreen
+import com.dshm.bot.ui.settings.PrivacySettingsScreen
+import com.dshm.bot.ui.settings.SettingsPageId
+import com.dshm.bot.ui.settings.SettingsScreen
+import com.dshm.bot.ui.settings.SettingsViewModel
+import com.dshm.bot.ui.settings.VoiceSettingsScreen
+import com.dshm.bot.ui.settings.WebHostScreen
+import com.dshm.bot.ui.settings.WebSearchScreen
 import com.dshm.bot.ui.settings.chatFontLabel
 import com.dshm.bot.ui.settings.languageLabel
-import com.dshm.bot.ui.settings.LanguageScreen
-import com.dshm.bot.ui.settings.SettingsScreen
-import com.dshm.bot.ui.settings.SettingsPageId
-import com.dshm.bot.ui.settings.OptionSettingsPage
-import com.dshm.bot.ui.settings.InfoSettingsPage
-import com.dshm.bot.ui.settings.interfaceLabel
-import com.dshm.bot.ui.settings.voiceLabel
-import com.dshm.bot.ui.settings.performanceLabel
-import com.dshm.bot.ui.settings.settingsPageTitle
-import com.dshm.bot.ui.settings.settingsPageInfo
-import com.dshm.bot.ui.settings.EngineSettingsScreen
-import com.dshm.bot.ui.settings.EngineNamespacesScreen
-import com.dshm.bot.ui.settings.PluginsScreen
-import com.dshm.bot.ui.settings.ProvidersScreen
-import com.dshm.bot.ui.settings.ProvidersViewModel
-import com.dshm.bot.ui.settings.PersonalizationScreen
-import com.dshm.bot.ui.settings.WebHostScreen
-import com.dshm.bot.ui.settings.EngineSettingsViewModel
 import com.dshm.bot.domain.model.InterfaceMode
-import com.dshm.bot.domain.model.scale
-import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.domain.model.PerformanceMode
-import com.dshm.bot.ui.settings.SettingsViewModel
+import com.dshm.bot.domain.model.scale
 
 private const val SCREEN_HOME = "home"
 private const val SCREEN_SEARCH = "search"
@@ -82,14 +85,6 @@ private const val SCREEN_ACCOUNT = "account"
 private const val SCREEN_SETTINGS_PAGE = "settings-page"
 private const val SCREEN_WEB = "web"
 private const val CHAT_PREFIX = "chat:"
-
-private fun depthOf(key: String): Int = when {
-    key == SCREEN_HOME || key == SCREEN_ONBOARDING -> 0
-    key == SCREEN_SEARCH || key == SCREEN_SETTINGS -> 1
-    key == SCREEN_ENGINE || key == SCREEN_APPEARANCE || key == SCREEN_CHAT_FONT || key == SCREEN_LANGUAGE || key == SCREEN_ACCOUNT || key == SCREEN_SETTINGS_PAGE || key.startsWith(CHAT_PREFIX) -> 2
-    key == SCREEN_WEB -> 0
-    else -> 1
-}
 
 /**
  * 应用外壳：主界面 ↔ 搜索 ↔ 设置 ↔ Bot 对话。
@@ -106,19 +101,8 @@ fun DshmBotApp(
     ),
     accountViewModel: AccountViewModel = viewModel(factory = AccountViewModel.factory(LocalContext.current.applicationContext)),
     engineSettingsViewModel: EngineSettingsViewModel = viewModel(factory = EngineSettingsViewModel.factory()),
-    providersViewModel: ProvidersViewModel = viewModel(factory = ProvidersViewModel.factory()),
 ) {
     val appContext = LocalContext.current
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { }
-    fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            appContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val engineState by engineViewModel.state.collectAsStateWithLifecycle()
@@ -132,7 +116,7 @@ fun DshmBotApp(
         val endpoint = (engineState as? RuntimeState.Running)?.endpoint
         accountViewModel.setEndpoint(endpoint)
         engineSettingsViewModel.setEndpoint(endpoint)
-        providersViewModel.setEndpoint(endpoint)
+        homeViewModel.setEndpoint(endpoint)
     }
     val engineStatusText = when (engineState) {
         is RuntimeState.Running -> stringResource(R.string.engine_value_running)
@@ -151,8 +135,24 @@ fun DshmBotApp(
     var chatFontOpen by rememberSaveable { mutableStateOf(false) }
     var languageOpen by rememberSaveable { mutableStateOf(false) }
     var accountOpen by rememberSaveable { mutableStateOf(false) }
-    var settingsPageName by rememberSaveable { mutableStateOf<String?>(null) }
+    // 设置子页用栈保存，返回时回到上一页而不是直接回设置首页。
+    var settingsStack by rememberSaveable { mutableStateOf(ArrayList<String>()) }
+    LaunchedEffect(settingsStack) {
+        if (settingsStack.any { runCatching { SettingsPageId.valueOf(it) }.isFailure }) {
+            settingsStack = ArrayList()
+        }
+    }
+    var navForward by remember { mutableStateOf(true) }
     val webMode = settingsUiState.interfaceMode == InterfaceMode.WEB && engineState is RuntimeState.Running
+    val systemAnimationsOff = runCatching {
+        android.provider.Settings.Global.getFloat(
+            appContext.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
+    }.getOrDefault(false)
+    val reduceMotion = settingsUiState.performanceMode == PerformanceMode.LIGHT ||
+        (settingsUiState.performanceMode == PerformanceMode.AUTO && systemAnimationsOff)
     // 已装运行时（含已停止）就不再走开屏引导：启动 App 直接进主界面。
     var onboardingDone by rememberSaveable { mutableStateOf(engineState !is RuntimeState.NotInstalled) }
 
@@ -187,7 +187,7 @@ fun DshmBotApp(
         chatFontOpen -> SCREEN_CHAT_FONT
         languageOpen -> SCREEN_LANGUAGE
         accountOpen -> SCREEN_ACCOUNT
-        settingsPageName != null -> SCREEN_SETTINGS_PAGE
+        settingsStack.isNotEmpty() -> "$SCREEN_SETTINGS_PAGE:${settingsStack.last()}"
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -207,92 +207,127 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsPageName != null || webMode || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsStack.isNotEmpty() || webMode || !onboardingDone) {
+        navForward = false
         when {
-            webMode -> settingsViewModel.setInterfaceMode(InterfaceMode.NATIVE)
             !onboardingDone -> Unit
             engineOpen -> engineOpen = false
             appearanceOpen -> appearanceOpen = false
             chatFontOpen -> chatFontOpen = false
             languageOpen -> languageOpen = false
-            settingsPageName != null -> {
-                settingsPageName = null
+            // 账号是从模型页等子页打开的：先关账号，回到原来的子页。
+            accountOpen -> accountOpen = false
+            settingsStack.isNotEmpty() -> {
+                settingsStack = ArrayList(settingsStack).apply { removeAt(lastIndex) }
                 settingsOpen = true
             }
-            accountOpen -> accountOpen = false
             openBotId != null -> openBotId = null
             settingsOpen -> settingsOpen = false
-            else -> {
+            searchOpen -> {
                 searchOpen = false
                 homeViewModel.setQuery("")
             }
+            // 网页模式是主界面本身：内部页面都关掉后才退出网页模式。
+            webMode -> settingsViewModel.setInterfaceMode(InterfaceMode.NATIVE)
         }
     }
 
+    val screenStateHolder = rememberSaveableStateHolder()
+    Box(Modifier.fillMaxSize()) {
     AnimatedContent(
         targetState = screenKey,
         modifier = Modifier
             .fillMaxSize()
-            .background(Dshm.colors.background),
+            .background(Dshm.colors.pageBackground),
         transitionSpec = {
-            val opening = depthOf(targetState) >= depthOf(initialState) && targetState != SCREEN_HOME
-            val duration = DshmMotion.screenTransitionMs
-            val parallax: (Int) -> Int = { fullWidth ->
-                (fullWidth * DshmMotion.outgoingParallaxFraction).toInt()
+            val opening = navForward
+            val duration = if (reduceMotion) 0 else DshmMotion.screenTransitionMs
+            val fadeDuration = if (reduceMotion) 0 else DshmMotion.fadeMs
+            val parallax: (Int) -> Int = if (reduceMotion) {
+                { 0 }
+            } else {
+                { fullWidth -> (fullWidth * DshmMotion.outgoingParallaxFraction).toInt() }
             }
             if (opening) {
                 // push：新页整屏从右滑入，旧页向左退一小段并淡出。
                 (
                     slideInHorizontally(tween(duration, easing = DshmMotion.standard)) { it } +
-                        fadeIn(tween(DshmMotion.fadeMs))
+                        fadeIn(tween(fadeDuration))
                     ).togetherWith(
                     slideOutHorizontally(tween(duration, easing = DshmMotion.exit)) { -parallax(it) } +
-                        fadeOut(tween(duration)),
+                        fadeOut(tween(fadeDuration)),
                 )
             } else {
                 // pop：当前页向右滑出，回退页从左侧那一点点位置滑回。
                 (
                     slideInHorizontally(tween(duration, easing = DshmMotion.standard)) { -parallax(it) } +
-                        fadeIn(tween(duration))
+                        fadeIn(tween(fadeDuration))
                     ).togetherWith(
                     slideOutHorizontally(tween(duration, easing = DshmMotion.standard)) { it } +
-                        fadeOut(tween(DshmMotion.fadeMs)),
+                        fadeOut(tween(fadeDuration)),
                 )
             }
         },
         label = "screen",
     ) { key ->
+        screenStateHolder.SaveableStateProvider(key) {
         when {
             key == SCREEN_ONBOARDING -> OnboardingScreen(
                 state = engineState,
                 onInstall = engineViewModel::install,
                 onStart = engineViewModel::start,
-                onDone = { onboardingDone = true },
+                onDone = {
+                    navForward = true
+                    onboardingDone = true
+                },
             )
 
             key.startsWith(CHAT_PREFIX) -> {
                 val botId = key.removePrefix(CHAT_PREFIX)
                 val openBot = uiState.rows.firstOrNull { it.id == botId }
                 if (openBot != null) {
-                    BotChatPlaceholderScreen(bot = openBot, onBack = { openBotId = null }, fontScale = settingsUiState.chatFontSize.scale())
+                    BotChatScreen(
+                        bot = openBot,
+                        endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                        onBack = {
+                            navForward = false
+                            openBotId = null
+                        },
+                        fontScale = settingsUiState.chatFontSize.scale(),
+                    )
                 } else {
                     HomeScreen(
                         uiState = uiState,
                         onQueryChange = homeViewModel::setQuery,
-                        onOpenBot = { openBotId = it },
+                        onOpenBot = {
+                            navForward = true
+                            openBotId = it
+                        },
                         onCreateBot = {},
                         onCreateGroup = {},
-                        onOpenSearch = { searchOpen = true },
-                        onOpenSettings = { settingsOpen = true },
+                        onOpenSearch = {
+                            navForward = true
+                            searchOpen = true
+                        },
+                        onOpenSettings = {
+                            navForward = true
+                            settingsOpen = true
+                        },
                         engineLabel = engineNotice,
-                        onEngineClick = { engineOpen = true },
+                        onEngineClick = {
+                            navForward = true
+                            engineOpen = true
+                        },
                     )
                 }
             }
 
             key == SCREEN_ENGINE -> EngineScreen(
                 state = engineState,
-                onBack = { engineOpen = false },
+                onBack = {
+                    navForward = false
+                    engineOpen = false
+                },
                 onInstall = engineViewModel::install,
                 onStart = engineViewModel::start,
                 onStop = engineViewModel::stop,
@@ -304,84 +339,82 @@ fun DshmBotApp(
                 onReset = engineViewModel::reset,
             )
 
-            key == SCREEN_SETTINGS_PAGE -> {
-                val page = settingsPageName?.let { name ->
-                    runCatching { SettingsPageId.valueOf(name) }.getOrNull()
+            key.startsWith("$SCREEN_SETTINGS_PAGE:") -> {
+                val page = runCatching {
+                    SettingsPageId.valueOf(key.substringAfter(':'))
+                }.getOrNull()
+                val close = {
+                    navForward = false
+                    settingsStack = ArrayList(settingsStack).apply {
+                        if (isNotEmpty()) removeAt(lastIndex)
+                    }
+                    settingsOpen = true
                 }
-                val close = { settingsPageName = null }
                 when (page) {
-                    SettingsPageId.INTERFACE -> OptionSettingsPage(
-                        title = stringResource(R.string.settings_interface),
-                        options = listOf(
-                            stringResource(R.string.settings_value_native),
-                            stringResource(R.string.interface_web),
-                        ),
-                        selectedIndex = settingsUiState.interfaceMode.ordinal,
-                        onPick = { settingsViewModel.setInterfaceMode(InterfaceMode.entries[it]) },
+                    SettingsPageId.INTERFACE -> InterfaceSettingsScreen(
+                        current = settingsUiState.interfaceMode,
+                        onSelect = settingsViewModel::setInterfaceMode,
+                        engineSettings = engineSettingsViewModel,
                         onBack = close,
                     )
 
-                    SettingsPageId.NOTIFICATIONS -> OptionSettingsPage(
-                        title = stringResource(R.string.settings_notifications),
-                        options = listOf(
-                            stringResource(R.string.settings_value_on),
-                            stringResource(R.string.settings_value_off),
-                        ),
-                        selectedIndex = if (settingsUiState.notificationsEnabled) 0 else 1,
-                        onPick = {
-                            if (it == 0) requestNotificationPermission()
-                            settingsViewModel.setNotificationsEnabled(it == 0)
-                        },
+                    SettingsPageId.NOTIFICATIONS -> NotificationSettingsScreen(
+                        enabled = settingsUiState.notificationsEnabled,
+                        onChange = settingsViewModel::setNotificationsEnabled,
                         onBack = close,
                     )
 
-                    SettingsPageId.VOICE -> OptionSettingsPage(
-                        title = stringResource(R.string.settings_voice),
-                        options = listOf(
-                            stringResource(R.string.settings_value_auto),
-                            stringResource(R.string.voice_system),
-                            stringResource(R.string.voice_engine),
-                        ),
-                        selectedIndex = settingsUiState.voiceMode.ordinal,
-                        onPick = { settingsViewModel.setVoiceMode(VoiceMode.entries[it]) },
-                        onBack = close,
-                        subtitles = listOf(
-                            stringResource(R.string.voice_hint_auto),
-                            stringResource(R.string.voice_hint_system),
-                            stringResource(R.string.voice_hint_engine),
-                        ),
-                        hint = stringResource(R.string.voice_model_hint),
-                    )
-
-                    SettingsPageId.PERFORMANCE -> OptionSettingsPage(
-                        title = stringResource(R.string.settings_performance),
-                        options = listOf(
-                            stringResource(R.string.settings_value_auto),
-                            stringResource(R.string.performance_full),
-                            stringResource(R.string.performance_light),
-                        ),
-                        selectedIndex = settingsUiState.performanceMode.ordinal,
-                        onPick = { settingsViewModel.setPerformanceMode(PerformanceMode.entries[it]) },
+                    SettingsPageId.PERFORMANCE -> PerformanceSettingsScreen(
+                        current = settingsUiState.performanceMode,
+                        onSelect = settingsViewModel::setPerformanceMode,
                         onBack = close,
                     )
 
                     SettingsPageId.PERSONALIZATION -> PersonalizationScreen(onBack = close)
 
-                    SettingsPageId.MODEL -> ProvidersScreen(viewModel = providersViewModel, onBack = close)
-
-                    SettingsPageId.PERMISSION -> EngineNamespacesScreen(
-                        viewModel = engineSettingsViewModel,
-                        title = stringResource(R.string.settings_permission),
-                        filter = { ns -> ns.contains("permission", true) },
-                        emptyHint = stringResource(R.string.info_engine_required),
+                    SettingsPageId.PHONE_CONTROL -> PhoneControlSettingsScreen(
+                        enabled = settingsUiState.phoneControlEnabled,
+                        confirmMode = settingsUiState.phoneConfirmMode,
+                        onEnabledChange = settingsViewModel::setPhoneControlEnabled,
+                        onConfirmModeChange = settingsViewModel::setPhoneConfirmMode,
                         onBack = close,
                     )
 
-                    SettingsPageId.WEB_SEARCH -> EngineNamespacesScreen(
+                    SettingsPageId.PETS -> PetsSettingsScreen(
+                        enabled = settingsUiState.petEnabled,
+                        style = settingsUiState.petStyle,
+                        size = settingsUiState.petSize,
+                        onEnabledChange = settingsViewModel::setPetEnabled,
+                        onStyleChange = settingsViewModel::setPetStyle,
+                        onSizeChange = settingsViewModel::setPetSize,
+                        onBack = close,
+                    )
+
+                    SettingsPageId.VOICE -> VoiceSettingsScreen(
+                        current = settingsUiState.voiceMode,
+                        onSelect = settingsViewModel::setVoiceMode,
+                        onBack = close,
+                    )
+
+                    SettingsPageId.MODEL -> ModelProvidersScreen(
                         viewModel = engineSettingsViewModel,
-                        title = stringResource(R.string.settings_web_search),
-                        filter = { ns -> ns.contains("search", true) || ns.contains("web", true) },
-                        emptyHint = stringResource(R.string.info_engine_required),
+                        onBack = close,
+                        onOpenAccount = {
+                            navForward = true
+                            accountOpen = true
+                        },
+                        dshVersion = engineViewModel.version,
+                        accountSignedIn = accountUi.name != null,
+                        reduceMotion = reduceMotion,
+                    )
+
+                    SettingsPageId.PERMISSION -> PermissionScreen(
+                        viewModel = engineSettingsViewModel,
+                        onBack = close,
+                    )
+
+                    SettingsPageId.WEB_SEARCH -> WebSearchScreen(
+                        viewModel = engineSettingsViewModel,
                         onBack = close,
                     )
 
@@ -393,13 +426,36 @@ fun DshmBotApp(
                     SettingsPageId.ENGINE_PARAMS -> EngineSettingsScreen(
                         viewModel = engineSettingsViewModel,
                         onBack = close,
+                        onOpenPlugins = {
+                            navForward = true
+                            settingsStack = ArrayList(settingsStack).apply {
+                                add(SettingsPageId.PLUGINS.name)
+                            }
+                        },
                     )
 
-                    else -> InfoSettingsPage(
-                        title = settingsPageTitle(page),
-                        lines = settingsPageInfo(page, engineViewModel.version),
+                    SettingsPageId.BACKGROUND -> BackgroundSettingsScreen(onBack = close)
+
+                    SettingsPageId.PRIVACY -> PrivacySettingsScreen(
+                        engineSettings = engineSettingsViewModel,
                         onBack = close,
                     )
+
+                    SettingsPageId.LICENSES -> LicensesScreen(onBack = close)
+
+                    SettingsPageId.ABOUT -> AboutScreen(
+                        dshVersion = engineViewModel.version,
+                        engineStatus = engineStatusText,
+                        onOpenLicenses = {
+                            navForward = true
+                            settingsStack = ArrayList(settingsStack).apply {
+                                add(SettingsPageId.LICENSES.name)
+                            }
+                        },
+                        onBack = close,
+                    )
+
+                    null -> Unit
                 }
             }
 
@@ -407,50 +463,83 @@ fun DshmBotApp(
 
             key == SCREEN_SETTINGS -> SettingsScreen(
                 uiState = settingsUiState,
-                onBack = { settingsOpen = false },
+                engineSettings = engineSettingsViewModel,
+                onBack = {
+                    navForward = false
+                    settingsOpen = false
+                },
+                onOpenEngine = {
+                    navForward = true
+                    engineOpen = true
+                },
                 onThemeChange = settingsViewModel::setThemeMode,
-                onOpenEngine = { engineOpen = true },
-                onOpenAppearance = { appearanceOpen = true },
-                onOpenChatFont = { chatFontOpen = true },
-                onOpenLanguage = { languageOpen = true },
-                onOpenPage = { settingsPageName = it.name },
-                onOpenAccount = { accountOpen = true },
+                onOpenChatFont = {
+                    navForward = true
+                    chatFontOpen = true
+                },
+                onLanguageChange = settingsViewModel::setLanguage,
+                onOpenPage = {
+                    navForward = true
+                    settingsStack = ArrayList(settingsStack).apply { add(it.name) }
+                },
+                onOpenAccount = {
+                    navForward = true
+                    accountOpen = true
+                },
                 accountName = accountUi.name,
                 accountBalance = accountUi.balance,
                 accountAvatarUrl = accountUi.avatarUrl,
                 chatFontLabel = chatFontLabel(settingsUiState.chatFontSize),
                 languageLabel = languageLabel(settingsUiState.language),
                 engineStatus = engineStatusText,
+                dshVersion = engineViewModel.version,
+                reduceMotion = reduceMotion,
             )
 
             key == SCREEN_APPEARANCE -> AppearanceScreen(
                 themeMode = settingsUiState.themeMode,
                 onThemeChange = settingsViewModel::setThemeMode,
-                onBack = { appearanceOpen = false },
+                onBack = {
+                    navForward = false
+                    appearanceOpen = false
+                },
             )
 
             key == SCREEN_CHAT_FONT -> ChatFontScreen(
                 current = settingsUiState.chatFontSize,
                 onSelect = settingsViewModel::setChatFontSize,
-                onBack = { chatFontOpen = false },
+                onBack = {
+                    navForward = false
+                    chatFontOpen = false
+                },
             )
 
             key == SCREEN_LANGUAGE -> LanguageScreen(
                 current = settingsUiState.language,
                 onSelect = settingsViewModel::setLanguage,
-                onBack = { languageOpen = false },
+                onBack = {
+                    navForward = false
+                    languageOpen = false
+                },
             )
 
             key == SCREEN_ACCOUNT -> AccountScreen(
                 viewModel = accountViewModel,
-                onBack = { accountOpen = false },
+                onBack = {
+                    navForward = false
+                    accountOpen = false
+                },
             )
 
             key == SCREEN_SEARCH -> SearchScreen(
                 uiState = uiState,
                 onQueryChange = homeViewModel::setQuery,
-                onOpenBot = { openBotId = it },
+                onOpenBot = {
+                    navForward = true
+                    openBotId = it
+                },
                 onBack = {
+                    navForward = false
                     searchOpen = false
                     homeViewModel.setQuery("")
                 },
@@ -459,15 +548,40 @@ fun DshmBotApp(
             else -> HomeScreen(
                 uiState = uiState,
                 onQueryChange = homeViewModel::setQuery,
-                onOpenBot = { openBotId = it },
+                onOpenBot = {
+                    navForward = true
+                    openBotId = it
+                },
                 onCreateBot = {},
                 onCreateGroup = {},
-                onOpenSearch = { searchOpen = true },
-                onOpenSettings = { settingsOpen = true },
+                onOpenSearch = {
+                    navForward = true
+                    searchOpen = true
+                },
+                onOpenSettings = {
+                    navForward = true
+                    settingsOpen = true
+                },
                         engineLabel = engineNotice,
-                        onEngineClick = { engineOpen = true },
+                        onEngineClick = {
+                            navForward = true
+                            engineOpen = true
+                        },
             )
         }
+        }
+    }
+
+    if (settingsUiState.petEnabled) {
+        PetOverlay(
+            style = settingsUiState.petStyle,
+            size = settingsUiState.petSize,
+            reduceMotion = reduceMotion,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 96.dp),
+        )
+    }
     }
 }
 

@@ -1,6 +1,9 @@
 package com.dshm.bot.data.runtime
 
 import android.content.Context
+import android.os.Process as AndroidProcess
+import android.system.Os
+import android.system.OsConstants
 import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -91,15 +94,63 @@ class RuntimeLauncher(
         )
     }
 
-    /** 停止引擎：先结束 dsh 进程，再强制结束 proot；同时清理引用。 */
+    /**
+     * 停止引擎（对齐 manifest `launch.stop`）：
+     * 先给 guest 的 `dsh` 进程 SIGTERM，让它正常退出；proot 不响应 SIGTERM，
+     * 再对 proot 发 SIGQUIT 杀掉所有 tracee，最后才强制结束并清扫残留。
+     */
     fun stop() {
         val running = process ?: return
         EngineLog.log("stopping engine")
-        runCatching {
-            running.destroy()
-            if (!running.waitFor(5, TimeUnit.SECONDS)) running.destroyForcibly()
+        val rootfs = installer.rootfsDir
+        val records = engineProcesses(rootfs)
+        val node = records.filter { it.cmdline.contains("/opt/node") || it.cmdline.contains("/usr/local/bin/dsh") }
+        node.forEach { runCatching { Os.kill(it.pid, OsConstants.SIGTERM) } }
+        if (!waitExit(running, 5_000)) {
+            records.firstOrNull { it.cmdline.contains("libproot.so") }?.let {
+                runCatching { Os.kill(it.pid, OsConstants.SIGQUIT) }
+            }
+            if (!waitExit(running, 2_000)) runCatching { running.destroyForcibly() }
         }
+        // 仍属于本 rootfs 的 tracee 一并清掉（node 可能被 init 收养）。
+        engineProcesses(rootfs).forEach { record ->
+            runCatching { Os.kill(record.pid, OsConstants.SIGQUIT) }
+        }
+        runCatching { running.waitFor() }
         process = null
+        runCatching { File(rootfs, "tmp/dsh-web.pid").delete() }
+    }
+
+    private data class EngineProcess(val pid: Int, val cmdline: String)
+
+    private fun engineProcesses(rootfs: File): List<EngineProcess> {
+        val dir = File("/proc")
+        val uid = AndroidProcess.myUid()
+        return dir.listFiles()?.mapNotNull { entry ->
+            val pid = entry.name.toIntOrNull() ?: return@mapNotNull null
+            if (pid == AndroidProcess.myPid()) return@mapNotNull null
+            val cmdline = runCatching {
+                File(entry, "cmdline").readBytes().toString(Charsets.UTF_8).replace('\u0000', ' ')
+            }.getOrNull() ?: return@mapNotNull null
+            if (!cmdline.contains(rootfs.absolutePath)) return@mapNotNull null
+            val owner = runCatching {
+                File(entry, "status").readLines()
+                    .firstOrNull { it.startsWith("Uid:") }
+                    ?.split(Regex("\\s+"))
+                    ?.getOrNull(1)
+                    ?.toInt()
+            }.getOrNull()
+            if (owner != uid) return@mapNotNull null
+            EngineProcess(pid, cmdline)
+        }.orEmpty()
+    }
+
+    private fun waitExit(running: Process, millis: Long): Boolean {
+        val deadline = System.currentTimeMillis() + millis
+        while (running.isAlive && System.currentTimeMillis() < deadline) {
+            Thread.sleep(100)
+        }
+        return !running.isAlive
     }
 
     val isRunning: Boolean

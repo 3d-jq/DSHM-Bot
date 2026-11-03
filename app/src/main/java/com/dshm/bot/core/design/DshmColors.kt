@@ -14,6 +14,8 @@ import androidx.compose.ui.graphics.Color
 data class DshmColors(
     val isDark: Boolean,
     val background: Color,
+    /** 页面底色：浅色主题用浅灰，深色主题用深底；设置/主界面共用。 */
+    val pageBackground: Color,
     val surface: Color,
     val surfaceMuted: Color,
     val textPrimary: Color,
@@ -46,6 +48,7 @@ data class DshmColors(
         val Light = DshmColors(
             isDark = false,
             background = Color(0xFFFFFFFF),
+            pageBackground = Color(0xFFF1F2F4),
             surface = Color(0xFFFFFFFF),
             surfaceMuted = Color(0xFFF1F2F4),
             textPrimary = Color(0xFF0B0B0F),
@@ -71,6 +74,7 @@ data class DshmColors(
         val Dark = DshmColors(
             isDark = true,
             background = Color(0xFF0E0F12),
+            pageBackground = Color(0xFF0E0F12),
             surface = Color(0xFF14161A),
             surfaceMuted = Color(0xFF1C1F25),
             textPrimary = Color(0xFFF2F3F5),

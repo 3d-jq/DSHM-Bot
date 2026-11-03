@@ -15,11 +15,12 @@ import com.dshm.bot.R
 import com.dshm.bot.core.design.DshmTheme
 import com.dshm.bot.domain.model.ThemeMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** 设置页：分组渲染、主题行显示当前值、选择主题回调。 */
+/** 设置首页：分组渲染、真实值、搜索入口与子页回调。 */
 @RunWith(AndroidJUnit4::class)
 class SettingsScreenTest {
 
@@ -31,22 +32,24 @@ class SettingsScreenTest {
     private fun setContent(
         themeMode: ThemeMode = ThemeMode.SYSTEM,
         onThemeChange: (ThemeMode) -> Unit = {},
-        onOpenAppearance: () -> Unit = {},
+        onOpenPage: (SettingsPageId) -> Unit = {},
     ) {
+        val engineSettings = EngineSettingsViewModel()
         composeRule.setContent {
             DshmTheme(darkTheme = false) {
                 SettingsScreen(
                     uiState = SettingsUiState(themeMode = themeMode),
+                    engineSettings = engineSettings,
                     onBack = {},
-                    onThemeChange = onThemeChange,
                     onOpenEngine = {},
-                    onOpenAppearance = onOpenAppearance,
+                    onThemeChange = onThemeChange,
                     onOpenChatFont = {},
-                    onOpenLanguage = {},
+                    onLanguageChange = {},
+                    onOpenPage = onOpenPage,
+                    onOpenAccount = {},
                     chatFontLabel = "标准",
                     languageLabel = "跟随系统",
-                    engineStatus = "运行中",
-                    onOpenAccount = {},
+                    engineStatus = "未运行",
                 )
             }
         }
@@ -57,7 +60,7 @@ class SettingsScreenTest {
         setContent()
         composeRule.onNodeWithText(context.getString(R.string.settings_group_ai)).assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.settings_group_appearance)).assertIsDisplayed()
-        composeRule.onAllNodesWithText(ThemeMode.SYSTEM.label(context)).onFirst().assertIsDisplayed()
+        composeRule.onAllNodesWithText(context.getString(R.string.theme_system)).onFirst().assertIsDisplayed()
 
         val about = context.getString(R.string.settings_group_about)
         composeRule.onNodeWithTag(SETTINGS_LIST_TAG).performScrollToNode(hasText(about))
@@ -69,29 +72,19 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun themeRowOpensAppearancePage() {
-        var opened = false
-        setContent(onOpenAppearance = { opened = true })
+    fun themeRowOpensPickerSheet() {
+        var picked: ThemeMode? = null
+        setContent(onThemeChange = { picked = it })
+        composeRule.onNode(hasText(context.getString(R.string.settings_group_appearance))).performClick()
+        composeRule.onNodeWithText(context.getString(R.string.theme_dark)).performClick()
+        assertEquals(ThemeMode.DARK, picked)
+    }
 
-        composeRule.onNode(hasText(context.getString(R.string.settings_theme))).performClick()
-
-        assertEquals(true, opened)
+    @Test
+    fun modelRowOpensModelPage() {
+        var picked: SettingsPageId? = null
+        setContent(onOpenPage = { picked = it })
+        composeRule.onNode(hasText(context.getString(R.string.settings_model))).performClick()
+        assertEquals(SettingsPageId.MODEL, picked)
     }
 }
-
-/** 主题文案（与 ThemeMode 对应）。 */
-internal fun ThemeMode.label(context: android.content.Context): String = context.getString(
-    when (this) {
-        ThemeMode.SYSTEM -> R.string.theme_system
-        ThemeMode.LIGHT -> R.string.theme_light
-        ThemeMode.DARK -> R.string.theme_dark
-    },
-)
-
-
-
-
-
-
-
-

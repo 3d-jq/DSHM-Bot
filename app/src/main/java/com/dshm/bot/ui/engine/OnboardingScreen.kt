@@ -38,7 +38,7 @@ fun OnboardingScreen(
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Scaffold(modifier = modifier.fillMaxSize(), containerColor = Dshm.colors.background) { padding ->
+    Scaffold(modifier = modifier.fillMaxSize(), containerColor = Dshm.colors.pageBackground) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()

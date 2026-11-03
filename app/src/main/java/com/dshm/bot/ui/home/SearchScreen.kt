@@ -55,7 +55,7 @@ fun SearchScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Dshm.colors.background)
+            .background(Dshm.colors.pageBackground)
             .statusBarsPadding(),
     ) {
         Row(

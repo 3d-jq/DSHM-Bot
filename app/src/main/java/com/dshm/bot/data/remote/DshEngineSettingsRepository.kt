@@ -4,67 +4,198 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 引擎设置（对齐 dsh-Go `engine_settings_api.dart`）：
- * - `settings/describe` → namespaces[{ns, revision, value, ...}]
- * - `settings/mutate {ns, ops:[{op:'set', path:[...], value}], expectedRevision}`
+ * 引擎设置（对齐 dsh-Go `dsh_client` 的 engine_settings_api / providers_api /
+ * session_api 子集）：
+ *
+ * - `settings/describe` → 每个 namespace 的 schema / value / base / user / secrets
+ * - `settings/mutate {ns, ops, expectedRevision}` → 新的 namespace 视图
+ * - `pluginInventory/list` → 插件条目
+ * - `permissionPresets/catalog` → 权限预设
+ * - `credentials/describe|set|unset` → API Key（值永远不回显）
  */
 class DshEngineSettingsRepository(private val client: DshClient) {
 
-    data class Namespace(
-        val ns: String,
-        val revision: Int,
-        val value: JSONObject,
-    )
-
-    suspend fun describe(): List<Namespace> {
+    suspend fun describe(): SettingsDescription {
         val root = client.rpc("settings/describe")
-        val array = root.optJSONArray("namespaces") ?: return emptyList()
-        return buildList {
-            for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                val ns = item.optString("ns")
-                if (ns.isEmpty()) continue
-                add(Namespace(ns, item.optInt("revision", 0), item.optJSONObject("value") ?: JSONObject()))
-            }
+        val writable = root.optBoolean("writable", true)
+        val namespaces = LinkedHashMap<String, SettingsNamespace>()
+        val array = root.optJSONArray("namespaces") ?: JSONArray()
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val namespace = SettingsNamespace.fromJson(item, writable) ?: continue
+            namespaces[namespace.ns] = namespace
         }
+        return SettingsDescription(
+            namespaces = namespaces,
+            writable = writable,
+            hasDocument = root.optBoolean("hasDocument", false),
+        )
     }
 
-    data class Plugin(val entryId: String, val moduleName: String, val enabled: Boolean)
+    suspend fun mutate(
+        ns: String,
+        ops: List<SettingsOp>,
+        expectedRevision: Int?,
+        writable: Boolean = true,
+    ): SettingsNamespace {
+        val args = JSONObject()
+            .put("ns", ns)
+            .put("ops", JSONArray().apply { ops.forEach { put(it.toJson()) } })
+        if (expectedRevision != null) args.put("expectedRevision", expectedRevision)
+        val root = client.rpc("settings/mutate", args)
+        return SettingsNamespace.fromJson(root, writable)
+            ?: error("settings/mutate 返回了无效的 namespace：$ns")
+    }
 
-    /** `pluginInventory/list`：引擎里已加载的插件条目。 */
-    suspend fun plugins(): List<Plugin> {
+    suspend fun pluginInventory(): PluginInventory {
         val root = client.rpc("pluginInventory/list")
-        val array = root.optJSONArray("entries")
-            ?: root.optJSONArray("plugins")
-            ?: root.optJSONArray("items")
-            ?: return emptyList()
-        return buildList {
+        val entries = mutableListOf<PluginInventoryEntry>()
+        root.optJSONArray("entries")?.let { array ->
             for (index in 0 until array.length()) {
                 val item = array.optJSONObject(index) ?: continue
                 val entryId = item.optString("entryId")
                 val moduleName = item.optString("moduleName")
                 if (entryId.isEmpty() && moduleName.isEmpty()) continue
-                add(Plugin(entryId, moduleName, item.optBoolean("enabled", false)))
+                entries.add(
+                    PluginInventoryEntry(
+                        entryId = entryId,
+                        moduleName = moduleName,
+                        enabled = item.optBoolean("enabled", false),
+                        fiberPhase = item.anyOrNull("fiberPhase") as? String,
+                        meta = PluginDisplayMeta.fromJson(item.optJSONObject("meta")),
+                    ),
+                )
+            }
+        }
+        return PluginInventory(
+            entries = entries,
+            managementAvailable = root.optBoolean("managementAvailable", false),
+        )
+    }
+
+    /** `pluginManager/listBundles`：官方可选包 + 第三方已安装包（隐藏基础设施包）。 */
+    suspend fun pluginBundles(): List<PluginBundle> {
+        val array = client.rpcValue("pluginManager/listBundles") as? JSONArray ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val bundle = parsePluginBundle(item)
+                if (bundle.name.isNotEmpty() && bundle.group != PluginBundleGroup.HIDDEN) add(bundle)
             }
         }
     }
 
-    suspend fun setBoolean(namespace: Namespace, path: String, value: Boolean) {
-        client.rpc(
-            "settings/mutate",
-            JSONObject()
-                .put("ns", namespace.ns)
-                .put(
-                    "ops",
-                    JSONArray().put(
-                        JSONObject()
-                            .put("op", "set")
-                            .put("path", JSONArray().put(path))
-                            .put("value", value),
-                    ),
-                )
-                .put("expectedRevision", namespace.revision),
+    /** 返回 null 表示 Host 接受；否则是错误文案。 */
+    suspend fun setPluginBundleEnabled(name: String, enabled: Boolean): String? {
+        val result = client.rpc(
+            "pluginManager/setBundleEnabled",
+            JSONObject().put("name", name).put("enabled", enabled),
+        )
+        val error = result.optJSONObject("error") ?: return null
+        return (error.anyOrNull("diagnostic") as? String)
+            ?: (error.anyOrNull("code") as? String)
+            ?: "操作失败"
+    }
+
+    suspend fun permissionCatalog(): PermissionCatalog {
+        val root = client.rpc("permissionPresets/catalog")
+        fun options(raw: JSONArray?): List<PermissionOption> {
+            if (raw == null) return emptyList()
+            return buildList {
+                for (index in 0 until raw.length()) {
+                    val item = raw.optJSONObject(index) ?: continue
+                    val value = item.optString("value")
+                    if (value.isEmpty()) continue
+                    add(
+                        PermissionOption(
+                            value = value,
+                            name = item.optString("name", value),
+                            description = item.anyOrNull("description") as? String,
+                        ),
+                    )
+                }
+            }
+        }
+        val all = options(root.optJSONArray("options"))
+        val defaults = if (root.has("defaultOptions")) {
+            options(root.optJSONArray("defaultOptions"))
+        } else {
+            all.filterNot { it.value == "auto" }
+        }
+        return PermissionCatalog(
+            options = all,
+            defaultOptions = defaults,
+            defaultPreset = root.optString("defaultPreset"),
         )
     }
-}
 
+    suspend fun describeCredentials(refs: List<String>): Map<String, CredentialStatus> {
+        if (refs.isEmpty()) return emptyMap()
+        val root = client.rpc("credentials/describe", JSONObject().put("refs", JSONArray(refs)))
+        val out = LinkedHashMap<String, CredentialStatus>()
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val item = root.optJSONObject(key) ?: continue
+            out[key] = CredentialStatus(
+                configured = item.optBoolean("configured", false),
+                writable = item.optBoolean("writable", false),
+                source = item.anyOrNull("source") as? String,
+            )
+        }
+        return out
+    }
+
+    suspend fun setCredential(ref: String, value: String) {
+        require(value.isNotBlank()) { "API Key 不能为空" }
+        client.rpc("credentials/set", JSONObject().put("ref", ref).put("value", value))
+    }
+
+    suspend fun unsetCredential(ref: String) {
+        client.rpc("credentials/unset", JSONObject().put("ref", ref))
+    }
+
+    /** 只取一个 namespace，用于 providers / permission 这类单独页面。 */
+    suspend fun section(ns: String): SettingsNamespace? = describe().namespace(ns)
+
+    data class ListedProvider(val id: String, val name: String)
+
+    /** `llm/listProviders`：引擎当前注册的渠道（官方 / 订阅）。 */
+    suspend fun listProviders(): List<ListedProvider> {
+        val array = client.rpcValue("llm/listProviders") as? JSONArray ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val id = item.optString("id")
+                if (id.isEmpty()) continue
+                add(ListedProvider(id = id, name = item.optString("name").ifEmpty { id }))
+            }
+        }
+    }
+
+    /** `llm/discoverModels`：向 draft 端点要模型列表，不落库。 */
+    suspend fun discoverModels(baseUrl: String, api: String, apiKey: String): List<String> {
+        val request = JSONObject()
+            .put("baseURL", baseUrl)
+            .put("api", api)
+        if (apiKey.isNotBlank()) request.put("apiKey", apiKey)
+        val value = client.rpcValue(
+            "llm/discoverModels",
+            JSONObject().put("settingsNs", PROVIDER_NAMESPACE).put("request", request),
+        )
+        val array = value as? JSONArray ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val id = item.optString("id")
+                if (id.isNotEmpty()) add(id)
+            }
+        }
+    }
+
+    suspend fun providerSettings(): ProviderSettings =
+        ProviderSettings.fromNamespace(describe().namespace(PROVIDER_NAMESPACE))
+
+    /** 权限页：`permission` namespace 的 revision + 用户层 defaultPreset。 */
+    suspend fun permissionSection(): SettingsNamespace? = describe().namespace("permission")
+}
