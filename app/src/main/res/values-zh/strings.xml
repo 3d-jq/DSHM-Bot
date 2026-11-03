@@ -165,7 +165,9 @@
     <string name="personalization_hint">你的个人 AGENTS.md，引擎会在内置文件之后加载。写清楚 Bot 应该如何配合你。</string>
     <string name="personalization_save">保存</string>
     <string name="personalization_saved">已保存</string>
+    <string name="composer_voice">语音输入</string>
 </resources>
+
 
 
 

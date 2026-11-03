@@ -165,7 +165,9 @@
     <string name="personalization_hint">Your own AGENTS.md, loaded by the engine after its managed one. Describe how the bots should work with you.</string>
     <string name="personalization_save">Save</string>
     <string name="personalization_saved">Saved</string>
+    <string name="composer_voice">Voice input</string>
 </resources>
+
 
 
 

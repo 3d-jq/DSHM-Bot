@@ -1,5 +1,9 @@
 package com.dshm.bot.ui.chat
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -59,6 +64,18 @@ fun ChatComposer(
     val colors = Dshm.colors
     val spacing = Dshm.spacing
     val shape = RoundedCornerShape(Dshm.radius.composer)
+    val context = LocalContext.current
+    // 语音输入：用系统识别服务（dsh-Go 的「自动/系统」路径），结果回填输入框。
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val spoken = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+        if (!spoken.isNullOrBlank()) {
+            onValueChange(listOf(value, spoken).filter { it.isNotBlank() }.joinToString(" "))
+        }
+    }
     val scaledText = Dshm.typography.composerText.copy(
         fontSize = Dshm.typography.composerText.fontSize * textScale,
         lineHeight = Dshm.typography.composerText.lineHeight * textScale,
@@ -85,6 +102,18 @@ fun ChatComposer(
             icon = R.drawable.ic_lucide_plus,
             contentDescription = stringResource(R.string.composer_attach),
             onClick = onAttach,
+        )
+        Spacer(Modifier.width(spacing.sm))
+        ComposerKey(
+            icon = R.drawable.ic_lucide_mic,
+            contentDescription = stringResource(R.string.composer_voice),
+            onClick = {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_PROMPT, placeholder)
+                }
+                runCatching { speechLauncher.launch(intent) }
+            },
         )
         Spacer(Modifier.width(spacing.sm))
         // 直接放进 Row：minLines=1、maxLines=6，按行数自然增高；

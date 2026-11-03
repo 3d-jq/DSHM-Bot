@@ -346,6 +346,7 @@ fun DshmBotApp(
                             stringResource(R.string.voice_hint_system),
                             stringResource(R.string.voice_hint_engine),
                         ),
+                        hint = stringResource(R.string.voice_model_hint),
                     )
 
                     SettingsPageId.PERFORMANCE -> OptionSettingsPage(
@@ -471,6 +472,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 
