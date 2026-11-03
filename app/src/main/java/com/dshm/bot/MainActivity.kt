@@ -1,17 +1,19 @@
 package com.dshm.bot
 
-import android.app.LocaleManager
+import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
-import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -31,6 +33,22 @@ class MainActivity : ComponentActivity() {
             val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
             val dark = settings.themeMode.isDark(isSystemInDarkTheme())
 
+            // 语言：用本地化 Context 提供字符串资源，不重建 Activity，切换即时且不闪屏。
+            val localizedContext = remember(settings.language) {
+                val locales = when (settings.language) {
+                    AppLanguage.SYSTEM -> null
+                    AppLanguage.CHINESE -> LocaleList.forLanguageTags("zh-CN")
+                    AppLanguage.ENGLISH -> LocaleList.forLanguageTags("en")
+                }
+                if (locales == null) {
+                    applicationContext
+                } else {
+                    val configuration = Configuration(applicationContext.resources.configuration)
+                    configuration.setLocales(locales)
+                    applicationContext.createConfigurationContext(configuration)
+                }
+            }
+
             // 窗口底色与状态栏/导航栏图标跟随 App 主题（不只是系统主题），
             // 避免深色 App 配浅色系统时，状态栏区域和转场缝隙露出白色。
             LaunchedEffect(dark) {
@@ -42,27 +60,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // 语言：真正应用到系统 per-app locale（API 33+），会重建 Activity 生效。
-            LaunchedEffect(settings.language) {
-                applyLanguage(settings.language)
+            CompositionLocalProvider(LocalContext provides localizedContext) {
+                DshmTheme(darkTheme = dark) {
+                    DshmBotApp(settingsViewModel = settingsViewModel)
+                }
             }
-
-            DshmTheme(darkTheme = dark) {
-                DshmBotApp(settingsViewModel = settingsViewModel)
-            }
-        }
-    }
-
-    private fun applyLanguage(language: AppLanguage) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val manager = getSystemService(LocaleManager::class.java) ?: return
-        val desired = when (language) {
-            AppLanguage.SYSTEM -> LocaleList.getEmptyLocaleList()
-            AppLanguage.CHINESE -> LocaleList.forLanguageTags("zh-CN")
-            AppLanguage.ENGLISH -> LocaleList.forLanguageTags("en")
-        }
-        if (manager.applicationLocales != desired) {
-            manager.applicationLocales = desired
         }
     }
 }

@@ -59,6 +59,7 @@ import com.dshm.bot.ui.settings.settingsPageInfo
 import com.dshm.bot.ui.settings.EngineSettingsScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
 import com.dshm.bot.domain.model.InterfaceMode
+import com.dshm.bot.domain.model.scale
 import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.ui.settings.SettingsViewModel
@@ -201,7 +202,10 @@ fun DshmBotApp(
             appearanceOpen -> appearanceOpen = false
             chatFontOpen -> chatFontOpen = false
             languageOpen -> languageOpen = false
-            settingsPageName != null -> settingsPageName = null
+            settingsPageName != null -> {
+                settingsPageName = null
+                settingsOpen = true
+            }
             accountOpen -> accountOpen = false
             openBotId != null -> openBotId = null
             settingsOpen -> settingsOpen = false
@@ -257,7 +261,7 @@ fun DshmBotApp(
                 val botId = key.removePrefix(CHAT_PREFIX)
                 val openBot = uiState.rows.firstOrNull { it.id == botId }
                 if (openBot != null) {
-                    BotChatPlaceholderScreen(bot = openBot, onBack = { openBotId = null })
+                    BotChatPlaceholderScreen(bot = openBot, onBack = { openBotId = null }, fontScale = settingsUiState.chatFontSize.scale())
                 } else {
                     HomeScreen(
                         uiState = uiState,
@@ -328,6 +332,11 @@ fun DshmBotApp(
                         selectedIndex = settingsUiState.voiceMode.ordinal,
                         onPick = { settingsViewModel.setVoiceMode(VoiceMode.entries[it]) },
                         onBack = close,
+                        subtitles = listOf(
+                            stringResource(R.string.voice_hint_auto),
+                            stringResource(R.string.voice_hint_system),
+                            stringResource(R.string.voice_hint_engine),
+                        ),
                     )
 
                     SettingsPageId.PERFORMANCE -> OptionSettingsPage(
@@ -420,6 +429,9 @@ fun DshmBotApp(
         }
     }
 }
+
+
+
 
 
 

@@ -145,7 +145,7 @@
     <string name="api_key_hint">粘贴 DeepSeek API Key。它加密保存在本机，并在启动本机引擎时注入。</string>
     <string name="interface_web">网页</string>
     <string name="voice_system">系统</string>
-    <string name="voice_engine">引擎</string>
+    <string name="voice_engine">语音模型</string>
     <string name="performance_full">完整</string>
     <string name="performance_light">轻量</string>
     <string name="info_engine_required">连接本机引擎后可配置。</string>
@@ -156,7 +156,15 @@
     <string name="notify_channel_engine">本机引擎</string>
     <string name="notify_engine_ready_title">本机引擎已就绪</string>
     <string name="notify_engine_ready_body">DSHM Bot 现在可以连接 DSH 了。</string>
+    <string name="voice_hint_auto">有语音模型时用它，否则用系统识别</string>
+    <string name="voice_hint_system">使用手机设置中的识别服务</string>
+    <string name="voice_hint_engine">用引擎里的语音模型识别</string>
+    <string name="voice_section_mode">识别方式</string>
+    <string name="voice_section_model">语音模型</string>
+    <string name="voice_model_hint">SenseVoice 模型运行在本机引擎里，接入 dsh-Go 的语音模型下载后再启用。</string>
 </resources>
+
+
 
 
 

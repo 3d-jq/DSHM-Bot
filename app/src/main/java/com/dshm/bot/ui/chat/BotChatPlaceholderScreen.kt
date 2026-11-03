@@ -53,6 +53,7 @@ fun BotChatPlaceholderScreen(
     bot: ChatRowUi,
     onBack: () -> Unit,
     onDetails: () -> Unit = {},
+    fontScale: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -157,7 +158,7 @@ fun BotChatPlaceholderScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                     ) {
-                        items(sent) { message -> UserBubble(message) }
+                        items(sent) { message -> UserBubble(message, fontScale) }
                     }
                 }
             }
@@ -171,6 +172,7 @@ fun BotChatPlaceholderScreen(
                     }
                 },
                 placeholder = stringResource(R.string.composer_placeholder, bot.name),
+                textScale = fontScale,
                 modifier = Modifier
                     .padding(horizontal = Dshm.spacing.lg)
                     .padding(bottom = Dshm.spacing.composerBottomInset),
@@ -181,14 +183,17 @@ fun BotChatPlaceholderScreen(
 
 /** 用户消息气泡（本地占位，接入 DSH 后由真实消息替换）。 */
 @Composable
-private fun UserBubble(text: String) {
+private fun UserBubble(text: String, fontScale: Float) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
     ) {
         Text(
             text = text,
-            style = Dshm.typography.composerText,
+            style = Dshm.typography.composerText.copy(
+                fontSize = Dshm.typography.composerText.fontSize * fontScale,
+                lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
+            ),
             color = Dshm.colors.onAccent,
             modifier = Modifier
                 .background(Dshm.colors.accent, RoundedCornerShape(Dshm.radius.lg))

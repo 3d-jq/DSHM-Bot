@@ -145,7 +145,7 @@
     <string name="api_key_hint">Paste your DeepSeek API Key. It is stored encrypted on this phone and passed to the local engine at launch.</string>
     <string name="interface_web">Web</string>
     <string name="voice_system">System</string>
-    <string name="voice_engine">Engine</string>
+    <string name="voice_engine">Voice model</string>
     <string name="performance_full">Full</string>
     <string name="performance_light">Light</string>
     <string name="info_engine_required">Connect the local engine to configure this.</string>
@@ -156,7 +156,15 @@
     <string name="notify_channel_engine">Local engine</string>
     <string name="notify_engine_ready_title">Local engine ready</string>
     <string name="notify_engine_ready_body">DSHM Bot can talk to DSH now.</string>
+    <string name="voice_hint_auto">Uses the voice model when it’s ready, otherwise the phone’s service</string>
+    <string name="voice_hint_system">Use the recognition service selected on this phone</string>
+    <string name="voice_hint_engine">Recognizes speech with the engine’s voice model</string>
+    <string name="voice_section_mode">Recognition</string>
+    <string name="voice_section_model">Voice model</string>
+    <string name="voice_model_hint">The SenseVoice model runs in the local engine. Download it from dsh-Go’s voice settings once wired.</string>
 </resources>
+
+
 
 
 

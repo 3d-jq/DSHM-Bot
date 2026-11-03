@@ -54,10 +54,16 @@ fun ChatComposer(
     onAttach: () -> Unit = {},
     sendEnabled: Boolean = ComposerRules.canSend(value),
     maxLines: Int = 6,
+    textScale: Float = 1f,
 ) {
     val colors = Dshm.colors
     val spacing = Dshm.spacing
     val shape = RoundedCornerShape(Dshm.radius.composer)
+    val scaledText = Dshm.typography.composerText.copy(
+        fontSize = Dshm.typography.composerText.fontSize * textScale,
+        lineHeight = Dshm.typography.composerText.lineHeight * textScale,
+        color = colors.textPrimary,
+    )
 
     Row(
         modifier = modifier
@@ -86,7 +92,7 @@ fun ChatComposer(
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            textStyle = Dshm.typography.composerText.copy(color = colors.textPrimary),
+            textStyle = scaledText,
             cursorBrush = SolidColor(colors.accent),
             minLines = 1,
             maxLines = maxLines,
@@ -97,7 +103,7 @@ fun ChatComposer(
                 if (value.isEmpty()) {
                     Text(
                         text = placeholder,
-                        style = Dshm.typography.composerText,
+                        style = scaledText.copy(color = colors.textTertiary),
                         color = colors.textTertiary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

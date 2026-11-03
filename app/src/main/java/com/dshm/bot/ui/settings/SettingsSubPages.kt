@@ -54,6 +54,7 @@ fun OptionSettingsPage(
     onPick: (Int) -> Unit,
     onBack: () -> Unit,
     hint: String? = null,
+    subtitles: List<String>? = null,
 ) {
     SettingsPageScaffold(title = title, onBack = onBack) {
         val shape = RoundedCornerShape(Dshm.radius.lg)
@@ -78,12 +79,21 @@ fun OptionSettingsPage(
                         .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = label,
-                        style = Dshm.typography.rowTitle,
-                        color = Dshm.colors.textPrimary,
-                        modifier = Modifier.weight(1f),
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = label,
+                            style = Dshm.typography.rowTitle,
+                            color = Dshm.colors.textPrimary,
+                        )
+                        val subtitle = subtitles?.getOrNull(index)
+                        if (subtitle != null) {
+                            Text(
+                                text = subtitle,
+                                style = Dshm.typography.rowPreview,
+                                color = Dshm.colors.textSecondary,
+                            )
+                        }
+                    }
                     RadioButton(selected = index == selectedIndex, onClick = { onPick(index) })
                 }
                 if (index != options.lastIndex) {
@@ -187,5 +197,6 @@ internal fun performanceLabel(mode: PerformanceMode): String = stringResource(
         PerformanceMode.LIGHT -> R.string.performance_light
     },
 )
+
 
 

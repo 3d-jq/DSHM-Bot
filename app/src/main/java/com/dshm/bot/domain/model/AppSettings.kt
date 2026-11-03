@@ -3,6 +3,14 @@ package com.dshm.bot.domain.model
 /** 对话字号（设置 → 外观 → 对话字号）。 */
 enum class ChatFontSize { SMALL, STANDARD, LARGE, XLARGE }
 
+/** 对话文字缩放（标准 = 1.0），供聊天页实际应用。 */
+fun ChatFontSize.scale(): Float = when (this) {
+    ChatFontSize.SMALL -> 0.9f
+    ChatFontSize.STANDARD -> 1f
+    ChatFontSize.LARGE -> 1.12f
+    ChatFontSize.XLARGE -> 1.24f
+}
+
 /** 界面语言（设置 → 通用 → 语言）。 */
 enum class AppLanguage { SYSTEM, CHINESE, ENGLISH }
 
