@@ -57,6 +57,8 @@ import com.dshm.bot.ui.settings.performanceLabel
 import com.dshm.bot.ui.settings.settingsPageTitle
 import com.dshm.bot.ui.settings.settingsPageInfo
 import com.dshm.bot.ui.settings.EngineSettingsScreen
+import com.dshm.bot.ui.settings.PluginsScreen
+import com.dshm.bot.ui.settings.WebHostScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
 import com.dshm.bot.domain.model.InterfaceMode
 import com.dshm.bot.domain.model.scale
@@ -74,12 +76,14 @@ private const val SCREEN_CHAT_FONT = "chat-font"
 private const val SCREEN_LANGUAGE = "language"
 private const val SCREEN_ACCOUNT = "account"
 private const val SCREEN_SETTINGS_PAGE = "settings-page"
+private const val SCREEN_WEB = "web"
 private const val CHAT_PREFIX = "chat:"
 
 private fun depthOf(key: String): Int = when {
     key == SCREEN_HOME || key == SCREEN_ONBOARDING -> 0
     key == SCREEN_SEARCH || key == SCREEN_SETTINGS -> 1
     key == SCREEN_ENGINE || key == SCREEN_APPEARANCE || key == SCREEN_CHAT_FONT || key == SCREEN_LANGUAGE || key == SCREEN_ACCOUNT || key == SCREEN_SETTINGS_PAGE || key.startsWith(CHAT_PREFIX) -> 2
+    key == SCREEN_WEB -> 0
     else -> 1
 }
 
@@ -142,6 +146,7 @@ fun DshmBotApp(
     var languageOpen by rememberSaveable { mutableStateOf(false) }
     var accountOpen by rememberSaveable { mutableStateOf(false) }
     var settingsPageName by rememberSaveable { mutableStateOf<String?>(null) }
+    val webMode = settingsUiState.interfaceMode == InterfaceMode.WEB && engineState is RuntimeState.Running
     // 已装运行时（含已停止）就不再走开屏引导：启动 App 直接进主界面。
     var onboardingDone by rememberSaveable { mutableStateOf(engineState !is RuntimeState.NotInstalled) }
 
@@ -170,6 +175,7 @@ fun DshmBotApp(
 
     val screenKey = when {
         !onboardingDone -> SCREEN_ONBOARDING
+        webMode && !settingsOpen && openBotId == null && !searchOpen -> SCREEN_WEB
         engineOpen -> SCREEN_ENGINE
         appearanceOpen -> SCREEN_APPEARANCE
         chatFontOpen -> SCREEN_CHAT_FONT
@@ -195,8 +201,9 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsPageName != null || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsPageName != null || webMode || !onboardingDone) {
         when {
+            webMode -> settingsViewModel.setInterfaceMode(InterfaceMode.NATIVE)
             !onboardingDone -> Unit
             engineOpen -> engineOpen = false
             appearanceOpen -> appearanceOpen = false
@@ -351,6 +358,11 @@ fun DshmBotApp(
                         onBack = close,
                     )
 
+                    SettingsPageId.PLUGINS -> PluginsScreen(
+                        viewModel = engineSettingsViewModel,
+                        onBack = close,
+                    )
+
                     SettingsPageId.ENGINE_PARAMS -> EngineSettingsScreen(
                         viewModel = engineSettingsViewModel,
                         onBack = close,
@@ -363,6 +375,8 @@ fun DshmBotApp(
                     )
                 }
             }
+
+            key == SCREEN_WEB -> WebHostScreen(endpoint = (engineState as? RuntimeState.Running)?.endpoint)
 
             key == SCREEN_SETTINGS -> SettingsScreen(
                 uiState = settingsUiState,
@@ -429,6 +443,9 @@ fun DshmBotApp(
         }
     }
 }
+
+
+
 
 
 

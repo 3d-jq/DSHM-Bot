@@ -19,6 +19,7 @@ class EngineSettingsViewModel : ViewModel() {
     data class UiState(
         val loading: Boolean = false,
         val namespaces: List<DshEngineSettingsRepository.Namespace> = emptyList(),
+        val plugins: List<DshEngineSettingsRepository.Plugin> = emptyList(),
         val error: String? = null,
     )
 
@@ -39,8 +40,14 @@ class EngineSettingsViewModel : ViewModel() {
         val repo = repository ?: return
         _ui.value = _ui.value.copy(loading = true, error = null)
         viewModelScope.launch {
-            runCatching { repo.describe() }
-                .onSuccess { _ui.value = UiState(namespaces = it) }
+            runCatching {
+                val namespaces = repo.describe()
+                val plugins = runCatching { repo.plugins() }.getOrDefault(emptyList())
+                namespaces to plugins
+            }
+                .onSuccess { (namespaces, plugins) ->
+                    _ui.value = UiState(namespaces = namespaces, plugins = plugins)
+                }
                 .onFailure { _ui.value = _ui.value.copy(loading = false, error = it.message) }
         }
     }
@@ -60,3 +67,4 @@ class EngineSettingsViewModel : ViewModel() {
         }
     }
 }
+

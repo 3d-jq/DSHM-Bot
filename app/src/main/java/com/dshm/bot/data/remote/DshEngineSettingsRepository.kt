@@ -29,6 +29,26 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         }
     }
 
+    data class Plugin(val entryId: String, val moduleName: String, val enabled: Boolean)
+
+    /** `pluginInventory/list`：引擎里已加载的插件条目。 */
+    suspend fun plugins(): List<Plugin> {
+        val root = client.rpc("pluginInventory/list")
+        val array = root.optJSONArray("entries")
+            ?: root.optJSONArray("plugins")
+            ?: root.optJSONArray("items")
+            ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val entryId = item.optString("entryId")
+                val moduleName = item.optString("moduleName")
+                if (entryId.isEmpty() && moduleName.isEmpty()) continue
+                add(Plugin(entryId, moduleName, item.optBoolean("enabled", false)))
+            }
+        }
+    }
+
     suspend fun setBoolean(namespace: Namespace, path: String, value: Boolean) {
         client.rpc(
             "settings/mutate",
@@ -47,3 +67,4 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         )
     }
 }
+
