@@ -59,6 +59,7 @@ import com.dshm.bot.ui.settings.settingsPageInfo
 import com.dshm.bot.ui.settings.EngineSettingsScreen
 import com.dshm.bot.ui.settings.EngineNamespacesScreen
 import com.dshm.bot.ui.settings.PluginsScreen
+import com.dshm.bot.ui.settings.PersonalizationScreen
 import com.dshm.bot.ui.settings.WebHostScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
 import com.dshm.bot.domain.model.InterfaceMode
@@ -359,6 +360,8 @@ fun DshmBotApp(
                         onBack = close,
                     )
 
+                    SettingsPageId.PERSONALIZATION -> PersonalizationScreen(onBack = close)
+
                     SettingsPageId.MODEL -> EngineNamespacesScreen(
                         viewModel = engineSettingsViewModel,
                         title = stringResource(R.string.settings_model),
@@ -468,6 +471,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 

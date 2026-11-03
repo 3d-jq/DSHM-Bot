@@ -162,7 +162,11 @@
     <string name="voice_section_mode">Recognition</string>
     <string name="voice_section_model">Voice model</string>
     <string name="voice_model_hint">The SenseVoice model runs in the local engine. Download it from dsh-Go’s voice settings once wired.</string>
+    <string name="personalization_hint">Your own AGENTS.md, loaded by the engine after its managed one. Describe how the bots should work with you.</string>
+    <string name="personalization_save">Save</string>
+    <string name="personalization_saved">Saved</string>
 </resources>
+
 
 
 

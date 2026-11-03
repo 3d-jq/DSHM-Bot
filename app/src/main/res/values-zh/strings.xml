@@ -162,7 +162,11 @@
     <string name="voice_section_mode">识别方式</string>
     <string name="voice_section_model">语音模型</string>
     <string name="voice_model_hint">SenseVoice 模型运行在本机引擎里，接入 dsh-Go 的语音模型下载后再启用。</string>
+    <string name="personalization_hint">你的个人 AGENTS.md，引擎会在内置文件之后加载。写清楚 Bot 应该如何配合你。</string>
+    <string name="personalization_save">保存</string>
+    <string name="personalization_saved">已保存</string>
 </resources>
+
 
 
 
