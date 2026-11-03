@@ -1,7 +1,10 @@
 package com.dshm.bot
 
+import android.app.LocaleManager
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
+import android.os.LocaleList
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -14,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.DshmColors
 import com.dshm.bot.core.design.DshmTheme
+import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.ui.settings.SettingsViewModel
 
 class MainActivity : ComponentActivity() {
@@ -38,9 +42,27 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // 语言：真正应用到系统 per-app locale（API 33+），会重建 Activity 生效。
+            LaunchedEffect(settings.language) {
+                applyLanguage(settings.language)
+            }
+
             DshmTheme(darkTheme = dark) {
                 DshmBotApp(settingsViewModel = settingsViewModel)
             }
+        }
+    }
+
+    private fun applyLanguage(language: AppLanguage) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val manager = getSystemService(LocaleManager::class.java) ?: return
+        val desired = when (language) {
+            AppLanguage.SYSTEM -> LocaleList.getEmptyLocaleList()
+            AppLanguage.CHINESE -> LocaleList.forLanguageTags("zh-CN")
+            AppLanguage.ENGLISH -> LocaleList.forLanguageTags("en")
+        }
+        if (manager.applicationLocales != desired) {
+            manager.applicationLocales = desired
         }
     }
 }

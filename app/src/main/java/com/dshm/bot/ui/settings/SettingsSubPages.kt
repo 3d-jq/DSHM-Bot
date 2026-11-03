@@ -1,6 +1,7 @@
 package com.dshm.bot.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,11 +12,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
@@ -53,25 +56,42 @@ fun OptionSettingsPage(
     hint: String? = null,
 ) {
     SettingsPageScaffold(title = title, onBack = onBack) {
+        val shape = RoundedCornerShape(Dshm.radius.lg)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(Dshm.radius.lg))
+                .shadow(
+                    elevation = Dshm.spacing.cardElevation,
+                    shape = shape,
+                    ambientColor = Dshm.colors.shadowCard,
+                    spotColor = Dshm.colors.shadowCard,
+                )
+                .clip(shape)
                 .background(Dshm.colors.surface)
-                .padding(vertical = Dshm.spacing.xs),
-            verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
+                .border(Dshm.spacing.hairline, Dshm.colors.divider, shape),
         ) {
             options.forEachIndexed { index, label ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onPick(index) }
-                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Text(
+                        text = label,
+                        style = Dshm.typography.rowTitle,
+                        color = Dshm.colors.textPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
                     RadioButton(selected = index == selectedIndex, onClick = { onPick(index) })
-                    Spacer(Modifier.width(Dshm.spacing.sm))
-                    Text(label, style = Dshm.typography.rowTitle, color = Dshm.colors.textPrimary)
+                }
+                if (index != options.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = Dshm.spacing.lg),
+                        thickness = Dshm.spacing.hairline,
+                        color = Dshm.colors.divider,
+                    )
                 }
             }
         }
@@ -167,4 +187,5 @@ internal fun performanceLabel(mode: PerformanceMode): String = stringResource(
         PerformanceMode.LIGHT -> R.string.performance_light
     },
 )
+
 

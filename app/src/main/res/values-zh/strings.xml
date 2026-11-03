@@ -153,7 +153,11 @@
     <string name="info_pets">宠物功能将按 dsh-Go 后续移植。</string>
     <string name="info_licenses">DSHM Bot 以 AGPL-3.0 开源。运行时构建配方来自 dsh-Go（AGPL-3.0），Bot 团队语义参考 DS-Bot（Apache-2.0），图标来自 Lucide（ISC）。</string>
     <string name="settings_privacy">隐私与分享</string>
+    <string name="notify_channel_engine">本机引擎</string>
+    <string name="notify_engine_ready_title">本机引擎已就绪</string>
+    <string name="notify_engine_ready_body">DSHM Bot 现在可以连接 DSH 了。</string>
 </resources>
+
 
 
 

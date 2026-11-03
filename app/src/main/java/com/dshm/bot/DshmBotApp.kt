@@ -1,6 +1,11 @@
 package com.dshm.bot
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -26,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmMotion
+import com.dshm.bot.data.notify.EngineNotifier
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.account.AccountScreen
 import com.dshm.bot.ui.account.AccountViewModel
@@ -50,6 +56,8 @@ import com.dshm.bot.ui.settings.voiceLabel
 import com.dshm.bot.ui.settings.performanceLabel
 import com.dshm.bot.ui.settings.settingsPageTitle
 import com.dshm.bot.ui.settings.settingsPageInfo
+import com.dshm.bot.ui.settings.EngineSettingsScreen
+import com.dshm.bot.ui.settings.EngineSettingsViewModel
 import com.dshm.bot.domain.model.InterfaceMode
 import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.domain.model.PerformanceMode
@@ -88,13 +96,32 @@ fun DshmBotApp(
         factory = EngineViewModel.factory(LocalContext.current.applicationContext),
     ),
     accountViewModel: AccountViewModel = viewModel(factory = AccountViewModel.factory(LocalContext.current.applicationContext)),
+    engineSettingsViewModel: EngineSettingsViewModel = viewModel(factory = EngineSettingsViewModel.factory()),
 ) {
+    val appContext = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            appContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val engineState by engineViewModel.state.collectAsStateWithLifecycle()
     val accountUi by accountViewModel.ui.collectAsStateWithLifecycle()
+    LaunchedEffect(engineState) {
+        if (engineState is RuntimeState.Running && settingsUiState.notificationsEnabled) {
+            EngineNotifier.notifyReady(appContext)
+        }
+    }
     LaunchedEffect((engineState as? RuntimeState.Running)?.endpoint) {
-        accountViewModel.setEndpoint((engineState as? RuntimeState.Running)?.endpoint)
+        val endpoint = (engineState as? RuntimeState.Running)?.endpoint
+        accountViewModel.setEndpoint(endpoint)
+        engineSettingsViewModel.setEndpoint(endpoint)
     }
     val engineStatusText = when (engineState) {
         is RuntimeState.Running -> stringResource(R.string.engine_value_running)
@@ -284,7 +311,10 @@ fun DshmBotApp(
                             stringResource(R.string.settings_value_off),
                         ),
                         selectedIndex = if (settingsUiState.notificationsEnabled) 0 else 1,
-                        onPick = { settingsViewModel.setNotificationsEnabled(it == 0) },
+                        onPick = {
+                            if (it == 0) requestNotificationPermission()
+                            settingsViewModel.setNotificationsEnabled(it == 0)
+                        },
                         onBack = close,
                     )
 
@@ -309,6 +339,11 @@ fun DshmBotApp(
                         ),
                         selectedIndex = settingsUiState.performanceMode.ordinal,
                         onPick = { settingsViewModel.setPerformanceMode(PerformanceMode.entries[it]) },
+                        onBack = close,
+                    )
+
+                    SettingsPageId.ENGINE_PARAMS -> EngineSettingsScreen(
+                        viewModel = engineSettingsViewModel,
                         onBack = close,
                     )
 
@@ -385,6 +420,8 @@ fun DshmBotApp(
         }
     }
 }
+
+
 
 
 
