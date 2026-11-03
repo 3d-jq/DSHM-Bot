@@ -58,7 +58,7 @@ fun EngineSettingsScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit)
 }
 
 @Composable
-private fun NamespaceCard(
+internal fun NamespaceCard(
     namespace: DshEngineSettingsRepository.Namespace,
     onToggle: (String, Boolean) -> Unit,
 ) {
@@ -136,5 +136,41 @@ private fun NamespaceCard(
     }
 }
 
-@Suppress("unused")
-private fun ColumnScope.unused() = Unit
+/** 按命名空间过滤的引擎设置页（模型/权限/联网搜索等复用）。 */
+@Composable
+fun EngineNamespacesScreen(
+    viewModel: EngineSettingsViewModel,
+    title: String,
+    filter: (String) -> Boolean,
+    emptyHint: String,
+    onBack: () -> Unit,
+) {
+    val ui by viewModel.ui.collectAsStateWithLifecycle()
+    SettingsPageScaffold(title = title, onBack = onBack) {
+        when {
+            ui.loading -> CircularProgressIndicator(color = Dshm.colors.accent)
+            ui.error != null -> Text(
+                text = ui.error.orEmpty(),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.danger,
+            )
+        }
+        val matched = ui.namespaces.filter { filter(it.ns) }
+        if (!ui.loading && matched.isEmpty()) {
+            Text(
+                text = emptyHint,
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textSecondary,
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md)) {
+            matched.forEach { namespace ->
+                NamespaceCard(
+                    namespace = namespace,
+                    onToggle = { key, value -> viewModel.toggleBoolean(namespace, key, value) },
+                )
+            }
+        }
+    }
+}
+

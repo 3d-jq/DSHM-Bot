@@ -57,6 +57,7 @@ import com.dshm.bot.ui.settings.performanceLabel
 import com.dshm.bot.ui.settings.settingsPageTitle
 import com.dshm.bot.ui.settings.settingsPageInfo
 import com.dshm.bot.ui.settings.EngineSettingsScreen
+import com.dshm.bot.ui.settings.EngineNamespacesScreen
 import com.dshm.bot.ui.settings.PluginsScreen
 import com.dshm.bot.ui.settings.WebHostScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
@@ -358,6 +359,30 @@ fun DshmBotApp(
                         onBack = close,
                     )
 
+                    SettingsPageId.MODEL -> EngineNamespacesScreen(
+                        viewModel = engineSettingsViewModel,
+                        title = stringResource(R.string.settings_model),
+                        filter = { ns -> ns.contains("model", true) || ns.contains("llm", true) || ns.contains("provider", true) },
+                        emptyHint = stringResource(R.string.info_engine_required),
+                        onBack = close,
+                    )
+
+                    SettingsPageId.PERMISSION -> EngineNamespacesScreen(
+                        viewModel = engineSettingsViewModel,
+                        title = stringResource(R.string.settings_permission),
+                        filter = { ns -> ns.contains("permission", true) },
+                        emptyHint = stringResource(R.string.info_engine_required),
+                        onBack = close,
+                    )
+
+                    SettingsPageId.WEB_SEARCH -> EngineNamespacesScreen(
+                        viewModel = engineSettingsViewModel,
+                        title = stringResource(R.string.settings_web_search),
+                        filter = { ns -> ns.contains("search", true) || ns.contains("web", true) },
+                        emptyHint = stringResource(R.string.info_engine_required),
+                        onBack = close,
+                    )
+
                     SettingsPageId.PLUGINS -> PluginsScreen(
                         viewModel = engineSettingsViewModel,
                         onBack = close,
@@ -443,6 +468,7 @@ fun DshmBotApp(
         }
     }
 }
+
 
 
 
