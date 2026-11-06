@@ -152,6 +152,10 @@
 | `statusDot` | 8 | 状态点直径 |
 | `inputHeight` | 44 | **所有输入框统一高度** |
 | `rowMinHeight` | 64 | 列表行最小高 |
+| `capsuleHeight` | 32 | 快捷胶囊高度（容量预设） |
+| `segmentedHeight` / `segmentedInset` | 36 / 3 | 分段控件高度 / 滑块与底槽的间隙 |
+| `levelRowHeight` | 44 | 思考档位行高度 |
+| `selectionTick` | 20 | 勾选圆点直径 |
 | `hairline` | 1 | 分割线 / 描边 |
 | `cardElevation` | 16 | 大卡片投影高 |
 | `composerKey` / `composerKeyGap` / `composerMinHeight` / `composerSendIcon` | 40 / 8 / 56 / 22 | 对话输入条 |
@@ -194,6 +198,8 @@
 | `IconButton` 默认 48dp | 放进输入框尾部会把**这一个框**撑高，和别的框高矮不一 | 用 `Icon` + `Modifier.size(20.dp)` + `clickable` |
 | 输入框上下内边距给 12dp | 框高 47dp，看着「上下很高」 | 上下 `spacing.sm`(8)，并用 `heightIn(min = spacing.inputHeight)` 统一所有输入框高度 |
 | Material3 `Scaffold(bottomBar=)` 是**非空**参数 | 传可空参数编译不过 | `bottomBar = { bottomBar?.invoke() }` |
+| `ModalBottomSheet` 默认半屏可上拉 | 候选多时底部按钮被半屏挡住 | `skipPartiallyExpanded = true` + 内容区 `height(屏高×0.7)` |
+| 用 `confirmValueChange = { false }` 锁面板高度 | **列表的滑动被面板手势吃掉，轻轻一滑就关闭** | 不要锁状态，用固定高度的内容区定死；原生把手保留 |
 
 ---
 
@@ -255,7 +261,9 @@ SettingsPage(
 
 - 顶部 Hero 区包成**一张卡**（`SettingsSection`）：`settingsAvatar`(56) 字母块 + 名称 `sheetTitle` + 状态点 + 状态词。
 - 下面按「连接」「模型」等语义分组，每组一张卡，组间距 `spacing.xxl`(24)。
-- 破坏性操作（删除）放**最后，单独居中**，用 `SettingsDangerButton`（`danger` 色文字按钮，无箭头）。
+- 破坏性操作（删除）放**最后，单独一张卡**，卡内按钮**居中**，用 `SettingsDangerButton`
+  （`danger` 色文字按钮 + 删除图标，无箭头）。**不要**把删除按钮裸放在页面背景上，
+  也不要给这张卡加太多上下留白（8dp 就够，卡片高度 ≈ 56dp）。
 
 ### 8.5 对话页模板
 
@@ -281,6 +289,9 @@ SettingsPage(
 | `SettingsAnchoredMenu` / `SettingsMenuItem` | 行下弹出选择面板 | 面板宽 `menuWidth`(220)，右对齐 |
 | `SettingsRefreshButton` | 顶栏刷新 | 用 `FloatingIconButton` |
 | `SettingsLoading` / `SettingsEmpty` / `SettingsHint` / `SettingsError` | 四种状态 | 加载用 `accent` 环；错误用 `danger` 文字 + 可选「重试」 |
+| `SettingsSegmentedPill` | 分段控件 | 胶囊底槽 + 会滑动的滑块；各段等宽、文字永远一行 |
+| `SettingsCapsuleGrid` / `SettingsChoiceCapsule` | 快捷胶囊网格 | 等宽胶囊按行排布，间距 8dp；选中反色 |
+| `SettingsLevelRow` / `SettingsSelectionTick` | 多选行 | 左侧 20dp 勾选圆点 + 行标题，整行可点 |
 
 其它公共件：`FloatingIconButton`（44 圆形按钮）、`BotAvatar`（44 头像）、`PetOverlay`（宠物）、`MarkdownText`（对话正文）。
 
@@ -300,7 +311,8 @@ SettingsPage(
 | 设置首页 | `SettingsScreen.kt` | 设置模板 | 账号概览卡 + 六组 |
 | 设置 16 子页 | `ui/settings/*` | 设置模板 | 见 §8.1 / §8.2 |
 | 渠道详情 | `ProviderDetailPage.kt` | 详情模板 | Hero 卡 + 连接卡 + 模型卡 + 居中删除 |
-| 模型选择面板 | `ProviderModelPicker.kt` | 弹层 | `ModalBottomSheet` + `Checkbox` |
+| 模型设置 | `ProviderModelPage.kt` | 设置模板 | 基本信息 / Token 上限 / 能力 三张卡 |
+| 模型选择面板 | `ProviderModelPicker.kt` | 弹层 | 原生 `ModalBottomSheet`，弹起即占屏高 70% |
 | 网页模式 | `WebHostScreen.kt` | 全屏 | `WebView` |
 
 ---
