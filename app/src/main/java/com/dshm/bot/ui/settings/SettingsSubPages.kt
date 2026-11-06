@@ -18,6 +18,7 @@ enum class SettingsPageId {
     PLUGINS,
     VOICE,
     ENGINE_PARAMS,
+    SCHEDULES,
     INTERFACE,
     NOTIFICATIONS,
     BACKGROUND,

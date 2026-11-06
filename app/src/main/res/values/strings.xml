@@ -90,6 +90,7 @@
     <string name="settings_group_appearance">Appearance</string>
     <string name="settings_group_general">General</string>
     <string name="settings_group_host">Hosts</string>
+    <string name="settings_group_team">Team</string>
     <string name="settings_group_about">About</string>
     <string name="settings_model">Model</string>
     <string name="settings_permission">Permissions</string>
@@ -662,6 +663,16 @@
     <string name="presets_delete_default_hint">Set another preset as the default first</string>
     <string name="presets_delete_title">Delete “%1$s”?</string>
     <string name="presets_delete_hint">New chats can no longer pick it. Chats already started are unaffected.</string>
+    <!-- 定时任务 -->
+    <string name="schedules_title">Scheduled tasks</string>
+    <string name="schedules_empty">No scheduled tasks yet.</string>
+    <string name="schedules_untitled">Untitled task</string>
+    <string name="schedules_active">Active</string>
+    <string name="schedules_inactive">Paused</string>
+    <string name="schedules_unavailable">Automation tasks are off in DSH</string>
+    <string name="schedules_unavailable_hint">Turn on the Automation tasks plugin in DSH to use this.</string>
+    <string name="schedules_delete_title">Delete “%1$s”?</string>
+    <string name="schedules_delete_hint">The task will stop running. Chats already started are unaffected.</string>
 </resources>
 
 

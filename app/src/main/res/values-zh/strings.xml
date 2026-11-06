@@ -90,6 +90,7 @@
     <string name="settings_group_appearance">外观</string>
     <string name="settings_group_general">通用</string>
     <string name="settings_group_host">主机</string>
+    <string name="settings_group_team">团队</string>
     <string name="settings_group_about">关于</string>
     <string name="settings_model">模型</string>
     <string name="settings_permission">权限</string>
@@ -330,6 +331,16 @@
     <string name="presets_delete_default_hint">先把别的预设设为新对话默认</string>
     <string name="presets_delete_title">删除“%1$s”？</string>
     <string name="presets_delete_hint">新对话不能再选它，已开始的对话不受影响。</string>
+    <!-- 定时任务 -->
+    <string name="schedules_title">定时任务</string>
+    <string name="schedules_empty">还没有定时任务。</string>
+    <string name="schedules_untitled">未命名任务</string>
+    <string name="schedules_active">进行中</string>
+    <string name="schedules_inactive">已停用</string>
+    <string name="schedules_unavailable">DSH 的自动化任务没开</string>
+    <string name="schedules_unavailable_hint">在 DSH 里打开 Automation tasks 插件后才能用。</string>
+    <string name="schedules_delete_title">删除“%1$s”？</string>
+    <string name="schedules_delete_hint">这个任务不会再运行，已开始的对话不受影响。</string>
 
     <string name="settings_search_title">搜索设置</string>
     <string name="settings_search_hint">搜索设置项</string>

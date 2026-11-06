@@ -547,6 +547,8 @@ fun SettingsCollapsedSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                // 和设置行一样高（56dp），别比里面的行矮一截。
+                .heightIn(min = Dshm.spacing.rowMinHeight - Dshm.spacing.sm)
                 .clickable { expanded = !expanded }
                 .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
             verticalAlignment = Alignment.CenterVertically,

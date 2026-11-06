@@ -36,6 +36,9 @@ class LucideIconResourcesTest {
         "monitor",
         "package",
         "terminal",
+        "clock_3",
+        "key_round",
+        "chart_column",
     )
 
     @Test

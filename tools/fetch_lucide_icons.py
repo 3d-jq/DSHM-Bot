@@ -68,6 +68,9 @@ ICONS = [
     "monitor",
     "package",
     "terminal",
+    "clock-3",
+    "key-round",
+    "chart-column",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

@@ -48,6 +48,8 @@ import com.dshm.bot.ui.settings.AboutScreen
 import com.dshm.bot.ui.settings.AgentPresetsScreen
 import com.dshm.bot.ui.settings.AppearanceScreen
 import com.dshm.bot.ui.settings.BackgroundSettingsScreen
+import com.dshm.bot.ui.settings.ScheduledTasksScreen
+import com.dshm.bot.ui.settings.ScheduledTasksViewModel
 import com.dshm.bot.ui.settings.ChatFontScreen
 import com.dshm.bot.ui.settings.EngineSettingsScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
@@ -106,6 +108,9 @@ fun DshmBotApp(
     ),
     accountViewModel: AccountViewModel = viewModel(factory = AccountViewModel.factory(LocalContext.current.applicationContext)),
     engineSettingsViewModel: EngineSettingsViewModel = viewModel(factory = EngineSettingsViewModel.factory()),
+    scheduledTasksViewModel: ScheduledTasksViewModel = viewModel(
+        factory = ScheduledTasksViewModel.factory(LocalContext.current.applicationContext),
+    ),
 ) {
     val appContext = LocalContext.current
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
@@ -120,6 +125,7 @@ fun DshmBotApp(
     LaunchedEffect((engineState as? RuntimeState.Running)?.endpoint) {
         val endpoint = (engineState as? RuntimeState.Running)?.endpoint
         accountViewModel.setEndpoint(endpoint)
+        scheduledTasksViewModel.setEndpoint(endpoint)
         engineSettingsViewModel.setEndpoint(endpoint)
         homeViewModel.setEndpoint(endpoint)
     }
@@ -573,6 +579,11 @@ fun DshmBotApp(
                                 add(SettingsPageId.MODEL.name)
                             }
                         },
+                    )
+
+                    SettingsPageId.SCHEDULES -> ScheduledTasksScreen(
+                        viewModel = scheduledTasksViewModel,
+                        onBack = close,
                     )
 
                     SettingsPageId.BACKGROUND -> BackgroundSettingsScreen(onBack = close)

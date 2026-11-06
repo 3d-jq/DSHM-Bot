@@ -308,6 +308,16 @@ fun SettingsScreen(
         }
 
         item {
+            SettingsSection(title = stringResource(R.string.settings_group_team)) {
+                SettingsRow(
+                    title = stringResource(R.string.schedules_title),
+                    icon = R.drawable.ic_lucide_clock_3,
+                    onClick = { onOpenPage(SettingsPageId.SCHEDULES) },
+                )
+            }
+        }
+
+        item {
             SettingsSection(title = stringResource(R.string.settings_group_about)) {
                 SettingsRow(
                     title = stringResource(R.string.settings_version),
