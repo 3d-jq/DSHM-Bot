@@ -743,26 +743,21 @@ class EngineSettingsViewModel : ViewModel() {
     }
 
     /** 插件自带的设置表单：排除专页/内置 namespace 后剩下的可写项。 */
+    /**
+     * 有「插件设置」页的 namespace。
+     *
+     * 对齐 dsh-Go：白名单 —— 不是 App 自己策展的、不是引擎内部或别的宿主
+     * （网页客户端 dsh-go-bridge / dsh-app）私有状态的、并且被**已启用的
+     * 组合包声明**的，才算插件设置。
+     */
     fun pluginConfigNamespaces(): List<SettingsNamespace> {
         val description = _ui.value.description ?: return emptyList()
-        val dedicated = setOf(
-            "subagent",
-            "subagent-model-selection-settings",
-            "agent-loop",
-            "bash-sandbox",
-            "pwsh-sandbox",
-            "web",
-            "web-search-deepseek",
-            "web-deepseek-api",
-            PROVIDER_NAMESPACE,
-            "permission",
-            "session-log-deepseek",
-            "ui-settings",
-            "ui-chat",
-            "ui-conversation",
-            "locale",
+        val declared = PluginConfigScope.declaredRows(
+            _ui.value.bundles.filter { it.enabled }.map { bundle -> bundle.rows.map { it.rowId } },
         )
-        return description.namespaces.values.filter { it.ns !in dedicated }
+        return description.namespaces.values.filter { ns ->
+            PluginConfigScope.isPluginNamespace(ns.ns, declared)
+        }
     }
 
     fun webNamespaces(): List<SettingsNamespace> {

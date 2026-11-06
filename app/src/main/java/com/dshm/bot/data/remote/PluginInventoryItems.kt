@@ -41,15 +41,47 @@ fun inventoryStatusOf(enabled: Boolean, fiberPhase: String?): InventoryStatus = 
 }
 
 /**
- * 这是不是「系统组件」：包没有中文名 = 内部组件（对齐 dsh-Go 的
- * `InventoryItem.system`）。只看有没有中文的键，不看解析结果 ——
- * 只有英文时按中文解析会回退到英文，不能当成"有中文名"。
+ * 条目的**中文名**；没有中文名就是 null（那是系统组件）。
+ *
+ * 只看有没有中文的键，不看解析结果 —— 只有英文时按中文解析会回退到英文，
+ * 不能当成「有中文名」。引擎给的 title 有时就是一条 `file://` 路径
+ * （本地路径加载的插件），那也不是名字。
  */
-fun isSystemEntry(meta: PluginDisplayMeta?): Boolean {
-    val values = meta?.title?.values ?: return true
-    if (values.isEmpty()) return true
-    return values.keys.none { it.startsWith("zh") }
+fun chineseTitleOf(meta: PluginDisplayMeta?): String? {
+    val values = meta?.title?.values ?: return null
+    val zh = values.entries.firstOrNull { it.key.startsWith("zh") }?.value
+    return zh?.takeIf { it.isNotBlank() }
 }
+
+/**
+ * 这是不是「系统组件」：包没有中文名 = 内部组件（对齐 dsh-Go 的
+ * `InventoryItem.system`）。
+ */
+fun isSystemEntry(meta: PluginDisplayMeta?): Boolean = chineseTitleOf(meta) == null
+
+/**
+ * 模块名缩成可读的名字（对齐 dsh-Go 的 `shortModuleName`）：
+ * `@scope/pkg` → `pkg`，再去掉 `cordis:` / `dsh-` 这类前缀。
+ */
+fun shortModuleName(name: String): String {
+    var short = name
+    val slash = short.lastIndexOf('/')
+    if (short.startsWith("@") && slash > 0) short = short.substring(slash + 1)
+    for (prefix in listOf("cordis:", "cordis-plugin-", "dsh-host-", "dsh-client-", "dsh-")) {
+        if (short.startsWith(prefix) && short.length > prefix.length) {
+            short = short.substring(prefix.length)
+            break
+        }
+    }
+    return short
+}
+
+/**
+ * 条目在清单里的名字：中文名优先，没有就用模块短名。
+ * 引擎给的 title 有时是一条 `file://` 入口路径 —— 那不是名字，不该直接显示。
+ */
+fun inventoryTitleOf(entry: PluginInventoryEntry): String =
+    chineseTitleOf(entry.meta) ?: shortModuleName(entry.moduleName)
 
 /**
  * 插件清单的分组，对齐 dsh-Go 的 `groupInventory`：

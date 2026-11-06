@@ -341,7 +341,7 @@
     <string name="settings_modified">已修改</string>
     <string name="settings_reset_default">恢复默认</string>
     <string name="settings_engine_read_only">该设置由引擎配置文件固定，无法在 App 内修改。</string>
-    <string name="settings_engine_revision">共 %1$d 个可配置分组 · 由本机引擎提供</string>
+    <string name="settings_engine_revision">引擎提供 %1$d 个可配置分组</string>
     <string name="settings_engine_revision_one">修订 %1$d · 由本机引擎提供</string>
     <string name="settings_secret_set">已设置</string>
     <string name="settings_secret_unset">未设置</string>

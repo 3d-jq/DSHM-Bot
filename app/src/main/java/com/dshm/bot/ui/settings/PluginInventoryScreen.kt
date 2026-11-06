@@ -25,6 +25,8 @@ import com.dshm.bot.data.remote.InventoryStatus
 import com.dshm.bot.data.remote.PluginInventoryEntry
 import com.dshm.bot.data.remote.PresetPlugins
 import com.dshm.bot.data.remote.inventoryStatusOf
+import com.dshm.bot.data.remote.inventoryTitleOf
+import com.dshm.bot.data.remote.isSystemEntry
 
 /**
  * 插件清单页（对齐 dsh-Go `app/lib/ui/plugins/plugin_inventory_page.dart`）：
@@ -57,11 +59,14 @@ fun PluginInventoryScreen(
         ?: presets.firstOrNull { it.isDefault }
         ?: presets.firstOrNull()
 
+    // 全局插件 = 不属于任何预设的条目；其中没有中文名的是「系统组件」，单独折叠收起来。
     val globalEntries = remember(entries, presets) {
         val provided = mutableSetOf<String>()
         presets.forEach { preset -> preset.rows.forEach { provided.add(it.entryId) } }
         entries.filterNot { it.entryId in provided }
     }
+    val systemEntries = remember(globalEntries) { globalEntries.filter { isSystemEntry(it.meta) } }
+    val namedEntries = remember(globalEntries) { globalEntries.filterNot { isSystemEntry(it.meta) } }
 
     SettingsPage(
         title = stringResource(R.string.plugins_inventory_title),
@@ -133,9 +138,10 @@ fun PluginInventoryScreen(
             }
             globalEntries.isEmpty() -> item { SettingsEmpty(stringResource(R.string.plugins_inventory_empty)) }
             else -> {
+                if (namedEntries.isNotEmpty()) {
                 item {
                     SettingsSection(title = globalTitle) {
-                        globalEntries.forEachIndexed { index, entry ->
+                        namedEntries.forEachIndexed { index, entry ->
                             if (index > 0) SettingsRowDivider()
                             InventoryRow(
                                 entry = entry,
@@ -147,6 +153,25 @@ fun PluginInventoryScreen(
                                     onOpenSettings(entry.rowId, title)
                                 },
                             )
+                        }
+                    }
+                }
+                }
+                // 系统组件：没有中文名的内部组件，收进折叠卡（对齐 dsh-Go）。
+                if (systemEntries.isNotEmpty()) {
+                    item {
+                        SettingsCollapsedSection(
+                            title = stringResource(R.string.plugins_inventory_system_group),
+                            count = systemEntries.size,
+                        ) {
+                            systemEntries.forEachIndexed { index, entry ->
+                                if (index > 0) SettingsRowDivider()
+                                InventoryRow(
+                                    entry = entry,
+                                    language = language,
+                                    onClick = { onOpenSettings(entry.rowId, inventoryTitleOf(entry)) },
+                                )
+                            }
                         }
                     }
                 }
@@ -164,29 +189,6 @@ data class InventorySection(
     val entries: List<PluginInventoryEntry>,
 )
 
-/**
- * 把清单分成「全局插件」与每个 Agent 预设一组。
- *
- * 预设带出来的条目（entryId 相同）不算全局插件 —— 它们只属于那个预设。
- */
-fun inventorySections(
-    entries: List<PluginInventoryEntry>,
-    presets: List<PresetPlugins>,
-    globalTitle: String,
-    presetTitleOf: (PresetPlugins) -> String,
-): List<InventorySection> {
-    val provided = mutableSetOf<String>()
-    presets.forEach { preset -> preset.rows.forEach { provided.add(it.entryId) } }
-    val global = entries.filterNot { it.entryId in provided }
-    val sections = mutableListOf<InventorySection>()
-    if (global.isNotEmpty()) sections += InventorySection(globalTitle, global)
-    presets.forEach { preset ->
-        if (preset.rows.isEmpty()) return@forEach
-        sections += InventorySection(presetTitleOf(preset), preset.rows)
-    }
-    return sections
-}
-
 /** 预设那一节的标题：官方中文名优先，没有就用名字，再没有就用 id。 */
 fun presetTitle(preset: PresetPlugins): String = when (preset.id) {
     "standard" -> "标准模式"
@@ -203,13 +205,11 @@ private fun InventoryRow(
     language: String,
     onClick: () -> Unit,
 ) {
-    val title = entry.meta?.title?.resolve(language)?.takeIf { it.isNotBlank() }
-        ?: entry.moduleName
-    val description = entry.meta?.description?.resolve(language)?.takeIf { it.isNotBlank() }
+    // 名字：中文名优先，没有就用模块短名；引擎给的 title 可能是 file:// 入口路径。
+    val title = inventoryTitleOf(entry)
     val status = inventoryStatusOf(entry.enabled, entry.fiberPhase)
     SettingsRow(
         title = title,
-        subtitle = description,
         trailing = {
             Box(
                 modifier = Modifier

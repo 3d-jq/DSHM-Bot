@@ -296,7 +296,7 @@
     <string name="settings_modified">Modified</string>
     <string name="settings_reset_default">Reset to default</string>
     <string name="settings_engine_read_only">This setting is fixed by the engine configuration and cannot be changed in the app.</string>
-    <string name="settings_engine_revision">%1$d configurable sections · provided by the local engine</string>
+    <string name="settings_engine_revision">%1$d configurable sections from the engine</string>
     <string name="settings_engine_revision_one">Revision %1$d · provided by the local engine</string>
     <string name="settings_secret_set">Set</string>
     <string name="settings_secret_unset">Not set</string>
