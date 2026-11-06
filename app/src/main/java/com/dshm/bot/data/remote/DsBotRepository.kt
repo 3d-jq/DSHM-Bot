@@ -3,6 +3,9 @@ package com.dshm.bot.data.remote
 import com.dshm.bot.domain.model.BotSummary
 import com.dshm.bot.domain.repository.BotRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
@@ -10,6 +13,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 /** 真实 DS Bot 数据源：`/api/bot` 的 `state` + `/api/bot/feed` 的 revision/live。 */
 class DsBotRepository(
@@ -22,22 +26,78 @@ class DsBotRepository(
         cache?.load()?.takeIf { it.isNotEmpty() }?.let { emit(it) }
         emit(fetchWithRetry())
         client.feed().collect { event ->
-            if (event.event == EVENT_HELLO || event.event == EVENT_REVISION || event.event == EVENT_LIVE) {
-                emit(fetchWithRetry())
+            when (event.event) {
+                // 模型的新输出 —— 记下来当这个 Bot 的预览（不用再问引擎）。
+                EVENT_MESSAGE -> event.data.let(::previewFromFeed)?.let { (botId, text) ->
+                    previews[botId] = BotPreview.oneLine(text)
+                }
+
+                EVENT_HELLO, EVENT_REVISION, EVENT_LIVE -> emit(fetchWithRetry())
             }
         }
     }.conflate().flowOn(Dispatchers.IO)
 
+    /**
+     * 从 feed 的 `message` 事件里取「哪个 Bot 的哪条模型输出」。
+     *
+     * 事件形状（`host/feed.js`）：`{botId, sessionId, item:{kind,text}}`。
+     * 只有模型输出（kind = "bot"）才算预览 —— 用户自己说的话不算。
+     */
+    private fun previewFromFeed(data: String): Pair<String, String>? {
+        val json = runCatching { JSONObject(data) }.getOrNull() ?: return null
+        val botId = json.optString("botId").ifEmpty { return null }
+        val item = json.optJSONObject("item") ?: return null
+        if (item.optString("kind") != "bot") return null
+        val text = item.optString("text").trim()
+        return if (text.isEmpty()) null else botId to text
+    }
+
     suspend fun fetch(): List<BotSummary> {
         val state = client.bot("state")
         cache?.save(state)
-        return DsBotParser.parseState(state)
+        val bots = DsBotParser.parseState(state)
+        return withPreviews(bots)
     }
 
     /**
-     * 移动端能力协商。offeredApi 为空时不声明版本，由服务端选默认版本，
-     * 避免客户端写死协议号；[DsBotHello.api] 为 null 表示版本不兼容。
+     * 给每个 Bot 补上「大模型最新输出」的预览。
+     *
+     * 引擎的 `state` 只给 Bot 一个 `role`（角色描述），没有消息预览 ——
+     * 群聊才有 `preview`。Bot 的预览有两个来源：
+     * 1. feed 推来的新消息（实时，零额外请求）；
+     * 2. 冷启动时问一次 `chat` 拿最后一页（并行，Bot 多也不卡）。
      */
+    private suspend fun withPreviews(bots: List<BotSummary>): List<BotSummary> =
+        coroutineScope {
+            // 用 `usage` 知道哪些 Bot 聊过 —— 只问这些，
+            // 不用对每个 Bot 都发一次 `chat`（Bot 多的时候差别很大）。
+            val active = runCatching {
+                BotPreview.activeBotIds(client.bot("usage"))
+            }.getOrDefault(emptySet())
+            val missing = bots.filter {
+                !it.isGroup && previews[it.id].isNullOrBlank() && (active.isEmpty() || it.id in active)
+            }
+            // 并行补齐冷启动的预览 —— 串行的话 Bot 一多主页就要等很久。
+            missing.map { bot ->
+                async {
+                    val preview = runCatching {
+                        BotPreview.fromChatPage(client.bot("chat", JSONObject().put("botId", bot.id)))
+                    }.getOrNull()
+                    if (!preview.isNullOrBlank()) previews[bot.id] = BotPreview.oneLine(preview)
+                }
+            }.awaitAll()
+            bots.map { bot ->
+                if (bot.isGroup) return@map bot
+                val preview = previews[bot.id]
+                if (preview.isNullOrBlank()) {
+                    // 还没有模型输出 —— 显示角色描述，别留空。
+                    bot
+                } else {
+                    bot.copy(preview = preview)
+                }
+            }
+        }
+
     suspend fun hello(offeredApi: List<Int>? = null): DsBotHello {
         val payload = JSONObject()
         offeredApi?.let {
@@ -69,7 +129,11 @@ class DsBotRepository(
         throw lastFailure ?: IllegalStateException("拉取 Bot 列表失败")
     }
 
+    /** 每个 Bot 最新的模型输出（预览）。feed 推来的消息会更新它。 */
+    private val previews = ConcurrentHashMap<String, String>()
+
     private companion object {
+        const val EVENT_MESSAGE = "message"
         const val EVENT_HELLO = "hello"
         const val EVENT_REVISION = "revision"
         const val EVENT_LIVE = "live"

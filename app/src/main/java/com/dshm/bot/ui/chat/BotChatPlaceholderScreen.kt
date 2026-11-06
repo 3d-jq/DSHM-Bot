@@ -236,6 +236,7 @@ fun BotChatScreen(
                         working = working,
                         hasEarlier = state.hasEarlier,
                         loadingEarlier = state.loadingEarlier,
+                        autoLoadEnabled = state.error == null,
                         onLoadEarlier = viewModel::loadEarlier,
                     )
                 }
@@ -290,31 +291,34 @@ fun BotChatScreen(
 }
 
 /**
- * 顶部的下拉指示：还有更早的消息时显示一个小箭头；
- * 正在加载时换成转圈。
+ * 距顶多少像素内就自动往前翻页。
+ *
+ * 照 dsh-Go（`bot_chat_kit.dart` 的 `above < 400`）：不是要滑到最顶，
+ * 而是接近顶部就开始加载，用户不用刻意拉到头。
+ */
+private const val EARLIER_TRIGGER_PX = 400
+
+/** 滑到第几项之内就算「接近顶部」。 */
+private const val EARLIER_TRIGGER_INDEX = 2
+
+/**
+ * 往前翻页时的顶部转圈。
+ *
+ * 尺寸照 dsh-Go（`bot_chat_kit.dart`）：18dp、strokeWidth 2、上下 16dp 留白。
  */
 @Composable
-private fun LoadEarlierIndicator(hasMore: Boolean, loading: Boolean) {
+private fun LoadingEarlierRow() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(Dshm.spacing.xl),
+            .padding(vertical = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            loading -> CircularProgressIndicator(
-                color = Dshm.colors.accent,
-                strokeWidth = Dshm.spacing.hairline + Dshm.spacing.xs / 2,
-                modifier = Modifier.size(Dshm.spacing.icon),
-            )
-
-            hasMore -> Icon(
-                painter = painterResource(R.drawable.ic_lucide_chevron_down),
-                contentDescription = stringResource(R.string.chat_load_earlier),
-                tint = Dshm.colors.textTertiary,
-                modifier = Modifier.size(Dshm.spacing.topBarIcon),
-            )
-        }
+        CircularProgressIndicator(
+            color = Dshm.colors.accent,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -330,55 +334,63 @@ private fun ChatMessages(
     working: Boolean,
     hasEarlier: Boolean = false,
     loadingEarlier: Boolean = false,
+    /** 上次加载出错时不再自动触发（否则会一直重试）。 */
+    autoLoadEnabled: Boolean = true,
     onLoadEarlier: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val typing = working && streaming.isEmpty()
     val count = entries.size + (if (streaming.isNotEmpty()) 1 else 0) + (if (typing) 1 else 0)
-    // 滚到底的时机：第一次有内容（进对话要看最新消息）、以及来了新消息。
-    // 往前翻历史时列表变长，但最后一条没变 —— 这时不能滚，会把刚加载的内容刷走。
-    var lastEntryId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(count) {
+
+    // 用户自己往上滑看别的消息时，别再自动抢着滚到底。
+    var userAway by remember { mutableStateOf(false) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.canScrollForward }
+            .collect { away -> userAway = away }
+    }
+
+    // 滚到底的时机：第一次有内容（进对话要看最新消息）、来了新消息、
+    // 模型正在输出（流式气泡在长）。往前翻历史时最后一条没变 —— 这时不能滚。
+    var lastTailId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(count, streaming.length) {
         val tailId = entries.lastOrNull()?.id
-        val isNewTail = tailId != null && tailId != lastEntryId
-        val firstLoad = lastEntryId == null && tailId != null
-        lastEntryId = tailId
-        if (count > 0 && (isNewTail || firstLoad)) {
+        val isNewTail = tailId != null && tailId != lastTailId
+        val firstLoad = lastTailId == null && tailId != null
+        lastTailId = tailId
+        if (count > 0 && (isNewTail || firstLoad || streaming.isNotEmpty()) && !userAway) {
             // 最后一条可能比屏幕高：先定位到它，再滚到列表末尾，保证看到最新内容的底部。
             listState.scrollToItem(count - 1)
             listState.scrollBy(100_000f)
         }
     }
+
     val scope = rememberCoroutineScope()
-    // 在顶部往下拉：加载更早的历史（就像聊天软件下拉翻上一步）。
-    val pullState = rememberPullToRefreshState()
+    // 滑到接近顶部就自动往前翻一页。
+    //
+    // dsh-Go 用的是倒序列表，判断「离再往上的端点还有多远」（above < 400）；
+    // 我们是正序列表，对应的量是「当前第一条消息离列表开头有多远」——
+    // 用滚动偏移量算：越接近 0 越靠近顶部。
+    LaunchedEffect(hasEarlier, loadingEarlier, entries.size, autoLoadEnabled) {
+        if (!hasEarlier || loadingEarlier || !autoLoadEnabled) return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                // 第一条可见消息就是列表第一项（index 0）时，说明已经到顶附近。
+                val nearTop = index <= EARLIER_TRIGGER_INDEX && offset <= EARLIER_TRIGGER_PX
+                if (nearTop) onLoadEarlier()
+            }
+    }
     Box(modifier = Modifier.fillMaxSize()) {
-        PullToRefreshBox(
-            isRefreshing = loadingEarlier,
-            onRefresh = onLoadEarlier,
-            state = pullState,
-            modifier = Modifier.fillMaxSize(),
-        ) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = Dshm.spacing.lg,
                 end = Dshm.spacing.lg,
-            top = topPadding + Dshm.spacing.md,
-            bottom = bottomPadding + Dshm.spacing.md,
-        ),
+                top = topPadding + Dshm.spacing.md,
+                bottom = bottomPadding + Dshm.spacing.md,
+            ),
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         ) {
-            // 下拉加载更早的消息：顶部挂一个指示器。
-            if (hasEarlier || loadingEarlier) {
-                item(key = "load-earlier") {
-                    LoadEarlierIndicator(
-                        hasMore = hasEarlier,
-                        loading = loadingEarlier,
-                    )
-                }
-            }
             items(entries, key = { it.id }) { entry ->
                 when (entry.kind) {
                     ChatEntryKind.USER -> UserBubble(entry.text, fontScale)
@@ -404,7 +416,12 @@ private fun ChatMessages(
             if (typing) {
                 item(key = "typing") { ThinkingRow(bot) }
             }
-        }
+            // 更早的历史：加载圈挂在列表顶部。
+            if (loadingEarlier) {
+                item(key = "load-earlier") {
+                    LoadingEarlierRow()
+                }
+            }
         }
         if (listState.canScrollForward) {
             Box(

@@ -19,7 +19,12 @@ class DsBotRepositoryTest {
                 when {
                     request.path.startsWith(FakeDshServer.LOGIN_PATH_PREFIX) -> FakeDshServer.cookie("repo")
                     request.path == "/api/bot" -> {
-                        if (stateCalls.incrementAndGet() == 1) {
+                        // 只数 state 请求 —— 主页还会问 usage / chat 拿预览。
+                        val endpoint = Regex("\"endpoint\":\"([^\"]+)\"")
+                            .find(request.body)?.groupValues?.get(1)
+                        if (endpoint != "state") {
+                            FakeDshServer.Response(200, body = "{\"ok\":true,\"value\":{}}")
+                        } else if (stateCalls.incrementAndGet() == 1) {
                             FakeDshServer.Response(500, body = "engine starting")
                         } else {
                             FakeDshServer.Response(
