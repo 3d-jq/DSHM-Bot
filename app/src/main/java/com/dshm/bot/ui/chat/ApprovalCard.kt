@@ -1,0 +1,120 @@
+package com.dshm.bot.ui.chat
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.dshm.bot.R
+import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.remote.BotApproval
+
+/**
+ * 审批卡片：Bot 要跑命令/调工具时，DSH 那边会等一个审批。
+ *
+ * 规格照 DS Bot 的 `client/member-status.js` 的 `ApprovalCard`：
+ * 工具名 → 详情文本 → 原因 → 错误码 → 「拒绝 / 允许一次」两个动作。
+ * `answerable` 为 false 时不能在这里答（要回 DSH 自己的卡片点）。
+ */
+@Composable
+fun ApprovalCard(
+    approval: BotApproval,
+    busy: Boolean,
+    onAnswer: (allow: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(Dshm.radius.md)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Dshm.colors.surface)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
+            .padding(Dshm.spacing.md),
+    ) {
+        Text(
+            text = stringResource(R.string.approval_waiting),
+            style = Dshm.typography.rowTime,
+            color = Dshm.colors.warning,
+        )
+        if (approval.tool.isNotEmpty()) {
+            Spacer(Modifier.height(Dshm.spacing.xs))
+            Text(
+                text = approval.tool,
+                style = Dshm.typography.settingsRowTitle.copy(fontFamily = FontFamily.Monospace),
+                color = Dshm.colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        approval.detailText?.let { detail ->
+            Spacer(Modifier.height(Dshm.spacing.xs))
+            Text(
+                text = detail,
+                style = Dshm.typography.rowPreview.copy(fontFamily = FontFamily.Monospace),
+                color = Dshm.colors.textPrimary,
+            )
+        }
+        if (approval.reason.isNotEmpty()) {
+            Spacer(Modifier.height(Dshm.spacing.xs))
+            Text(
+                text = approval.reason,
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textSecondary,
+            )
+        }
+        approval.detailCode?.let { code ->
+            Spacer(Modifier.height(Dshm.spacing.xs))
+            Text(
+                text = code,
+                style = Dshm.typography.rowTime.copy(fontFamily = FontFamily.Monospace),
+                color = Dshm.colors.textTertiary,
+            )
+        }
+        Spacer(Modifier.height(Dshm.spacing.sm))
+        if (approval.answerable) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { onAnswer(false) }, enabled = !busy) {
+                    Text(
+                        text = stringResource(R.string.approval_reject),
+                        style = Dshm.typography.sheetAction,
+                        color = Dshm.colors.textSecondary,
+                    )
+                }
+                Spacer(Modifier.width(Dshm.spacing.sm))
+                TextButton(onClick = { onAnswer(true) }, enabled = !busy) {
+                    Text(
+                        text = stringResource(R.string.approval_allow_once),
+                        style = Dshm.typography.sheetAction,
+                        color = Dshm.colors.accent,
+                    )
+                }
+            }
+        } else {
+            Text(
+                text = stringResource(R.string.approval_in_dsh),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textTertiary,
+            )
+        }
+    }
+}

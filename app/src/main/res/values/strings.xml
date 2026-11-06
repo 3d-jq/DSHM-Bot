@@ -23,6 +23,10 @@
     <string name="chat_load_failed">Couldn’t load this conversation</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_send_failed">Message not sent: %1$s</string>
+    <string name="approval_waiting">Waiting for your approval</string>
+    <string name="approval_reject">Reject</string>
+    <string name="approval_allow_once">Allow once</string>
+    <string name="approval_in_dsh">Answer this request in DSH</string>
     <string name="chat_load_earlier">Load earlier messages</string>
     <string name="chat_engine_off_title">Local engine is off</string>
     <string name="chat_engine_off_hint">Start it in Settings → Local engine, then come back.</string>

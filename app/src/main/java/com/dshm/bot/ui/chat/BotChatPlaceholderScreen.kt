@@ -8,6 +8,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -53,13 +55,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -117,6 +122,9 @@ fun BotChatScreen(
     var quickSettings by remember { mutableStateOf(false) }
     val quickSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val working = state.sending || state.waitingForReply || state.streaming.isNotEmpty()
+    // 审批应答中（按钮禁用，避免重复点）。
+    var answeringApproval by remember { mutableStateOf(false) }
+    var chatError by remember { mutableStateOf<String?>(null) }
     val workingTransition = rememberInfiniteTransition(label = "bot-working")
     val workingPulse by workingTransition.animateFloat(
         initialValue = 0.95f,
@@ -241,6 +249,24 @@ fun BotChatScreen(
                     )
                 }
             }
+            // 审批卡片：Bot 要跑命令时，DSH 那边等着一个确认。
+            state.approvals.forEach { approval ->
+                ApprovalCard(
+                    approval = approval,
+                    busy = answeringApproval,
+                    onAnswer = { allow ->
+                        answeringApproval = true
+                        viewModel.answerApproval(approval.id, allow) { error ->
+                            answeringApproval = false
+                            if (error != null) chatError = error
+                        }
+                    },
+                    modifier = Modifier.padding(
+                        horizontal = Dshm.spacing.lg,
+                        vertical = Dshm.spacing.xs,
+                    ),
+                )
+            }
             if (state.error != null && state.entries.isNotEmpty()) {
                 Text(
                     text = stringResource(R.string.chat_send_failed, state.error.orEmpty()),
@@ -298,8 +324,10 @@ fun BotChatScreen(
  */
 private const val EARLIER_TRIGGER_PX = 400
 
-/** 滑到第几项之内就算「接近顶部」。 */
-private const val EARLIER_TRIGGER_INDEX = 2
+/**
+ * 倒序列表里，末尾这么多项之内就算「接近顶部」（要往前翻历史了）。
+ */
+private const val EARLIER_TRIGGER_ITEMS = 3
 
 /**
  * 往前翻页时的顶部转圈。
@@ -342,46 +370,68 @@ private fun ChatMessages(
     val typing = working && streaming.isEmpty()
     val count = entries.size + (if (streaming.isNotEmpty()) 1 else 0) + (if (typing) 1 else 0)
 
-    // 用户自己往上滑看别的消息时，别再自动抢着滚到底。
-    var userAway by remember { mutableStateOf(false) }
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.canScrollForward }
-            .collect { away -> userAway = away }
-    }
-
-    // 滚到底的时机：第一次有内容（进对话要看最新消息）、来了新消息、
-    // 模型正在输出（流式气泡在长）。往前翻历史时最后一条没变 —— 这时不能滚。
-    var lastTailId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(count, streaming.length) {
-        val tailId = entries.lastOrNull()?.id
-        val isNewTail = tailId != null && tailId != lastTailId
-        val firstLoad = lastTailId == null && tailId != null
-        lastTailId = tailId
-        if (count > 0 && (isNewTail || firstLoad || streaming.isNotEmpty()) && !userAway) {
-            // 最后一条可能比屏幕高：先定位到它，再滚到列表末尾，保证看到最新内容的底部。
-            listState.scrollToItem(count - 1)
-            listState.scrollBy(100_000f)
+    // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
+    // 显示在底部。Compose 的 reverseLayout 原生就会把底部锚住 ——
+    // 不手动 scrollToItem，让它自己贴底（手动滚反而会和它打架）。
+    //
+    // DeepSearch 的四条结论：
+    // 1. 信 reverseLayout 的原生底部锚定，不要每个流式 token 都 scrollToItem；
+    // 2. 只在「终止事件」（发送、流结束）才自动跟随，不逐 token 跟；
+    // 3. 「用户离开了底部」是**派生值**，不是手势改出来的状态；
+    // 4. 另给一个「回到底部」按钮当万能出口。
+    //
+    // 「在底部」的判定：`firstVisibleItemIndex == 0` 且滚动偏移在 32dp 内。
+    val scope = rememberCoroutineScope()
+    val nearBottomThresholdPx = with(LocalDensity.current) { 32.dp.toPx() }.toInt()
+    val isNearBottom by remember(listState, nearBottomThresholdPx) {
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 &&
+                listState.firstVisibleItemScrollOffset <= nearBottomThresholdPx
         }
     }
 
-    val scope = rememberCoroutineScope()
     // 滑到接近顶部就自动往前翻一页。
     //
-    // dsh-Go 用的是倒序列表，判断「离再往上的端点还有多远」（above < 400）；
-    // 我们是正序列表，对应的量是「当前第一条消息离列表开头有多远」——
-    // 用滚动偏移量算：越接近 0 越靠近顶部。
+    // 倒序列表里 `firstVisibleItemIndex` 恒为 0（视觉底部就是最新），
+    // 判断「滑到了顶部」要看**最后一个可见项**离列表末尾有多远 ——
+    // 参照 DeepSearch 用 layoutInfo 定位可见集合的做法。
     LaunchedEffect(hasEarlier, loadingEarlier, entries.size, autoLoadEnabled) {
         if (!hasEarlier || loadingEarlier || !autoLoadEnabled) return@LaunchedEffect
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
-                // 第一条可见消息就是列表第一项（index 0）时，说明已经到顶附近。
-                val nearTop = index <= EARLIER_TRIGGER_INDEX && offset <= EARLIER_TRIGGER_PX
-                if (nearTop) onLoadEarlier()
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            (last?.index ?: 0) to info.totalItemsCount
+        }.collect { (lastIndex, total) ->
+            // 距离列表末尾只剩几项了 → 快到顶了，往前翻一页。
+            if (total > 0 && total - lastIndex <= EARLIER_TRIGGER_ITEMS) {
+                onLoadEarlier()
             }
+        }
     }
+
+    // 钉到底（照 DeepSearch 的 T170「三段式钉住」）：
+    // 第一次 scrollToItem(0) 钉的是自增高之前的位置，等一帧再钉一次
+    // 就能抓住「同一格子里内容又长高了」之后的位置。
+    //
+    // 什么时候钉：
+    // - 第一次有内容（进对话要看到最新消息）—— 无条件钉；
+    // - 来了新消息 —— 用户还在底部才钉（否则会抢走他的滚动）。
+    var pinnedOnce by remember { mutableStateOf(false) }
+    LaunchedEffect(entries.size) {
+        if (entries.isEmpty()) return@LaunchedEffect
+        val isFirst = !pinnedOnce
+        pinnedOnce = true
+        if (!isFirst && !isNearBottom) return@LaunchedEffect
+        listState.scrollToItem(0)
+        // 等一帧再钉一次 —— 抓住同一格子的异步自增高。
+        withFrameNanos { }
+        if (isNearBottom || isFirst) listState.scrollToItem(0)
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
+            reverseLayout = true,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = Dshm.spacing.lg,
@@ -391,17 +441,9 @@ private fun ChatMessages(
             ),
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         ) {
-            items(entries, key = { it.id }) { entry ->
-                when (entry.kind) {
-                    ChatEntryKind.USER -> UserBubble(entry.text, fontScale)
-                    ChatEntryKind.BOT -> BotBubble(
-                        text = entry.text,
-                        author = entry.author,
-                        showAuthor = bot.isGroup,
-                        fontScale = fontScale,
-                    )
-                    ChatEntryKind.EVENT -> EventLine(entry.text)
-                }
+            // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
+            if (typing) {
+                item(key = "typing") { ThinkingRow(bot) }
             }
             if (streaming.isNotEmpty()) {
                 item(key = "streaming") {
@@ -413,8 +455,18 @@ private fun ChatMessages(
                     )
                 }
             }
-            if (typing) {
-                item(key = "typing") { ThinkingRow(bot) }
+            items(entries.size, key = { index -> entries[entries.size - 1 - index].id }) { index ->
+                val entry = entries[entries.size - 1 - index]
+                when (entry.kind) {
+                    ChatEntryKind.USER -> UserBubble(entry.text, fontScale)
+                    ChatEntryKind.BOT -> BotBubble(
+                        text = entry.text,
+                        author = entry.author,
+                        showAuthor = bot.isGroup,
+                        fontScale = fontScale,
+                    )
+                    ChatEntryKind.EVENT -> EventLine(entry.text)
+                }
             }
             // 更早的历史：加载圈挂在列表顶部。
             if (loadingEarlier) {
@@ -423,7 +475,7 @@ private fun ChatMessages(
                 }
             }
         }
-        if (listState.canScrollForward) {
+        if (!isNearBottom) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -440,8 +492,8 @@ private fun ChatMessages(
                     .background(Dshm.colors.surface)
                     .clickable {
                         scope.launch {
-                            listState.animateScrollToItem((count - 1).coerceAtLeast(0))
-                            listState.animateScrollBy(100_000f)
+                            // 倒序列表：index 0 就是底部（最新）。
+                            listState.animateScrollToItem(0)
                         }
                     },
                 contentAlignment = Alignment.Center,

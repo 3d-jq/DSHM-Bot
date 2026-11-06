@@ -5,12 +5,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.data.remote.BotApproval
 import com.dshm.bot.data.remote.BotFeedEvent
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.parseChatPage
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.remote.ChatCursor
 import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.RemoteSpeechRepository
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -50,6 +52,8 @@ data class BotChatUiState(
     val memoryNotice: Boolean = false,
     /** 正在流式输出的回复；非空时在列表末尾显示一个临时气泡。 */
     val streaming: String = "",
+    /** 这个 Bot（或它所在的群）正在等的审批。 */
+    val approvals: List<BotApproval> = emptyList(),
     /** 还有更早的历史（游标非空）。 */
     val hasEarlier: Boolean = false,
     /** 正在往前翻一页。 */
@@ -361,6 +365,15 @@ class BotChatViewModel(
                 }
             }
 
+            // 审批请求会变成一条 notice（kind = "approval"）——
+            // 收到就去重读状态，把审批卡片显示出来。
+            "notice" -> {
+                val kind = data.optString("kind")
+                val belongs = data.optString("botId") == botId ||
+                    data.optString("roomId") == botId
+                if (kind == "approval" && belongs) refreshBotStatus()
+            }
+
             "room" -> {
                 if (isGroup && data.optString("roomId") == botId) scheduleReload()
             }
@@ -402,13 +415,37 @@ class BotChatViewModel(
                     _uiState.update { it.copy(memoryNotice = false) }
                 }
             }
+            // 审批：DSH 弹的审批卡片，DS Bot 这边也要能看到并应答。
+            val approvals = parseBotApprovals(state).filter { entry ->
+                if (isGroup) entry.roomId == botId else entry.botId == botId
+            }
             _uiState.update {
                 it.copy(
                     botStatus = role.takeIf { name -> name.isNotEmpty() }
                         ?: if (isMain) "主 Bot" else "空闲",
                     botIsMain = isMain,
+                    approvals = approvals,
                 )
             }
+        }
+    }
+
+    /**
+     * 应答一条审批：允许一次 / 拒绝。
+     *
+     * 应答后立刻重读状态 —— 审批卡片是 DSH 那边等的，答完就没了。
+     */
+    fun answerApproval(id: String, allow: Boolean, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            val error = runCatching {
+                connection.bot(
+                    "approval-answer",
+                    JSONObject().put("id", id).put("choice", if (allow) "allow" else "reject"),
+                )
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            if (error == null) refreshBotStatus()
+            onDone(error)
         }
     }
 
