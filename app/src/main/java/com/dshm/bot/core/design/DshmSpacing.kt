@@ -56,10 +56,6 @@ data class DshmSpacing(
     val hairline: Dp = 1.dp,
     /** 输入框底部安全区留白（与键盘/系统栏之间）。 */
     val composerBottomInset: Dp = 8.dp,
-    /** 宠物挂件距屏幕右侧的外边距。 */
-    val petInsetEnd: Dp = 16.dp,
-    /** 宠物挂件距屏幕底部的外边距：抬到输入器上方，避免遮挡发送键。 */
-    val petInsetBottom: Dp = 96.dp,
     /** 状态点直径（dsh-Go 的 8dp 渠道状态点）。 */
     val statusDot: Dp = 8.dp,
     /** 快捷胶囊高度（容量预设、档位筛选）。 */
@@ -72,6 +68,12 @@ data class DshmSpacing(
     val levelRowHeight: Dp = 44.dp,
     /** 勾选圆点直径。 */
     val selectionTick: Dp = 20.dp,
+    /** 引擎状态环的描边宽度（dsh-Go 的 EngineRing）。 */
+    val ringStroke: Dp = 2.5.dp,
+    /** 日志井的最小高度。 */
+    val logWellMin: Dp = 260.dp,
+    /** 日志井的最大高度。 */
+    val logWellMax: Dp = 520.dp,
 )
 
 val LocalDshmSpacing = staticCompositionLocalOf { DshmSpacing() }

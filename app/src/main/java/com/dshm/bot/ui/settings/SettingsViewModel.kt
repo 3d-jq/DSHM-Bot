@@ -11,9 +11,6 @@ import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ChatFontSize
 import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.domain.model.InterfaceMode
-import com.dshm.bot.domain.model.PerformanceMode
-import com.dshm.bot.domain.model.PetSize
-import com.dshm.bot.domain.model.PetStyle
 import com.dshm.bot.domain.model.PhoneConfirmMode
 import com.dshm.bot.domain.model.ThemeMode
 import com.dshm.bot.domain.model.VoiceMode
@@ -31,10 +28,6 @@ data class SettingsUiState(
     val interfaceMode: InterfaceMode = InterfaceMode.NATIVE,
     val notificationsEnabled: Boolean = true,
     val voiceMode: VoiceMode = VoiceMode.AUTO,
-    val performanceMode: PerformanceMode = PerformanceMode.AUTO,
-    val petEnabled: Boolean = false,
-    val petStyle: PetStyle = PetStyle.DEEPY_WHALE,
-    val petSize: PetSize = PetSize.MEDIUM,
     val phoneControlEnabled: Boolean = false,
     val phoneConfirmMode: PhoneConfirmMode = PhoneConfirmMode.ASK,
     val dshGo: DshGoPreferences = DshGoPreferences(),
@@ -55,16 +48,6 @@ class SettingsViewModel(
         listOf(theme, font, language, interfaceMode, notifications)
     }
 
-    private val extended = combine(
-        repository.observeVoiceMode(),
-        repository.observePerformanceMode(),
-        repository.observePetEnabled(),
-        repository.observePetStyle(),
-        repository.observePetSize(),
-    ) { voice, performance, petEnabled, petStyle, petSize ->
-        listOf(voice, performance, petEnabled, petStyle, petSize)
-    }
-
     private val phone = combine(
         repository.observePhoneControlEnabled(),
         repository.observePhoneConfirmMode(),
@@ -72,10 +55,10 @@ class SettingsViewModel(
 
     val uiState: StateFlow<SettingsUiState> = combine(
         core,
-        extended,
+        repository.observeVoiceMode(),
         phone,
         repository.observeDshGoPreferences(),
-    ) { base, extra, phoneValues, dshGo ->
+    ) { base, voice, phoneValues, dshGo ->
         @Suppress("UNCHECKED_CAST")
         SettingsUiState(
             themeMode = base[0] as ThemeMode,
@@ -83,11 +66,7 @@ class SettingsViewModel(
             language = base[2] as AppLanguage,
             interfaceMode = base[3] as InterfaceMode,
             notificationsEnabled = base[4] as Boolean,
-            voiceMode = extra[0] as VoiceMode,
-            performanceMode = extra[1] as PerformanceMode,
-            petEnabled = extra[2] as Boolean,
-            petStyle = extra[3] as PetStyle,
-            petSize = extra[4] as PetSize,
+            voiceMode = voice,
             phoneControlEnabled = phoneValues[0] as Boolean,
             phoneConfirmMode = phoneValues[1] as PhoneConfirmMode,
             dshGo = dshGo,
@@ -109,14 +88,6 @@ class SettingsViewModel(
     fun setNotificationsEnabled(enabled: Boolean) = repository.setNotificationsEnabled(enabled)
 
     fun setVoiceMode(mode: VoiceMode) = repository.setVoiceMode(mode)
-
-    fun setPerformanceMode(mode: PerformanceMode) = repository.setPerformanceMode(mode)
-
-    fun setPetEnabled(enabled: Boolean) = repository.setPetEnabled(enabled)
-
-    fun setPetStyle(style: PetStyle) = repository.setPetStyle(style)
-
-    fun setPetSize(size: PetSize) = repository.setPetSize(size)
 
     fun setPhoneControlEnabled(enabled: Boolean) = repository.setPhoneControlEnabled(enabled)
 

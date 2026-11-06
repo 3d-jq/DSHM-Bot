@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
 import com.dshm.bot.domain.model.InterfaceMode
-import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.domain.model.ThemeMode
 import com.dshm.bot.domain.model.VoiceMode
 
@@ -13,15 +12,14 @@ enum class SettingsPageId {
     MODEL,
     PERMISSION,
     PERSONALIZATION,
+    AGENT_PRESETS,
     PHONE_CONTROL,
     WEB_SEARCH,
     PLUGINS,
-    PETS,
     VOICE,
     ENGINE_PARAMS,
     INTERFACE,
     NOTIFICATIONS,
-    PERFORMANCE,
     BACKGROUND,
     PRIVACY,
     LICENSES,
@@ -42,15 +40,6 @@ internal fun interfaceLabel(mode: InterfaceMode): String = stringResource(
     when (mode) {
         InterfaceMode.NATIVE -> R.string.settings_value_native
         InterfaceMode.WEB -> R.string.interface_web
-    },
-)
-
-@Composable
-internal fun performanceLabel(mode: PerformanceMode): String = stringResource(
-    when (mode) {
-        PerformanceMode.AUTO -> R.string.settings_value_auto
-        PerformanceMode.FULL -> R.string.performance_full
-        PerformanceMode.LIGHT -> R.string.performance_light
     },
 )
 

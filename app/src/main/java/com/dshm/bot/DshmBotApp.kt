@@ -37,7 +37,7 @@ import com.dshm.bot.ui.account.AccountViewModel
 import com.dshm.bot.ui.chat.BotBrowserScreen
 import com.dshm.bot.ui.chat.BotChatScreen
 import com.dshm.bot.ui.chat.BotDetailsScreen
-import com.dshm.bot.ui.components.PetOverlay
+import com.dshm.bot.ui.engine.DiagnosticsScreen
 import com.dshm.bot.ui.engine.EngineScreen
 import com.dshm.bot.ui.engine.EngineViewModel
 import com.dshm.bot.ui.engine.OnboardingScreen
@@ -45,6 +45,7 @@ import com.dshm.bot.ui.home.HomeScreen
 import com.dshm.bot.ui.home.HomeViewModel
 import com.dshm.bot.ui.home.SearchScreen
 import com.dshm.bot.ui.settings.AboutScreen
+import com.dshm.bot.ui.settings.AgentPresetsScreen
 import com.dshm.bot.ui.settings.AppearanceScreen
 import com.dshm.bot.ui.settings.BackgroundSettingsScreen
 import com.dshm.bot.ui.settings.ChatFontScreen
@@ -55,10 +56,8 @@ import com.dshm.bot.ui.settings.LanguageScreen
 import com.dshm.bot.ui.settings.LicensesScreen
 import com.dshm.bot.ui.settings.ModelProvidersScreen
 import com.dshm.bot.ui.settings.NotificationSettingsScreen
-import com.dshm.bot.ui.settings.PerformanceSettingsScreen
 import com.dshm.bot.ui.settings.PermissionScreen
 import com.dshm.bot.ui.settings.PersonalizationScreen
-import com.dshm.bot.ui.settings.PetsSettingsScreen
 import com.dshm.bot.ui.settings.PhoneControlSettingsScreen
 import com.dshm.bot.ui.settings.PluginsScreen
 import com.dshm.bot.ui.settings.PrivacySettingsScreen
@@ -70,8 +69,8 @@ import com.dshm.bot.ui.settings.WebHostScreen
 import com.dshm.bot.ui.settings.WebSearchScreen
 import com.dshm.bot.ui.settings.chatFontLabel
 import com.dshm.bot.ui.settings.languageLabel
+import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.domain.model.InterfaceMode
-import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.domain.model.scale
 
 private const val SCREEN_HOME = "home"
@@ -85,6 +84,7 @@ private const val SCREEN_LANGUAGE = "language"
 private const val SCREEN_ACCOUNT = "account"
 private const val SCREEN_SETTINGS_PAGE = "settings-page"
 private const val SCREEN_WEB = "web"
+private const val SCREEN_DIAGNOSTICS = "diagnostics"
 private const val CHAT_PREFIX = "chat:"
 private const val BOT_DETAILS_PREFIX = "bot-details:"
 private const val SCREEN_BOT_BROWSER = "bot-browser"
@@ -142,6 +142,9 @@ fun DshmBotApp(
     var chatFontOpen by rememberSaveable { mutableStateOf(false) }
     var languageOpen by rememberSaveable { mutableStateOf(false) }
     var accountOpen by rememberSaveable { mutableStateOf(false) }
+    var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
+    // 从本机引擎页直接打开网页版（不用先切「界面模式」）。
+    var webOpen by rememberSaveable { mutableStateOf(false) }
     // 设置子页用栈保存，返回时回到上一页而不是直接回设置首页。
     var settingsStack by rememberSaveable { mutableStateOf(ArrayList<String>()) }
     LaunchedEffect(settingsStack) {
@@ -158,14 +161,18 @@ fun DshmBotApp(
             1f,
         ) == 0f
     }.getOrDefault(false)
-    val reduceMotion = settingsUiState.performanceMode == PerformanceMode.LIGHT ||
-        (settingsUiState.performanceMode == PerformanceMode.AUTO && systemAnimationsOff)
+    // 「性能」档位按产品范围不做：系统关掉动画时跟着减动效。
+    val reduceMotion = systemAnimationsOff
     // 已装运行时（含已停止）就不再走开屏引导：启动 App 直接进主界面。
     var onboardingDone by rememberSaveable { mutableStateOf(engineState !is RuntimeState.NotInstalled) }
 
     // 打开 App 自动拉起本机引擎（已安装/已停止时），不挡主界面。
+    // 「引擎启动」里那个开关关掉后就不再自动拉起了。
     LaunchedEffect(Unit) {
-        if (engineState is RuntimeState.Installed || engineState is RuntimeState.Stopped) {
+        val autoStart = settingsUiState.dshGo.flag(DshGoPreferences.KEY_AUTO_START_LOCAL)
+        if (autoStart &&
+            (engineState is RuntimeState.Installed || engineState is RuntimeState.Stopped)
+        ) {
             engineViewModel.start()
         }
     }
@@ -189,6 +196,9 @@ fun DshmBotApp(
     val screenKey = when {
         !onboardingDone -> SCREEN_ONBOARDING
         webMode && !settingsOpen && openBotId == null && !searchOpen -> SCREEN_WEB
+        webOpen -> SCREEN_WEB
+        // 诊断页是引擎页推出来的：它要先判，否则 engineOpen 会把诊断页挡住。
+        diagnosticsOpen -> SCREEN_DIAGNOSTICS
         engineOpen -> SCREEN_ENGINE
         appearanceOpen -> SCREEN_APPEARANCE
         chatFontOpen -> SCREEN_CHAT_FONT
@@ -216,12 +226,16 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsStack.isNotEmpty() || webMode || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || diagnosticsOpen || settingsStack.isNotEmpty() || webMode || webOpen || !onboardingDone) {
         navForward = false
         when {
             !onboardingDone -> Unit
             botBrowserOpen -> botBrowserOpen = false
             botDetailsOpen -> botDetailsOpen = false
+            diagnosticsOpen -> {
+                diagnosticsOpen = false
+                engineOpen = true
+            }
             engineOpen -> engineOpen = false
             appearanceOpen -> appearanceOpen = false
             chatFontOpen -> chatFontOpen = false
@@ -239,6 +253,7 @@ fun DshmBotApp(
                 homeViewModel.setQuery("")
             }
             // 网页模式是主界面本身：内部页面都关掉后才退出网页模式。
+            webOpen -> webOpen = false
             webMode -> settingsViewModel.setInterfaceMode(InterfaceMode.NATIVE)
         }
     }
@@ -404,12 +419,61 @@ fun DshmBotApp(
                 onStart = engineViewModel::start,
                 onStop = engineViewModel::stop,
                 onRestart = engineViewModel::restart,
+                onReset = { keep -> engineViewModel.reset(keep) },
+                onOpenWeb = {
+                    navForward = true
+                    webOpen = true
+                },                onOpenBackground = {
+                    // 「后台运行」是设置里的一个子页，从引擎页进去后仍能原路返回。
+                    navForward = true
+                    engineOpen = false
+                    settingsStack = ArrayList(settingsStack).apply { add(SettingsPageId.BACKGROUND.name) }
+                },
+                onOpenDiagnostics = {
+                    navForward = true
+                    diagnosticsOpen = true
+                },
                 version = engineViewModel.version,
                 nodeVersion = engineViewModel.nodeVersion,
+                bundledVersion = engineViewModel.bundledVersion,
+                installedVersion = engineViewModel.installedVersion,
                 abi = engineViewModel.abi,
+                autoStart = settingsUiState.dshGo.flag(DshGoPreferences.KEY_AUTO_START_LOCAL),
+                onAutoStartChange = {
+                    settingsViewModel.setDshGoPreference(DshGoPreferences.KEY_AUTO_START_LOCAL, it)
+                },
                 logText = engineViewModel::logText,
-                onReset = engineViewModel::reset,
             )
+
+            key == SCREEN_DIAGNOSTICS -> {
+                // stringResource 只能在 Composable 作用域取，先算好再交给普通 lambda。
+                val connectionLabel = if (engineState is RuntimeState.Running) {
+                    stringResource(R.string.diagnostics_connected)
+                } else {
+                    stringResource(R.string.diagnostics_not_connected)
+                }
+                DiagnosticsScreen(
+                    state = engineState,
+                    version = engineViewModel.version,
+                    nodeVersion = engineViewModel.nodeVersion,
+                    bundledVersion = engineViewModel.bundledVersion,
+                    installedVersion = engineViewModel.installedVersion,
+                    abi = engineViewModel.abi,
+                    hasApiKey = accountUi.hasApiKey,
+                    report = {
+                        engineViewModel.diagnosticsReport(
+                            state = engineState,
+                            hasApiKey = accountUi.hasApiKey,
+                            connection = connectionLabel,
+                        )
+                    },
+                    onBack = {
+                        navForward = false
+                        diagnosticsOpen = false
+                        engineOpen = true
+                    },
+                )
+            }
 
             key.startsWith("$SCREEN_SETTINGS_PAGE:") -> {
                 val page = runCatching {
@@ -436,29 +500,26 @@ fun DshmBotApp(
                         onBack = close,
                     )
 
-                    SettingsPageId.PERFORMANCE -> PerformanceSettingsScreen(
-                        current = settingsUiState.performanceMode,
-                        onSelect = settingsViewModel::setPerformanceMode,
+                    SettingsPageId.PERSONALIZATION -> PersonalizationScreen(
                         onBack = close,
+                        onOpenAgentPresets = {
+                            navForward = true
+                            settingsStack = ArrayList(settingsStack).apply {
+                                add(SettingsPageId.AGENT_PRESETS.name)
+                            }
+                        },
                     )
 
-                    SettingsPageId.PERSONALIZATION -> PersonalizationScreen(onBack = close)
+                    SettingsPageId.AGENT_PRESETS -> AgentPresetsScreen(
+                        viewModel = engineSettingsViewModel,
+                        onBack = close,
+                    )
 
                     SettingsPageId.PHONE_CONTROL -> PhoneControlSettingsScreen(
                         enabled = settingsUiState.phoneControlEnabled,
                         confirmMode = settingsUiState.phoneConfirmMode,
                         onEnabledChange = settingsViewModel::setPhoneControlEnabled,
                         onConfirmModeChange = settingsViewModel::setPhoneConfirmMode,
-                        onBack = close,
-                    )
-
-                    SettingsPageId.PETS -> PetsSettingsScreen(
-                        enabled = settingsUiState.petEnabled,
-                        style = settingsUiState.petStyle,
-                        size = settingsUiState.petSize,
-                        onEnabledChange = settingsViewModel::setPetEnabled,
-                        onStyleChange = settingsViewModel::setPetStyle,
-                        onSizeChange = settingsViewModel::setPetSize,
                         onBack = close,
                     )
 
@@ -504,6 +565,12 @@ fun DshmBotApp(
                             navForward = true
                             settingsStack = ArrayList(settingsStack).apply {
                                 add(SettingsPageId.PLUGINS.name)
+                            }
+                        },
+                        onOpenProviders = {
+                            navForward = true
+                            settingsStack = ArrayList(settingsStack).apply {
+                                add(SettingsPageId.MODEL.name)
                             }
                         },
                     )
@@ -646,19 +713,6 @@ fun DshmBotApp(
         }
     }
 
-    if (settingsUiState.petEnabled) {
-        PetOverlay(
-            style = settingsUiState.petStyle,
-            size = settingsUiState.petSize,
-            reduceMotion = reduceMotion,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(
-                    end = Dshm.spacing.petInsetEnd,
-                    bottom = Dshm.spacing.petInsetBottom,
-                ),
-        )
-    }
     }
 }
 

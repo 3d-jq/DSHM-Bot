@@ -71,9 +71,46 @@ class DshEngineSettingsRepository(private val client: DshClient) {
                 )
             }
         }
+        // 引擎组合出来的 Agent 预设：每个预设带出来哪些插件条目。
+        val presets = mutableListOf<PresetPlugins>()
+        root.optJSONArray("agentPresets")?.let { array ->
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val id = item.optString("id")
+                if (id.isEmpty()) continue
+                val rows = mutableListOf<PluginInventoryEntry>()
+                item.optJSONArray("rows")?.let { rowsArray ->
+                    for (rowIndex in 0 until rowsArray.length()) {
+                        val row = rowsArray.optJSONObject(rowIndex) ?: continue
+                        val entryId = row.optString("entryId")
+                        val moduleName = row.optString("moduleName")
+                        if (entryId.isEmpty() && moduleName.isEmpty()) continue
+                        rows.add(
+                            PluginInventoryEntry(
+                                entryId = entryId,
+                                moduleName = moduleName,
+                                enabled = row.optBoolean("enabled", false),
+                                fiberPhase = row.anyOrNull("fiberPhase") as? String,
+                                meta = PluginDisplayMeta.fromJson(row.optJSONObject("meta")),
+                            ),
+                        )
+                    }
+                }
+                presets.add(
+                    PresetPlugins(
+                        id = id,
+                        name = item.optString("name").takeIf { it.isNotEmpty() },
+                        isDefault = item.optBoolean("isDefault", false),
+                        broken = item.optString("broken").takeIf { it.isNotEmpty() },
+                        rows = rows,
+                    ),
+                )
+            }
+        }
         return PluginInventory(
             entries = entries,
             managementAvailable = root.optBoolean("managementAvailable", false),
+            presets = presets,
         )
     }
 

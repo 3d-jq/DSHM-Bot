@@ -36,7 +36,10 @@ fun rememberAgentsSummary(context: Context, refreshKey: Any? = Unit): String? {
 
 // 个性化：个人偏好、可视化回复、Agent 预设，对齐 dsh-Go PersonalizationPage。
 @Composable
-fun PersonalizationScreen(onBack: () -> Unit) {
+fun PersonalizationScreen(
+    onBack: () -> Unit,
+    onOpenAgentPresets: () -> Unit = {},
+) {
     val context = LocalContext.current
     val store = remember(context) { PersonalizationStore(context) }
     val scope = rememberCoroutineScope()
@@ -64,7 +67,6 @@ fun PersonalizationScreen(onBack: () -> Unit) {
     SettingsPage(
         title = stringResource(R.string.settings_personalization),
         onBack = onBack,
-        subtitle = stringResource(R.string.personalization_title_hint),
         actions = {
             SettingsRefreshButton(onClick = { reload() })
         },
@@ -136,9 +138,9 @@ fun PersonalizationScreen(onBack: () -> Unit) {
                 )
             }
         }
-        // 可视化回复 / Agent 预设：依赖本机引擎与尚未接入的能力，标注不可用。
+        // 可视化回复（尚未接入）；Agent 预设是引擎侧的功能页。
         item {
-            SettingsSection(footer = stringResource(R.string.settings_engine_required)) {
+            SettingsSection {
                 SettingsRow(
                     title = stringResource(R.string.settings_visual_replies),
                     subtitle = stringResource(R.string.settings_unavailable_hint),
@@ -148,9 +150,8 @@ fun PersonalizationScreen(onBack: () -> Unit) {
                 SettingsRowDivider()
                 SettingsRow(
                     title = stringResource(R.string.settings_agent_presets),
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                    enabled = false,
+                    subtitle = stringResource(R.string.presets_subtitle),
+                    onClick = onOpenAgentPresets,
                 )
             }
         }

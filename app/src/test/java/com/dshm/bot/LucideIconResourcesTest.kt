@@ -26,6 +26,16 @@ class LucideIconResourcesTest {
         "pencil",
         "check",
         "trash_2",
+        "play",
+        "download",
+        "globe",
+        "copy",
+        "circle_stop",
+        "box",
+        "cpu",
+        "monitor",
+        "package",
+        "terminal",
     )
 
     @Test

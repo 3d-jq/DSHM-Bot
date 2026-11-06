@@ -213,17 +213,6 @@ fun SettingsScreen(
                     value = chatFontLabel,
                     onClick = onOpenChatFont,
                 )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.settings_pets),
-                    icon = R.drawable.ic_lucide_paw_print,
-                    value = if (uiState.petEnabled) {
-                        SettingsCopy.petLabel(uiState.petStyle, language)
-                    } else {
-                        stringResource(R.string.settings_value_off)
-                    },
-                    onClick = { onOpenPage(SettingsPageId.PETS) },
-                )
             }
         }
 
@@ -282,13 +271,6 @@ fun SettingsScreen(
                     icon = R.drawable.ic_lucide_mic,
                     value = voiceLabel(uiState.voiceMode),
                     onClick = { onOpenPage(SettingsPageId.VOICE) },
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.settings_performance),
-                    icon = R.drawable.ic_lucide_gauge,
-                    value = performanceLabel(uiState.performanceMode),
-                    onClick = { onOpenPage(SettingsPageId.PERFORMANCE) },
                 )
                 SettingsRowDivider()
                 SettingsRow(

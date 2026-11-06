@@ -11,9 +11,16 @@ import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.DshEngineSettingsRepository
 import com.dshm.bot.data.remote.DshRpcException
+import com.dshm.bot.data.remote.DshFeaturesRepository
+import com.dshm.bot.data.remote.DshSessionRepository
 import com.dshm.bot.data.remote.PROVIDER_NAMESPACE
 import com.dshm.bot.data.remote.PermissionCatalog
 import com.dshm.bot.data.remote.PluginBundle
+import com.dshm.bot.data.remote.AGENT_PRESET_REGISTRY_NS
+import com.dshm.bot.data.remote.AGENT_PRESET_SELECTED_DEFAULT_PATH
+import com.dshm.bot.data.remote.AgentPresetDocument
+import com.dshm.bot.data.remote.AgentPresetInfo
+import com.dshm.bot.data.remote.ModelCatalog
 import com.dshm.bot.data.remote.PluginInventory
 import com.dshm.bot.data.remote.ProviderModelSpec
 import com.dshm.bot.data.remote.ProviderProfile
@@ -64,12 +71,20 @@ class EngineSettingsViewModel : ViewModel() {
         val pluginRestartNeeded: Boolean = false,
         /** 官方语音输入插件的 `speech/catalog`。 */
         val speech: SpeechCatalog? = null,
+        /** 模型目录（`session/modelCatalog`），子代理页挑模型用。 */
+        val modelCatalog: ModelCatalog? = null,
+        val modelCatalogError: String? = null,
+        /** 「Agent 预设」清单。 */
+        val agentPresets: List<AgentPresetInfo> = emptyList(),
+        val agentPresetsError: String? = null,
         val speechLoading: Boolean = false,
         val speechError: String? = null,
         val speechPreparing: Boolean = false,
     )
 
     private var repository: DshEngineSettingsRepository? = null
+    private var sessionRepository: DshSessionRepository? = null
+    private var featuresRepository: DshFeaturesRepository? = null
     private var endpoint: RuntimeEndpoint? = null
     private var speechPoll: Job? = null
     private val writeMutex = Mutex()
@@ -81,10 +96,101 @@ class EngineSettingsViewModel : ViewModel() {
         if (endpoint == next && repository != null) return
         endpoint = next
         repository = next?.let { DshEngineSettingsRepository(DshClients.of(it)) }
+        sessionRepository = next?.let { DshSessionRepository(DshClients.of(it)) }
+        featuresRepository = next?.let { DshFeaturesRepository(DshClients.of(it)) }
         if (repository == null) {
             _ui.value = UiState(error = "本机引擎未运行")
         } else {
             refresh()
+        }
+    }
+
+    /** 读「Agent 预设」清单。 */
+    fun refreshAgentPresets() {
+        val features = featuresRepository ?: return
+        viewModelScope.launch {
+            runCatching { features.agentPresets() }
+                .onSuccess { presets ->
+                    _ui.update { it.copy(agentPresets = presets, agentPresetsError = null) }
+                }
+                .onFailure { failure ->
+                    _ui.update { it.copy(agentPresetsError = describeSettingsError(failure)) }
+                }
+        }
+    }
+
+    /** 把某个预设设为新对话的默认（写 `agent-preset-registry` 的 `selectedDefault`）。 */
+    fun setDefaultAgentPreset(id: String, onDone: (String?) -> Unit = {}) {
+        viewModelScope.launch {
+            val error = applyWrite(
+                AGENT_PRESET_REGISTRY_NS,
+                listOf(SettingsOp.set(AGENT_PRESET_SELECTED_DEFAULT_PATH, id)),
+                listOf(AGENT_PRESET_SELECTED_DEFAULT_PATH),
+            )
+            if (error == null) refreshAgentPresets()
+            onDone(error)
+        }
+    }
+
+    /**
+     * 读一个预设的原始 YAML（「查看配置」用）。
+     */
+    fun agentPresetDocument(id: String, onDone: (AgentPresetDocument?) -> Unit) {
+        val features = featuresRepository ?: run {
+            onDone(null)
+            return
+        }
+        viewModelScope.launch {
+            val document = runCatching { features.agentPresetDocument(id) }.getOrNull()
+            onDone(document)
+        }
+    }
+
+    /**
+     * 删除一个预设：删的是**声明它的那个组合包**（对齐 dsh-Go 的 `deletePresetBundle`）。
+     * 默认预设不能删 —— 得先把别的预设设为默认。
+     */
+    fun deleteAgentPreset(preset: AgentPresetInfo, onDone: (String?) -> Unit = {}) {
+        val features = featuresRepository ?: run {
+            onDone("本机引擎未运行")
+            return
+        }
+        val bundle = presetBundleOf(preset.id)
+        if (bundle == null) {
+            onDone("没有找到声明这个预设的插件包")
+            return
+        }
+        viewModelScope.launch {
+            val error = runCatching { features.removeBundle(bundle.name) }
+                .exceptionOrNull()
+                ?.let { describeSettingsError(it) }
+            if (error == null) refreshAgentPresets()
+            onDone(error)
+        }
+    }
+
+    /** 哪个组合包声明了这个预设（`@deepseek-ai/dsh-agent-preset` 的 `preset-<id>` 行）。 */
+    private fun presetBundleOf(presetId: String): PluginBundle? =
+        _ui.value.bundles.firstOrNull { bundle ->
+            bundle.rows.any { row ->
+                row.moduleName == AGENT_PRESET_MODULE && row.rowId == "preset-$presetId"
+            }
+        }
+
+    /**
+     * 读模型目录（`session/modelCatalog`）：子代理页要给用户挑可选模型。
+     * 目录只有配好凭据的渠道，失败不报错，只是空目录。
+     */
+    fun refreshModelCatalog() {
+        val session = sessionRepository ?: return
+        viewModelScope.launch {
+            runCatching { session.modelCatalog() }
+                .onSuccess { raw ->
+                    _ui.update { it.copy(modelCatalog = ModelCatalog.fromJson(raw), modelCatalogError = null) }
+                }
+                .onFailure { failure ->
+                    _ui.update { it.copy(modelCatalogError = describeSettingsError(failure)) }
+                }
         }
     }
 
@@ -278,6 +384,21 @@ class EngineSettingsViewModel : ViewModel() {
 
     fun setValue(ns: String, path: List<String>, value: Any?) {
         viewModelScope.launch { applyWrite(ns, listOf(SettingsOp.set(path, value)), listOf(path)) }
+    }
+
+    /**
+     * 一次写多个字段（引擎当成一个事务）。
+     * 子代理页「打开开关 + 选第一个模型」必须一起发，引擎才不拒绝。
+     */
+    fun setValues(ns: String, values: List<Pair<List<String>, Any?>>) {
+        if (values.isEmpty()) return
+        viewModelScope.launch {
+            applyWrite(
+                ns,
+                values.map { (path, value) -> SettingsOp.set(path, value) },
+                values.map { (path, _) -> path },
+            )
+        }
     }
 
     fun unsetValue(ns: String, path: List<String>) {
@@ -657,6 +778,9 @@ class EngineSettingsViewModel : ViewModel() {
         _ui.value.fieldErrors["$ns:${pathKey(path)}"]
 
     companion object {
+        /** 声明 Agent 预设的模块名。 */
+        private const val AGENT_PRESET_MODULE = "@deepseek-ai/dsh-agent-preset"
+
         fun factory(): ViewModelProvider.Factory = viewModelFactory {
             initializer { EngineSettingsViewModel() }
         }

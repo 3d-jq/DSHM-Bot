@@ -527,12 +527,34 @@ data class PluginInventoryEntry(
     val rowId: String get() = entryId.removePrefix("include:")
 }
 
+/**
+ * 一个 Agent 预设带出来的插件条目（对齐 dsh-Go 的 `PresetPlugins`）。
+ */
+data class PresetPlugins(
+    val id: String,
+    val name: String? = null,
+    val isDefault: Boolean = false,
+    val broken: String? = null,
+    val rows: List<PluginInventoryEntry> = emptyList(),
+)
+
 data class PluginInventory(
     val entries: List<PluginInventoryEntry>,
     val managementAvailable: Boolean,
+    /** 引擎组合出来的预设清单（`agentPresets` 字段）。 */
+    val presets: List<PresetPlugins> = emptyList(),
 )
 
 /** `pluginManager/listBundles` 的一项：官方可选包或第三方已安装包。 */
+/** 组合包里的一个 Loader 条目。 */
+data class PluginBundleRow(
+    /** 条目 id（如 `preset-standard`）。 */
+    val rowId: String,
+    /** 条目所属的模块名（如 `@deepseek-ai/dsh-agent-preset`）。 */
+    val moduleName: String,
+    val meta: PluginDisplayMeta?,
+)
+
 data class PluginBundle(
     val name: String,
     val official: Boolean,
@@ -545,6 +567,8 @@ data class PluginBundle(
     val removable: Boolean,
     val readOnlyReason: String?,
     val error: String?,
+    /** 包里的 Loader 条目（找「哪个包声明了某个预设」要用）。 */
+    val rows: List<PluginBundleRow> = emptyList(),
 ) {
     /** dsh-Go `bundleGroup`：第三方的归「已安装」，官方可选/已装的归「DSH 官方」。 */
     val group: PluginBundleGroup
@@ -568,21 +592,37 @@ data class PluginToggleResult(
     val message: String?,
 )
 
-fun parsePluginBundle(raw: JSONObject): PluginBundle = PluginBundle(
-    name = raw.optString("name"),
-    official = raw.optBoolean("official", false),
-    version = raw.anyOrNull("version") as? String,
-    meta = PluginDisplayMeta.fromJson(raw.optJSONObject("meta")),
-    description = raw.anyOrNull("description") as? String,
-    enabled = raw.optBoolean("enabled", false),
-    installed = raw.optBoolean("installed", false),
-    optional = raw.optBoolean("optional", false),
-    removable = raw.optBoolean("removable", false),
-    readOnlyReason = raw.anyOrNull("readOnlyReason") as? String,
-    error = raw.optJSONObject("error")?.let { error ->
-        (error.anyOrNull("diagnostic") as? String) ?: (error.anyOrNull("code") as? String)
-    },
-)
+fun parsePluginBundle(raw: JSONObject): PluginBundle {
+    val rows = mutableListOf<PluginBundleRow>()
+    raw.optJSONArray("rows")?.let { array ->
+        for (index in 0 until array.length()) {
+            val row = array.optJSONObject(index) ?: continue
+            val rowId = row.optString("rowId").ifEmpty { row.optString("id") }
+            if (rowId.isEmpty()) continue
+            rows += PluginBundleRow(
+                rowId = rowId,
+                moduleName = row.optString("moduleName"),
+                meta = PluginDisplayMeta.fromJson(row.optJSONObject("meta")),
+            )
+        }
+    }
+    return PluginBundle(
+        name = raw.optString("name"),
+        official = raw.optBoolean("official", false),
+        version = raw.anyOrNull("version") as? String,
+        meta = PluginDisplayMeta.fromJson(raw.optJSONObject("meta")),
+        description = raw.anyOrNull("description") as? String,
+        enabled = raw.optBoolean("enabled", false),
+        installed = raw.optBoolean("installed", false),
+        optional = raw.optBoolean("optional", false),
+        removable = raw.optBoolean("removable", false),
+        readOnlyReason = raw.anyOrNull("readOnlyReason") as? String,
+        error = raw.optJSONObject("error")?.let { error ->
+            (error.anyOrNull("diagnostic") as? String) ?: (error.anyOrNull("code") as? String)
+        },
+        rows = rows,
+    )
+}
 
 /** `speech/catalog` 的一个识别器及其模型准备状态（对齐 dsh-Go `SpeechProviderView`）。 */
 data class SpeechProvider(

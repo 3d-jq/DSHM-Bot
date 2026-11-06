@@ -58,6 +58,16 @@ ICONS = [
     "pencil",
     "check",
     "trash-2",
+    "play",
+    "download",
+    "globe",
+    "copy",
+    "circle-stop",
+    "box",
+    "cpu",
+    "monitor",
+    "package",
+    "terminal",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

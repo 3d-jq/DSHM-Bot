@@ -103,11 +103,9 @@
     <string name="settings_language">Language</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_voice">Voice input</string>
-    <string name="settings_performance">Performance</string>
     <string name="settings_local_engine">Local engine</string>
     <string name="settings_engine_params">Engine settings</string>
     <string name="settings_background_running">Background running</string>
-    <string name="settings_pets">Pets</string>
     <string name="settings_remote_host">Remote host</string>
     <string name="settings_version">Version</string>
     <string name="settings_dsh_version">DSH version</string>
@@ -164,9 +162,37 @@
     <string name="engine_arch">Architecture</string>
     <string name="engine_method">Launch method</string>
     <string name="engine_reset_title">Reset runtime?</string>
-    <string name="engine_reset_body">The downloaded and unpacked rootfs will be deleted. You will need to download it again next time. App settings are kept.</string>
-    <string name="engine_reset_hint">Only use this when the engine is broken. App settings are kept.</string>
+    <string name="engine_reset_body">The downloaded and unpacked rootfs will be deleted. You will need to download it again next time.</string>
+    <string name="engine_reset_hint">Only use this when the engine is broken.</string>
     <string name="engine_reset">Reset runtime</string>
+    <string name="engine_reset_keep_workspace">Keep conversations, workspace and personalization</string>
+    <string name="engine_reset_delete">Delete and reset</string>
+    <string name="engine_startup">Engine startup</string>
+    <string name="engine_auto_start">Start the engine when the app opens</string>
+    <string name="engine_auto_start_hint">The engine runs in the background on this phone.</string>
+    <string name="engine_open_web">Open the web app</string>
+    <string name="engine_bundled_version">Bundled version</string>
+    <string name="engine_detail_running">Running · %1$s</string>
+    <string name="engine_start_again">Start again</string>
+    <string name="engine_stop_title">Stop the engine?</string>
+    <string name="engine_stop_body">Bots will not answer until the engine starts again.</string>
+    <!-- 诊断页 -->
+    <string name="diagnostics_runtime">Runtime</string>
+    <string name="diagnostics_connection">Connection</string>
+    <string name="diagnostics_export">Export</string>
+    <string name="diagnostics_status">Status</string>
+    <string name="diagnostics_architecture">Architecture</string>
+    <string name="diagnostics_installed_version">Installed version</string>
+    <string name="diagnostics_address">Address</string>
+    <string name="diagnostics_client">Client</string>
+    <string name="diagnostics_api_key">API Key</string>
+    <string name="diagnostics_configured">Configured</string>
+    <string name="diagnostics_error">Error</string>
+    <string name="diagnostics_copy_report">Copy diagnostics report</string>
+    <string name="diagnostics_copy_report_hint">Runtime state, connection and app settings, with secrets redacted.</string>
+    <string name="diagnostics_copied">Diagnostics copied</string>
+    <string name="diagnostics_not_connected">Not connected</string>
+    <string name="diagnostics_connected">Connected</string>
     <string name="onboarding_title">Welcome to DSHM Bot</string>
     <string name="onboarding_intro">Before the bots can work, the app needs a local runtime on this phone (Ubuntu + Node + DSH). It is downloaded once and then runs offline.</string>
     <string name="onboarding_download_hint">About 150 MB. Keep the app open during download and installation.</string>
@@ -205,8 +231,6 @@
     <string name="interface_web">Web</string>
     <string name="voice_system">System</string>
     <string name="voice_engine">Voice model</string>
-    <string name="performance_full">Full</string>
-    <string name="performance_light">Light</string>
     <string name="info_engine_required">Connect the local engine to configure this.</string>
     <string name="info_privacy">Chats and credentials stay on this phone. Nothing is uploaded unless you turn it on in DSH.</string>
     <string name="info_pets">Pet support will be ported from dsh-Go later.</string>
@@ -374,11 +398,6 @@
     <string name="settings_notifications_open_system_hint">Allow notifications for DSHM Bot in Android.</string>
     <string name="settings_notifications_permission_denied">Notification permission was denied. Enable it in system settings.</string>
 
-    <string name="settings_performance_mode">Mode</string>
-    <string name="settings_performance_hint">Light turns off full-screen transitions and reduces motion.</string>
-    <string name="settings_performance_auto_hint">Use the default for this phone.</string>
-    <string name="settings_performance_full_hint">Keep all transitions and effects.</string>
-    <string name="settings_performance_light_hint">Reduce motion and skip page transitions.</string>
 
     <string name="settings_background_status">Status</string>
     <string name="settings_background_hint">Without the exemption, Android may stop the engine while the app is in the background.</string>
@@ -599,6 +618,50 @@
     <string name="settings_model_effort_xhigh">Extra high</string>
     <string name="settings_model_effort_max">Max</string>
     <string name="action_done">Done</string>
+    <string name="settings_engine_advanced">Advanced</string>
+    <string name="settings_engine_reset_all">Restore all defaults</string>
+    <string name="settings_count_items">%1$d items</string>
+    <!-- 子代理页 -->
+    <string name="settings_subagent_title">Subagents</string>
+    <string name="settings_subagent_limits">Run limits</string>
+    <string name="settings_subagent_max_depth">Max recursion depth</string>
+    <string name="settings_subagent_max_active">Max running at once</string>
+    <string name="settings_subagent_model_selection">Model selection</string>
+    <string name="settings_subagent_allow_choice">Let AI pick models for subagents</string>
+    <string name="settings_subagent_pick_first">Pick a model to apply this</string>
+    <string name="settings_subagent_keep_one">Keep at least one model</string>
+    <string name="settings_subagent_no_models">No models to choose from</string>
+    <string name="settings_subagent_connect_model">Add a model</string>
+    <string name="settings_subagent_read_failed">Could not read the model list</string>
+    <string name="settings_subagent_unavailable">currently unavailable</string>
+    <!-- 插件清单页 -->
+    <string name="plugins_inventory_title">Plugin inventory</string>
+    <string name="plugins_inventory_empty">The engine has no components yet.</string>
+    <string name="plugins_inventory_failed_group">Failed</string>
+    <string name="plugins_inventory_system_group">System components</string>
+    <string name="plugins_inventory_running">Enabled</string>
+    <string name="plugins_inventory_off">Disabled</string>
+    <string name="plugins_inventory_failed">Failed</string>
+    <string name="plugins_inventory_loading">Loading</string>
+    <string name="plugins_inventory_waiting">Waiting</string>
+    <string name="plugins_inventory_idle">Not running</string>
+    <string name="plugins_inventory_global">Global plugins</string>
+    <string name="plugins_inventory_presets">Agent presets</string>
+    <!-- Agent 预设 -->
+    <string name="presets_title">Agent presets</string>
+    <string name="presets_subtitle">Tools and working style for new conversations</string>
+    <string name="presets_empty">No presets yet.</string>
+    <string name="presets_set_default">Set as default for new chats</string>
+    <string name="presets_already_default">Already the default for new chats</string>
+    <string name="presets_default_badge">Default</string>
+    <string name="presets_broken">Failed to load</string>
+    <string name="presets_view_config">View configuration</string>
+    <string name="presets_no_config">This preset has no configuration file.</string>
+    <string name="presets_create_unavailable">Create and edit need Creator mode (not wired yet)</string>
+    <string name="presets_delete">Delete</string>
+    <string name="presets_delete_default_hint">Set another preset as the default first</string>
+    <string name="presets_delete_title">Delete “%1$s”?</string>
+    <string name="presets_delete_hint">New chats can no longer pick it. Chats already started are unaffected.</string>
 </resources>
 
 

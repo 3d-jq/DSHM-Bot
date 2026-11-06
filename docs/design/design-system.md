@@ -228,8 +228,11 @@ SettingsPage(
   **不要给整张卡统一加底距**——那会让所有卡片都凭空多出一圈空白。
 - **行高**：≥ `rowMinHeight - spacing.sm` = 56dp。
 - **行内左右**：`spacing.lg`(16)；图标 20dp；图标↔文字 `spacing.sm`(8)。
-- **行间分割线**：`SettingsRowDivider()`，1dp `divider`，左右各缩进 `spacing.lg`(16)。
+- **行间分割线**：**默认不画**（dsh-Go 的 `SettingsSection` 用 `SheetGroup`，行间只有 2dp 间距，
+  靠行内边距分组）。需要分隔时用 `SettingsRowDivider()`（1dp `divider`，左右各缩进 `spacing.lg`(16)）。
 - **右侧值**：`settingsRowValue` + `textSecondary`；有值时**不要**再画 `>` 箭头（`trailing = {}` 可显式去掉）。
+- **标签不许被值挤扁**：值很长时标签保持自然宽度，值自己省略（`maxLines = 1` + Ellipsis），
+  不要让「版本」这种标签被压成一列竖排的字。版本串按 dsh-Go 的 `shortRuntimeVersion` 缩写。
 
 ### 8.2 表单字段块模板（表单页）
 
@@ -305,7 +308,9 @@ SettingsPage(
 | 搜索 | `SearchScreen.kt` | 列表模板 | 复用 `BotRow` |
 | 对话 | `BotChatPlaceholderScreen.kt` | 对话模板 | `ChatComposer`、`MarkdownText` |
 | Bot 详情 | `BotDetailsScreen.kt` | 详情模板 | Hero 卡 + 分组卡 |
-| 引擎页 | `EngineScreen.kt` | 设置模板 | `SettingsSection` / 行 / 日志井 |
+| 引擎页 | `EngineScreen.kt` | 设置模板 | Hero 卡 + 胶囊操作区 + 「引擎启动」卡 + 日志井 + 「更多」卡 + 「运行时」卡 |
+| 诊断页 | `DiagnosticsScreen.kt` | 设置模板 | 「运行时」卡 + 「连接」卡 + 「导出」卡 |
+| 引擎参数 | `EngineSettingsScreen.kt` | 设置模板 | 「运行」组（子代理 / Agent 循环 / 命令执行）+「插件」组 |
 | 开屏引导 | `OnboardingScreen.kt` | 独立 | 按钮用 `SettingsPrimaryButton` |
 | 账号页 | `AccountScreen.kt` | 详情模板 | Hero 卡 + 「连接」卡 + 余额两列 |
 | 设置首页 | `SettingsScreen.kt` | 设置模板 | 账号概览卡 + 六组 |

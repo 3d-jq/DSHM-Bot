@@ -20,15 +20,6 @@ enum class InterfaceMode { NATIVE, WEB }
 /** 语音输入（自动 / 系统 / 引擎）。 */
 enum class VoiceMode { AUTO, SYSTEM, ENGINE }
 
-/** 性能模式（自动 / 完整 / 轻量）。 */
-enum class PerformanceMode { AUTO, FULL, LIGHT }
-
-/** 宠物形象（设置 → 外观 → 宠物），对应 dsh-Go 的两套宠物包。 */
-enum class PetStyle { DEEPY_WHALE, WHALE_GIRL }
-
-/** 宠物大小。 */
-enum class PetSize { SMALL, MEDIUM, LARGE }
-
 /** 手机操控的确认方式。 */
 enum class PhoneConfirmMode { ASK, TASK, ALWAYS }
 
@@ -46,6 +37,8 @@ data class DshGoPreferences(
     val notifyApproval: Boolean = true,
     val notifyQuestion: Boolean = true,
     val foldProcess: Boolean = true,
+    /** 打开 App 时自动启动本机引擎（对齐 dsh-Go 的 `autoStartLocal`）。 */
+    val autoStartLocal: Boolean = true,
 ) {
     fun flag(key: String): Boolean = when (key) {
         KEY_NOTIFY_TURN_DONE -> notifyTurnDone
@@ -53,6 +46,7 @@ data class DshGoPreferences(
         KEY_NOTIFY_APPROVAL -> notifyApproval
         KEY_NOTIFY_QUESTION -> notifyQuestion
         KEY_FOLD_PROCESS -> foldProcess
+        KEY_AUTO_START_LOCAL -> autoStartLocal
         else -> error("未知的设置偏好 key: $key")
     }
 
@@ -65,6 +59,7 @@ data class DshGoPreferences(
             KEY_NOTIFY_APPROVAL -> copy(notifyApproval = value)
             KEY_NOTIFY_QUESTION -> copy(notifyQuestion = value)
             KEY_FOLD_PROCESS -> copy(foldProcess = value)
+            KEY_AUTO_START_LOCAL -> copy(autoStartLocal = value)
             else -> error("未知的设置偏好 key: $key")
         }
     }
@@ -75,6 +70,7 @@ data class DshGoPreferences(
         const val KEY_NOTIFY_APPROVAL = "notify_approval"
         const val KEY_NOTIFY_QUESTION = "notify_question"
         const val KEY_FOLD_PROCESS = "fold_process"
+        const val KEY_AUTO_START_LOCAL = "auto_start_local"
 
         val BOOLEAN_KEYS = listOf(
             KEY_NOTIFY_TURN_DONE,
@@ -82,6 +78,7 @@ data class DshGoPreferences(
             KEY_NOTIFY_APPROVAL,
             KEY_NOTIFY_QUESTION,
             KEY_FOLD_PROCESS,
+            KEY_AUTO_START_LOCAL,
         )
     }
 }

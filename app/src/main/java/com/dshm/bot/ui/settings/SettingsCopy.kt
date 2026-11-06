@@ -2,7 +2,6 @@ package com.dshm.bot.ui.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalResources
-import com.dshm.bot.domain.model.PetStyle
 
 /** 当前界面语言（跟随 App 的语言覆盖，而不是系统 Locale）。 */
 @Composable
@@ -52,11 +51,6 @@ object SettingsCopy {
     }
 
     fun fieldDescription(ns: String, path: List<String>, language: String): String? = null
-
-    fun petLabel(style: PetStyle, language: String): String = when (style) {
-        PetStyle.DEEPY_WHALE -> if (isChinese(language)) "Deepy 小鲸鱼" else "Deepy"
-        PetStyle.WHALE_GIRL -> if (isChinese(language)) "鲸娘" else "Whale Girl"
-    }
 
     fun permissionLabel(value: String, language: String): String {
         val zh = isChinese(language)

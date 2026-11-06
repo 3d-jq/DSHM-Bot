@@ -27,6 +27,8 @@ class RuntimeInstaller(context: Context) {
     val rootfsDir = File(baseDir, "rootfs")
     private val versionFile = File(baseDir, "rootfs.version")
     private val stagingDir = File(baseDir, "staging")
+    /** 重置运行时时暂存「要保留的东西」的地方（在 rootfs 之外）。 */
+    private val stashDir = File(baseDir, "keep")
 
     fun isInstalled(): Boolean =
         versionFile.isFile && rootfsDir.isDirectory && !rootfsDir.list().isNullOrEmpty()
@@ -101,6 +103,8 @@ class RuntimeInstaller(context: Context) {
         val activateAt = SystemClock.elapsedRealtime()
         versionFile.writeText(effective.runtimeVersion)
         EngineLog.log("install activate: ${SystemClock.elapsedRealtime() - activateAt} ms")
+        // 之前重置时保留的东西这时搬回新装的运行时。
+        restoreStash()
         EngineLog.log("runtime ready in ${(SystemClock.elapsedRealtime() - startedAt) / 1000}s")
         onProgress(100, "已安装")
         return effective.runtimeVersion
@@ -118,6 +122,18 @@ class RuntimeInstaller(context: Context) {
         stagingDir.deleteRecursively()
         versionFile.delete()
     }
+
+    /**
+     * 重置运行时前，把 [paths]（相对 rootfs）复制到保留区。
+     * 删除 rootfs 不会带走它们，下次装好运行时再搬回去。
+     */
+    fun stash(paths: List<String>) = RuntimeStash.stash(rootfsDir, stashDir, paths)
+
+    /** 装好运行时后把保留区搬回去。 */
+    fun restoreStash() = RuntimeStash.restore(stashDir, rootfsDir)
+
+    /** 保留区里还有东西（重置后还没重新装运行时）。 */
+    fun hasStash(): Boolean = RuntimeStash.hasStash(stashDir)
 
     private fun findRootfsEntry(zip: ZipFile, asset: String) =
         listOf(asset, "assets/runtime/$asset")
@@ -184,9 +200,19 @@ class RuntimeInstaller(context: Context) {
         return File(parent, linkName).canonicalPath
     }
 
-    private companion object {
-        const val DEFAULT_BUFFER = 1 shl 20
-        const val EXECUTABLE_MASK = 0b001_001_001
+    companion object {
+        private const val DEFAULT_BUFFER = 1 shl 20
+        private const val EXECUTABLE_MASK = 0b001_001_001
+
+        /**
+         * 重置运行时时「保留」的东西（相对 rootfs）：
+         * 对话、工作区、Bot 记忆与个性化配置 —— 用户写下的东西不该被一次重置抹掉。
+         */
+        val KEEP_PATHS = listOf(
+            "root/.dsh/bot",
+            "root/.dsh/sessions",
+            "root/.dsh/AGENTS.md",
+        )
     }
 }
 

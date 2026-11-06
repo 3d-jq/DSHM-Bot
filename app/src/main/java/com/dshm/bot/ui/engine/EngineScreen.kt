@@ -9,16 +9,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,12 +25,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,29 +36,40 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeState
+import com.dshm.bot.data.runtime.shortRuntimeVersion
 import com.dshm.bot.ui.components.FloatingIconButton
+import com.dshm.bot.ui.settings.SettingsDangerButton
+import com.dshm.bot.ui.settings.SettingsPage
+import com.dshm.bot.ui.settings.SettingsSection
+import com.dshm.bot.ui.settings.SettingsRow
+import com.dshm.bot.ui.settings.SettingsRowDivider
+import com.dshm.bot.ui.settings.SettingsSwitchRow
 
 /** 默认下载地址：我们自己的 Release 运行时包。 */
 const val DEFAULT_RUNTIME_URL =
     "https://github.com/3d-jq/DSHM-Bot/releases/latest/download/dshm-runtime-arm64-v8a.zip"
 
 /**
- * 本机引擎页（参照 dsh-Go `engine_screen.dart` + `TerminalCard`）：
- * hero 状态卡 → 启动/停止/重启 → 日志终端卡 → 更多 → 运行时信息 → 危险区。
+ * 本机引擎页（对齐 dsh-Go `app/lib/ui/engine/engine_screen.dart`）：
+ *
+ * 顶栏（返回 + 标题 + 网页）→ Hero 状态卡 → 启动/停止/重启 → 引擎启动（自动启动）
+ * → 日志终端井 → 更多（后台运行 / 诊断）→ 运行时信息 → 危险区（重置）。
+ *
+ * 页面骨架按设计文档 §8.1（设置子页模板）：分组卡、真实状态值、唯一主操作。
  */
 @Composable
 fun EngineScreen(
@@ -74,13 +79,21 @@ fun EngineScreen(
     onStart: () -> Unit = {},
     onStop: () -> Unit = {},
     onRestart: () -> Unit = {},
-    onReset: () -> Unit = {},
+    onReset: (ResetKeep) -> Unit = {},
+    onOpenWeb: () -> Unit = {},
+    onOpenBackground: () -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {},
     version: String = "—",
     nodeVersion: String = "—",
+    bundledVersion: String = "—",
+    installedVersion: String? = null,
     abi: String = "arm64-v8a",
+    autoStart: Boolean = true,
+    onAutoStartChange: (Boolean) -> Unit = {},
     logText: () -> String = { "" },
     modifier: Modifier = Modifier,
 ) {
+    var showStopDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
     var logs by remember { mutableStateOf(logText()) }
     LaunchedEffect(state) {
@@ -89,112 +102,295 @@ fun EngineScreen(
             kotlinx.coroutines.delay(1_000)
         }
     }
+    val running = state is RuntimeState.Running
+    val missing = state is RuntimeState.NotInstalled
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = Dshm.colors.pageBackground,
-        topBar = { EngineHeader(onBack) },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
-            verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md),
-        ) {
-            HeroCard(state = state, version = version, nodeVersion = nodeVersion)
-            ActionRow(state = state, onInstall = onInstall, onStart = onStart, onStop = onStop, onRestart = onRestart)
-            if (state is RuntimeState.Installing) {
-                LinearProgressIndicator(
-                    progress = { if (state.progress > 0) state.progress / 100f else 0f },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Dshm.colors.accent,
-                )
-                Text(
-                    text = "${state.message} ${if (state.progress > 0) "${state.progress}%" else ""}",
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.textSecondary,
+    SettingsPage(
+        title = stringResource(R.string.engine_title),
+        onBack = { onBack?.invoke() },
+        actions = {
+            // dsh-Go：顶栏右侧是「网页」按钮，引擎跑着才可点。
+            FloatingIconButton(
+                icon = R.drawable.ic_lucide_globe,
+                contentDescription = stringResource(R.string.engine_open_web),
+                onClick = onOpenWeb,
+                enabled = running,
+            )
+        },
+    ) {
+        item {
+            EngineHeroCard(
+                state = state,
+                version = version,
+                nodeVersion = nodeVersion,
+            )
+        }
+
+        item {
+            EngineActions(
+                state = state,
+                onInstall = { onInstall(DEFAULT_RUNTIME_URL) },
+                onStart = onStart,
+                onStop = { showStopDialog = true },
+                onRestart = onRestart,
+            )
+        }
+
+        if (state is RuntimeState.Installing) {
+            item {
+                Column {
+                    LinearProgressIndicator(
+                        progress = { if (state.progress > 0) state.progress / 100f else 0f },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Dshm.colors.accent,
+                    )
+                    Spacer(Modifier.height(Dshm.spacing.xs))
+                    Text(
+                        text = if (state.progress > 0) {
+                            "${state.message} ${state.progress}%"
+                        } else {
+                            state.message
+                        },
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.textSecondary,
+                    )
+                }
+            }
+        }
+
+        item {
+            SettingsSection(title = stringResource(R.string.engine_startup)) {
+                SettingsSwitchRow(
+                    title = stringResource(R.string.engine_auto_start),
+                    subtitle = stringResource(R.string.engine_auto_start_hint),
+                    icon = R.drawable.ic_lucide_play,
+                    checked = autoStart,
+                    onCheckedChange = onAutoStartChange,
                 )
             }
-            TerminalCard(logs = logs)
-            MoreCard()
-            RuntimeInfoCard(version = version, abi = abi)
-            DangerCard(onReset = { showResetDialog = true })
+        }
+
+        if (!missing) {
+            item { EngineLogCard(logs = logs) }
+        }
+
+        item {
+            SettingsSection(title = stringResource(R.string.engine_more)) {
+                SettingsRow(
+                    title = stringResource(R.string.engine_background),
+                    icon = R.drawable.ic_lucide_smartphone,
+                    subtitle = stringResource(R.string.engine_keep_alive_hint),
+                    onClick = onOpenBackground,
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.engine_diagnostics),
+                    icon = R.drawable.ic_lucide_info,
+                    subtitle = stringResource(R.string.engine_diagnostics_hint),
+                    onClick = onOpenDiagnostics,
+                )
+            }
+        }
+
+        item {
+            SettingsSection(title = stringResource(R.string.engine_runtime_info)) {
+                SettingsRow(
+                    title = stringResource(R.string.engine_version),
+                    icon = R.drawable.ic_lucide_box,
+                    value = shortRuntimeVersion(installedVersion)
+                        ?: stringResource(R.string.settings_value_not_set),
+                    trailing = {},
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.engine_bundled_version),
+                    icon = R.drawable.ic_lucide_package,
+                    value = shortRuntimeVersion(bundledVersion),
+                    trailing = {},
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.engine_arch),
+                    icon = R.drawable.ic_lucide_cpu,
+                    value = abi,
+                    trailing = {},
+                )
+            }
+        }
+
+        if (!missing) {
+            item {
+                SettingsSection {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Spacer(Modifier.height(Dshm.spacing.sm))
+                        SettingsDangerButton(
+                            text = stringResource(R.string.engine_reset),
+                            icon = R.drawable.ic_lucide_trash_2,
+                            onClick = { showResetDialog = true },
+                        )
+                        Spacer(Modifier.height(Dshm.spacing.sm))
+                    }
+                }
+            }
         }
     }
 
-    if (showResetDialog) {
+    if (showStopDialog) {
         AlertDialog(
-            onDismissRequest = { showResetDialog = false },
+            onDismissRequest = { showStopDialog = false },
             containerColor = Dshm.colors.surface,
             title = {
                 Text(
-                    text = stringResource(R.string.engine_reset_title),
+                    text = stringResource(R.string.engine_stop_title),
                     style = Dshm.typography.sheetTitle,
                     color = Dshm.colors.textPrimary,
                 )
             },
             text = {
                 Text(
-                    text = stringResource(R.string.engine_reset_body),
+                    text = stringResource(R.string.engine_stop_body),
                     style = Dshm.typography.rowPreview,
                     color = Dshm.colors.textSecondary,
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    showResetDialog = false
-                    onReset()
+                    showStopDialog = false
+                    onStop()
                 }) {
-                    Text(stringResource(R.string.engine_reset), color = Dshm.colors.danger)
+                    Text(stringResource(R.string.engine_stop_short), color = Dshm.colors.danger)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
-                    Text(stringResource(android.R.string.cancel), color = Dshm.colors.accent)
+                TextButton(onClick = { showStopDialog = false }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
                 }
+            },
+        )
+    }
+
+    if (showResetDialog) {
+        ResetDialog(
+            onDismiss = { showResetDialog = false },
+            onConfirm = { keep ->
+                showResetDialog = false
+                onReset(keep)
             },
         )
     }
 }
 
+/**
+ * 重置运行环境：说清会删什么，并让用户选「保留对话与工作区」还是「全部删除」。
+ * 保留的东西在下次装好运行时时会自动搬回来。
+ */
 @Composable
-private fun EngineHeader(onBack: (() -> Unit)?) {
-    Box(
+private fun ResetDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (ResetKeep) -> Unit,
+) {
+    var keepWorkspace by remember { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Dshm.colors.surface,
+        title = {
+            Text(
+                text = stringResource(R.string.engine_reset_title),
+                style = Dshm.typography.sheetTitle,
+                color = Dshm.colors.textPrimary,
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = stringResource(R.string.engine_reset_body),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                )
+                Spacer(Modifier.height(Dshm.spacing.md))
+                ResetKeepOption(
+                    label = stringResource(R.string.engine_reset_keep_workspace),
+                    checked = keepWorkspace,
+                    onCheckedChange = { keepWorkspace = it },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onConfirm(if (keepWorkspace) ResetKeep.KEEP_WORKSPACE else ResetKeep.DELETE_ALL)
+            }) {
+                Text(stringResource(R.string.engine_reset_delete), color = Dshm.colors.danger)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+            }
+        },
+    )
+}
+
+/** 重置弹窗里的整行勾选项。 */
+@Composable
+private fun ResetKeepOption(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
+            .clip(RoundedCornerShape(Dshm.radius.xs))
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onBack != null) {
-            FloatingIconButton(
-                icon = R.drawable.ic_lucide_arrow_left,
-                contentDescription = stringResource(R.string.action_back),
-                onClick = onBack,
-                modifier = Modifier.align(Alignment.CenterStart),
-            )
+        Box(
+            modifier = Modifier
+                .size(Dshm.spacing.selectionTick)
+                .clip(CircleShape)
+                .background(if (checked) Dshm.colors.accent else Color.Transparent)
+                .border(
+                    Dshm.spacing.hairline + Dshm.spacing.xs / 2,
+                    if (checked) Dshm.colors.accent else Dshm.colors.textTertiary,
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_lucide_check),
+                    contentDescription = null,
+                    tint = Dshm.colors.onAccent,
+                    modifier = Modifier.size(Dshm.spacing.topBarIcon - Dshm.spacing.xs),
+                )
+            }
         }
+        Spacer(Modifier.width(Dshm.spacing.md))
         Text(
-            text = stringResource(R.string.engine_title),
-            style = Dshm.typography.pageTitle,
+            text = label,
+            style = Dshm.typography.settingsRowSubtitle,
             color = Dshm.colors.textPrimary,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.align(Alignment.Center),
         )
     }
 }
 
+/** Hero 状态卡：状态环 + 名称 + 当前状态 + 两个版本统计。 */
 @Composable
-private fun HeroCard(state: RuntimeState, version: String, nodeVersion: String) {
-    val tone = when (state) {
-        is RuntimeState.Running -> Dshm.colors.success
-        is RuntimeState.Failed -> Dshm.colors.danger
-        is RuntimeState.Installing, is RuntimeState.Starting -> Dshm.colors.warning
-        else -> Dshm.colors.textTertiary
-    }
+private fun EngineHeroCard(
+    state: RuntimeState,
+    version: String,
+    nodeVersion: String,
+) {
+    val tone = engineTone(state)
     val detail = when (state) {
-        is RuntimeState.Running -> stringResource(R.string.engine_value_running) + " · " + state.endpoint.baseUrl
+        is RuntimeState.Running -> stringResource(
+            R.string.engine_detail_running,
+            state.endpoint.baseUrl,
+        )
         is RuntimeState.Installed -> stringResource(R.string.engine_value_installed)
         is RuntimeState.Starting -> stringResource(R.string.engine_value_starting)
         is RuntimeState.Installing -> stringResource(R.string.engine_value_installing)
@@ -202,16 +398,22 @@ private fun HeroCard(state: RuntimeState, version: String, nodeVersion: String) 
         RuntimeState.Stopped -> stringResource(R.string.engine_value_stopped)
         RuntimeState.NotInstalled -> stringResource(R.string.engine_value_not_installed)
     }
-    SettingsCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    SettingsSection {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                // 卡片内左右 16dp、上下 12dp（设计文档 §8.1）。
+                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box(
                 modifier = Modifier
-                    .size(Dshm.spacing.xxl)
+                    .size(Dshm.spacing.settingsAvatar)
                     .clip(CircleShape)
-                    .border(Dshm.spacing.hairline * 2, tone, CircleShape),
+                    .border(Dshm.spacing.ringStroke, tone, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                androidx.compose.material3.Icon(
+                Icon(
                     painter = painterResource(R.drawable.ic_lucide_server),
                     contentDescription = null,
                     tint = tone,
@@ -219,7 +421,7 @@ private fun HeroCard(state: RuntimeState, version: String, nodeVersion: String) 
                 )
             }
             Spacer(Modifier.width(Dshm.spacing.md))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.engine_local_title),
                     style = Dshm.typography.sheetTitle,
@@ -230,74 +432,157 @@ private fun HeroCard(state: RuntimeState, version: String, nodeVersion: String) 
                     style = Dshm.typography.rowPreview,
                     color = if (state is RuntimeState.Failed) Dshm.colors.danger else Dshm.colors.textSecondary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Spacer(Modifier.height(Dshm.spacing.md))
-        Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xxl)) {
-            Stat(value = "v$version", label = "DSH")
-            Stat(value = "v$nodeVersion", label = "Node.js")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = Dshm.spacing.lg, end = Dshm.spacing.lg, bottom = Dshm.spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xxl),
+        ) {
+            EngineStat(value = "v$version", label = "DSH")
+            EngineStat(value = "v$nodeVersion", label = "Node.js")
         }
     }
 }
 
+/** 状态对应的语义色。 */
 @Composable
-private fun Stat(value: String, label: String) {
+private fun engineTone(state: RuntimeState): Color = when (state) {
+    is RuntimeState.Running -> Dshm.colors.accent
+    is RuntimeState.Failed -> Dshm.colors.danger
+    is RuntimeState.Installing, is RuntimeState.Starting -> Dshm.colors.warning
+    else -> Dshm.colors.textTertiary
+}
+
+@Composable
+private fun EngineStat(value: String, label: String) {
     Column {
         Text(text = value, style = Dshm.typography.rowTitle, color = Dshm.colors.textPrimary)
         Text(text = label, style = Dshm.typography.rowTime, color = Dshm.colors.textTertiary)
     }
 }
 
+/**
+ * 「启动 · 停止 · 重启」三颗等宽胶囊（对齐 dsh-Go 的 `EngineActions`）。
+ * 没装运行时时换成「安装运行时」主按钮。
+ */
 @Composable
-private fun ActionRow(
+private fun EngineActions(
     state: RuntimeState,
-    onInstall: (String) -> Unit,
+    onInstall: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onRestart: () -> Unit,
 ) {
-    if (state is RuntimeState.NotInstalled || state is RuntimeState.Failed) {
-        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs)) {
-            Text(
-                text = stringResource(R.string.engine_intro),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textSecondary,
-            )
-            Text(
-                text = stringResource(R.string.engine_intro_hint),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textTertiary,
-            )
-        }
-        Button(onClick = { onInstall(DEFAULT_RUNTIME_URL) }, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.engine_install_action))
-        }
+    if (state is RuntimeState.NotInstalled) {
+        EngineCapsule(
+            icon = R.drawable.ic_lucide_download,
+            label = stringResource(R.string.engine_install_action),
+            primary = true,
+            onClick = onInstall,
+        )
         return
     }
     val running = state is RuntimeState.Running
-    val ready = state is RuntimeState.Installed || state is RuntimeState.Stopped
-    Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm), modifier = Modifier.fillMaxWidth()) {
-        FilledTonalButton(
-            onClick = onStart,
-            enabled = ready,
-            modifier = Modifier.weight(1f).heightIn(min = Dshm.spacing.composerKey),
-        ) { Text(stringResource(R.string.engine_start_short)) }
-        OutlinedButton(
-            onClick = onStop,
-            enabled = running,
-            modifier = Modifier.weight(1f).heightIn(min = Dshm.spacing.composerKey),
-        ) { Text(stringResource(R.string.engine_stop_short)) }
-        OutlinedButton(
-            onClick = onRestart,
-            enabled = running,
-            modifier = Modifier.weight(1f).heightIn(min = Dshm.spacing.composerKey),
-        ) { Text(stringResource(R.string.engine_restart_short)) }
+    val busy = state is RuntimeState.Starting || state is RuntimeState.Installing
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        EngineCapsule(
+            icon = R.drawable.ic_lucide_play,
+            label = if (state is RuntimeState.Failed) {
+                stringResource(R.string.engine_start_again)
+            } else {
+                stringResource(R.string.engine_start_short)
+            },
+            primary = !running,
+            busy = busy,
+            onClick = if (running) null else onStart,
+            modifier = Modifier.weight(1f),
+        )
+        EngineCapsule(
+            icon = R.drawable.ic_lucide_circle_stop,
+            label = stringResource(R.string.engine_stop_short),
+            onClick = if (running) onStop else null,
+            modifier = Modifier.weight(1f),
+        )
+        EngineCapsule(
+            icon = R.drawable.ic_lucide_refresh_cw,
+            label = stringResource(R.string.engine_restart_short),
+            onClick = if (running) onRestart else null,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
+/**
+ * 一颗引擎操作胶囊：圆角胶囊 + 图标 + 短文案。
+ * 主操作（引擎没跑时）用主色底，其余是安静的中性底。
+ */
 @Composable
-private fun TerminalCard(logs: String) {
+private fun EngineCapsule(
+    icon: Int,
+    label: String,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    busy: Boolean = false,
+) {
+    val enabled = onClick != null
+    val fill = if (primary && enabled) {
+        Dshm.colors.accent
+    } else {
+        Dshm.colors.textPrimary.copy(alpha = 0.06f)
+    }
+    val ink = if (primary && enabled) Dshm.colors.onAccent else Dshm.colors.textPrimary
+    Row(
+        modifier = modifier
+            .heightIn(min = Dshm.spacing.iconButton)
+            .clip(RoundedCornerShape(Dshm.radius.pill))
+            .background(fill)
+            .then(
+                if (enabled) {
+                    Modifier.clickable(onClick = onClick!!)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = Dshm.spacing.md),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(Dshm.spacing.topBarIcon),
+                strokeWidth = Dshm.spacing.hairline * 2,
+                color = ink,
+            )
+        } else {
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = null,
+                tint = ink,
+                modifier = Modifier.size(Dshm.spacing.topBarIcon),
+            )
+        }
+        Spacer(Modifier.width(Dshm.spacing.xs))
+        Text(
+            text = label,
+            style = Dshm.typography.settingsRowSubtitle,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 日志终端井：深色底、等宽字、最新一条在最下面。 */
+@Composable
+private fun EngineLogCard(logs: String) {
     val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     var copied by remember { mutableStateOf(false) }
     val lines = remember(logs) { logs.lines().filter { it.isNotBlank() } }
@@ -305,7 +590,12 @@ private fun TerminalCard(logs: String) {
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) logState.scrollToItem(lines.lastIndex)
     }
-    val shape = RoundedCornerShape(Dshm.radius.lg)
+    // 高度跟着屏幕走：约 42%，但不低于 260、不高于 520（对齐 dsh-Go 的 logHeight）。
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val wellHeight = (screenHeight * LOG_HEIGHT_FRACTION)
+        .coerceIn(Dshm.spacing.logWellMin, Dshm.spacing.logWellMax)
+    // 圆角和其它设置卡一致（设计文档 §4：设置页分组卡一律 settingsCard）。
+    val shape = RoundedCornerShape(Dshm.radius.settingsCard)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -313,7 +603,12 @@ private fun TerminalCard(logs: String) {
             .background(Dshm.colors.terminalBackground),
     ) {
         Row(
-            modifier = Modifier.padding(start = Dshm.spacing.lg, end = Dshm.spacing.md, top = Dshm.spacing.sm, bottom = Dshm.spacing.xs),
+            modifier = Modifier.padding(
+                start = Dshm.spacing.lg,
+                end = Dshm.spacing.md,
+                top = Dshm.spacing.sm,
+                bottom = Dshm.spacing.xs,
+            ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -329,7 +624,11 @@ private fun TerminalCard(logs: String) {
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = if (copied) stringResource(R.string.engine_logs_copied) else stringResource(R.string.engine_logs_copy),
+                text = if (copied) {
+                    stringResource(R.string.engine_logs_copied)
+                } else {
+                    stringResource(R.string.engine_logs_copy)
+                },
                 style = Dshm.typography.rowPreview,
                 color = Dshm.colors.accent,
                 modifier = Modifier
@@ -340,12 +639,11 @@ private fun TerminalCard(logs: String) {
                     .padding(Dshm.spacing.xs),
             )
         }
-        // 完整日志：固定高度懒加载滚动，最新日志自动滚到底。
         LazyColumn(
             state = logState,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(Dshm.spacing.xxl * 10)
+                .height(wellHeight)
                 .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
         ) {
@@ -355,128 +653,30 @@ private fun TerminalCard(logs: String) {
                         text = stringResource(R.string.engine_logs_empty),
                         style = Dshm.typography.rowPreview.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            lineHeight = 16.sp,
+                            fontSize = Dshm.typography.rowTime.fontSize,
+                            lineHeight = Dshm.typography.rowTime.lineHeight,
                         ),
                         color = Dshm.colors.textTertiary,
                     )
                 }
             } else {
                 items(lines.size) { index ->
-                    Text(
-                        text = lines[index],
-                        style = Dshm.typography.rowPreview.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            lineHeight = 16.sp,
-                        ),
-                        color = Dshm.colors.terminalText,
-                    )
+                    SelectionContainer {
+                        Text(
+                            text = lines[index],
+                            style = Dshm.typography.rowPreview.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = Dshm.typography.rowTime.fontSize,
+                                lineHeight = Dshm.typography.rowTime.lineHeight,
+                            ),
+                            color = Dshm.colors.terminalText,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-@Composable
-private fun MoreCard() {
-    SettingsCard {
-        Spacer(Modifier.height(Dshm.spacing.xs))
-        Text(
-            text = stringResource(R.string.engine_background),
-            style = Dshm.typography.rowTitle,
-            color = Dshm.colors.textPrimary,
-        )
-        Text(
-            text = stringResource(R.string.engine_keep_alive_hint),
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textSecondary,
-        )
-        Spacer(Modifier.height(Dshm.spacing.sm))
-        Text(
-            text = stringResource(R.string.engine_diagnostics),
-            style = Dshm.typography.rowTitle,
-            color = Dshm.colors.textPrimary,
-        )
-        Text(
-            text = stringResource(R.string.engine_diagnostics_hint),
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textSecondary,
-        )
-    }
-}
-
-@Composable
-private fun RuntimeInfoCard(version: String, abi: String) {
-    SettingsCard {
-        Spacer(Modifier.height(Dshm.spacing.xs))
-        InfoRow(stringResource(R.string.engine_version), version, mono = true)
-        HorizontalDivider(color = Dshm.colors.divider, thickness = Dshm.spacing.hairline)
-        InfoRow(stringResource(R.string.engine_arch), abi, mono = true)
-    }
-}
-
-@Composable
-private fun InfoRow(label: String, value: String, mono: Boolean = false) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = Dshm.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textSecondary,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = value,
-            style = if (mono) Dshm.typography.rowPreview.copy(fontFamily = FontFamily.Monospace) else Dshm.typography.rowPreview,
-            color = Dshm.colors.textPrimary,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun DangerCard(onReset: () -> Unit) {
-    SettingsCard {
-        Text(
-            text = stringResource(R.string.engine_reset),
-            style = Dshm.typography.rowTitle,
-            color = Dshm.colors.danger,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onReset)
-                .padding(vertical = Dshm.spacing.xs),
-        )
-        Text(
-            text = stringResource(R.string.engine_reset_hint),
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textTertiary,
-        )
-    }
-}
-
-@Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(Dshm.radius.lg)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = Dshm.spacing.cardElevation,
-                shape = shape,
-                ambientColor = Dshm.colors.shadowCard,
-                spotColor = Dshm.colors.shadowCard,
-            )
-            .clip(shape)
-            .background(Dshm.colors.surface)
-            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
-            .padding(Dshm.spacing.lg),
-        content = content,
-    )
-}
-
-
+/** 日志井占屏高的比例（dsh-Go 的 logHeight）。 */
+private const val LOG_HEIGHT_FRACTION = 0.42f

@@ -14,6 +14,8 @@ import com.dshm.bot.data.runtime.RuntimeManager
 import com.dshm.bot.data.runtime.RuntimeManifest
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.data.runtime.TextMasking
+import com.dshm.bot.data.runtime.buildDiagnosticsReport
+import com.dshm.bot.data.runtime.phaseName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +23,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/** 重置运行环境时保留什么。 */
+enum class ResetKeep {
+    /** 保留对话、工作区与个性化配置（用户写下的东西）。 */
+    KEEP_WORKSPACE,
+
+    /** 全部删除：运行时回到未安装状态。 */
+    DELETE_ALL,
+}
 
 /** 本机引擎页状态层：安装/状态交给 RuntimeManager，启动/停止交给 RuntimeLauncher。 */
 class EngineViewModel(
@@ -37,6 +48,12 @@ class EngineViewModel(
     val version: String = manifest.dshVersion.ifEmpty { manifest.runtimeVersion }
     val abi: String = manifest.abi.ifEmpty { "arm64-v8a" }
     val nodeVersion: String = manifest.nodeVersion
+
+    /** 内置运行时版本（App 里带的清单）。 */
+    val bundledVersion: String = manifest.runtimeVersion
+
+    /** 已安装的运行时版本；没装过是 null。 */
+    val installedVersion: String? get() = installer.installedVersion()
 
     init {
         viewModelScope.launch { manager.state.collect { _state.value = it } }
@@ -86,15 +103,41 @@ class EngineViewModel(
     }
 
     /** 重置运行环境：停止引擎并删除已解压的 rootfs（下次启动需重新下载安装）。 */
-    fun reset() {
+    fun reset(keep: ResetKeep = ResetKeep.DELETE_ALL) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 launcher.stop()
+                // 要保留的东西先挪到 rootfs 之外，删完运行时再装回来。
+                if (keep == ResetKeep.KEEP_WORKSPACE) {
+                    installer.stash(RuntimeInstaller.KEEP_PATHS)
+                }
                 installer.delete()
             }
             _state.value = RuntimeState.NotInstalled
         }
     }
+
+    /**
+     * 诊断报告：运行时状态 + 连接信息，密钥一律打码。
+     * 对齐 dsh-Go 的 `DiagnosticsPage.report`。
+     */
+    fun diagnosticsReport(
+        state: RuntimeState,
+        hasApiKey: Boolean,
+        connection: String,
+    ): String = buildDiagnosticsReport(
+        phase = state.phaseName(),
+        abi = abi,
+        bundledVersion = bundledVersion,
+        installedVersion = installedVersion,
+        dshVersion = version,
+        nodeVersion = nodeVersion,
+        baseUrl = (state as? RuntimeState.Running)?.endpoint?.baseUrl,
+        error = (state as? RuntimeState.Failed)?.message,
+        logLines = logText().count { it == '\n' } + 1,
+        hasApiKey = hasApiKey,
+        connection = connection,
+    )
 
     /** 完整运行日志：stdout 的 engine.log + DSH 自己写下的全部日志文件，供日志卡展示/复制。 */
     fun logText(): String = runCatching {

@@ -41,8 +41,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.SolidColor
@@ -240,6 +244,9 @@ fun SettingsRow(
                     text = subtitle,
                     style = Dshm.typography.settingsRowSubtitle,
                     color = subtitleColor ?: Dshm.colors.textSecondary,
+                    // 副标题最多两行：同一张卡里几行的高度才一致（dsh-Go 同理）。
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -516,6 +523,61 @@ fun SettingsDangerButton(
     }
 }
 
+/**
+ * 可折叠的分组卡（dsh-Go 的 `SchemaCollapsedGroup`）：
+ * 标题行显示「标题 · N 项」和展开箭头，点一下展开 / 收起。
+ */
+@Composable
+fun SettingsCollapsedSection(
+    title: String,
+    count: Int,
+    modifier: Modifier = Modifier,
+    initiallyExpanded: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    val shape = RoundedCornerShape(Dshm.radius.settingsCard)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Dshm.colors.surface)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = Dshm.typography.settingsRowTitle,
+                color = Dshm.colors.textPrimary,
+            )
+            Spacer(Modifier.width(Dshm.spacing.sm))
+            Text(
+                text = stringResource(R.string.settings_count_items, count),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textTertiary,
+            )
+            Spacer(Modifier.weight(1f))
+            Icon(
+                painter = painterResource(
+                    if (expanded) R.drawable.ic_lucide_chevrons_up_down else R.drawable.ic_lucide_chevrons_up_down,
+                ),
+                contentDescription = null,
+                tint = Dshm.colors.textTertiary,
+                modifier = Modifier.size(Dshm.spacing.topBarIcon),
+            )
+        }
+        if (expanded) {
+            content()
+        }
+    }
+}
+
 /** 只读值行：用于 schema 里无法编辑的字段。 */
 @Composable
 fun SettingsReadOnlyValue(label: String, value: String, subtitle: String? = null) {
@@ -530,6 +592,33 @@ fun SettingsReadOnlyValue(label: String, value: String, subtitle: String? = null
 // ---------------------------------------------------------------------------
 // 胶囊 / 分段 / 勾选（dsh-Go 的 CapsuleGrid、SegmentedPill、SelectionTick）
 // ---------------------------------------------------------------------------
+
+/**
+ * 胶囊选项（dsh-Go 的 `CapsuleChoiceChip`）：选中的那颗是主色描边 + 主色字，
+ * 没选中的只有一圈浅描边。用于横向一排的预设切换。
+ */
+@Composable
+fun SettingsChoiceChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val border = if (selected) Dshm.colors.accent else Dshm.colors.divider
+    val ink = if (selected) Dshm.colors.accent else Dshm.colors.textSecondary
+    Text(
+        text = label,
+        style = Dshm.typography.settingsRowSubtitle,
+        color = ink,
+        maxLines = 1,
+        modifier = modifier
+            .clip(RoundedCornerShape(Dshm.radius.pill))
+            .border(Dshm.spacing.hairline, border, RoundedCornerShape(Dshm.radius.pill))
+            .background(if (selected) Dshm.colors.accent.copy(alpha = 0.10f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+    )
+}
 
 /**
  * 分段控件：一条胶囊底槽，选中项是一颗会滑动的胶囊。

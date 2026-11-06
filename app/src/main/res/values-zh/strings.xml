@@ -103,11 +103,9 @@
     <string name="settings_language">语言</string>
     <string name="settings_notifications">通知</string>
     <string name="settings_voice">语音输入</string>
-    <string name="settings_performance">性能</string>
     <string name="settings_local_engine">本机引擎</string>
     <string name="settings_engine_params">引擎参数</string>
     <string name="settings_background_running">后台运行</string>
-    <string name="settings_pets">宠物</string>
     <string name="settings_remote_host">远程主机</string>
     <string name="settings_version">版本</string>
     <string name="settings_dsh_version">DSH 版本</string>
@@ -164,9 +162,37 @@
     <string name="engine_arch">架构</string>
     <string name="engine_method">启动方式</string>
     <string name="engine_reset_title">重置运行环境？</string>
-    <string name="engine_reset_body">将删除已下载并解压的 rootfs，下次需要重新下载安装。App 设置会保留。</string>
-    <string name="engine_reset_hint">仅在引擎异常时使用。App 设置会保留。</string>
+    <string name="engine_reset_body">将删除已下载并解压的 rootfs，下次需要重新下载安装。</string>
+    <string name="engine_reset_hint">仅在引擎异常时使用。</string>
     <string name="engine_reset">重置运行环境</string>
+    <string name="engine_reset_keep_workspace">保留对话、工作区与个性化配置</string>
+    <string name="engine_reset_delete">删除并重置</string>
+    <string name="engine_startup">引擎启动</string>
+    <string name="engine_auto_start">打开 App 时自动启动引擎</string>
+    <string name="engine_auto_start_hint">引擎在本机后台运行。</string>
+    <string name="engine_open_web">打开网页版</string>
+    <string name="engine_bundled_version">内置版本</string>
+    <string name="engine_detail_running">运行中 · %1$s</string>
+    <string name="engine_start_again">重新启动</string>
+    <string name="engine_stop_title">停止引擎？</string>
+    <string name="engine_stop_body">引擎重新启动前，Bot 不会回复。</string>
+    <!-- 诊断页 -->
+    <string name="diagnostics_runtime">运行时</string>
+    <string name="diagnostics_connection">连接</string>
+    <string name="diagnostics_export">导出</string>
+    <string name="diagnostics_status">状态</string>
+    <string name="diagnostics_architecture">架构</string>
+    <string name="diagnostics_installed_version">已安装版本</string>
+    <string name="diagnostics_address">地址</string>
+    <string name="diagnostics_client">客户端</string>
+    <string name="diagnostics_api_key">API Key</string>
+    <string name="diagnostics_configured">已配置</string>
+    <string name="diagnostics_error">错误</string>
+    <string name="diagnostics_copy_report">复制诊断报告</string>
+    <string name="diagnostics_copy_report_hint">包含运行时状态、连接信息与 App 设置，密钥已打码。</string>
+    <string name="diagnostics_copied">诊断报告已复制</string>
+    <string name="diagnostics_not_connected">未连接</string>
+    <string name="diagnostics_connected">已连接</string>
     <string name="onboarding_title">欢迎使用 DSHM Bot</string>
     <string name="onboarding_intro">Bot 要在本机工作，需要先准备一套运行环境（Ubuntu + Node + DSH）。只需下载一次，之后离线运行。</string>
     <string name="onboarding_download_hint">约 150 MB，下载和安装期间请保持 App 打开。</string>
@@ -205,8 +231,6 @@
     <string name="interface_web">网页</string>
     <string name="voice_system">系统</string>
     <string name="voice_engine">语音模型</string>
-    <string name="performance_full">完整</string>
-    <string name="performance_light">轻量</string>
     <string name="info_engine_required">连接本机引擎后可配置。</string>
     <string name="info_privacy">对话与凭证都保存在本机，除非你在 DSH 里主动开启，否则不会上传。</string>
     <string name="info_pets">宠物功能将按 dsh-Go 后续移植。</string>
@@ -262,6 +286,50 @@
     <string name="action_continue">继续</string>
     <string name="action_loading">加载中…</string>
     <string name="action_done">完成</string>
+    <string name="settings_engine_advanced">高级</string>
+    <string name="settings_engine_reset_all">全部恢复默认</string>
+    <string name="settings_count_items">%1$d 项</string>
+    <!-- 子代理页 -->
+    <string name="settings_subagent_title">子代理</string>
+    <string name="settings_subagent_limits">运行限制</string>
+    <string name="settings_subagent_max_depth">最大递归深度</string>
+    <string name="settings_subagent_max_active">同时运行上限</string>
+    <string name="settings_subagent_model_selection">模型选择</string>
+    <string name="settings_subagent_allow_choice">允许 AI 给子代理选模型</string>
+    <string name="settings_subagent_pick_first">选一个模型后生效</string>
+    <string name="settings_subagent_keep_one">至少保留一个模型</string>
+    <string name="settings_subagent_no_models">还没有可选的模型</string>
+    <string name="settings_subagent_connect_model">接入模型</string>
+    <string name="settings_subagent_read_failed">没能读取模型列表</string>
+    <string name="settings_subagent_unavailable">当前不可用</string>
+    <!-- 插件清单页 -->
+    <string name="plugins_inventory_title">插件清单</string>
+    <string name="plugins_inventory_empty">引擎里还没有组件。</string>
+    <string name="plugins_inventory_failed_group">出错</string>
+    <string name="plugins_inventory_system_group">系统组件</string>
+    <string name="plugins_inventory_running">已启用</string>
+    <string name="plugins_inventory_off">未启用</string>
+    <string name="plugins_inventory_failed">出错</string>
+    <string name="plugins_inventory_loading">加载中</string>
+    <string name="plugins_inventory_waiting">等待中</string>
+    <string name="plugins_inventory_idle">未运行</string>
+    <string name="plugins_inventory_global">全局插件</string>
+    <string name="plugins_inventory_presets">Agent 预设</string>
+    <!-- Agent 预设 -->
+    <string name="presets_title">Agent 预设</string>
+    <string name="presets_subtitle">新对话的工具与工作方式</string>
+    <string name="presets_empty">还没有预设。</string>
+    <string name="presets_set_default">设为新对话默认</string>
+    <string name="presets_already_default">已是新对话默认</string>
+    <string name="presets_default_badge">新对话默认</string>
+    <string name="presets_broken">加载失败</string>
+    <string name="presets_view_config">查看配置</string>
+    <string name="presets_no_config">这个预设没有配置文件。</string>
+    <string name="presets_create_unavailable">新建与编辑需要创造模式（尚未接入）</string>
+    <string name="presets_delete">删除</string>
+    <string name="presets_delete_default_hint">先把别的预设设为新对话默认</string>
+    <string name="presets_delete_title">删除“%1$s”？</string>
+    <string name="presets_delete_hint">新对话不能再选它，已开始的对话不受影响。</string>
 
     <string name="settings_search_title">搜索设置</string>
     <string name="settings_search_hint">搜索设置项</string>
@@ -375,11 +443,6 @@
     <string name="settings_notifications_open_system_hint">在 Android 设置里允许 DSHM Bot 的通知。</string>
     <string name="settings_notifications_permission_denied">通知权限被拒绝，请在系统设置里开启。</string>
 
-    <string name="settings_performance_mode">模式</string>
-    <string name="settings_performance_hint">轻量会关闭整屏转场并减少动效。</string>
-    <string name="settings_performance_auto_hint">使用这台手机的默认值。</string>
-    <string name="settings_performance_full_hint">保留全部转场与动效。</string>
-    <string name="settings_performance_light_hint">减少动效，跳过页面转场。</string>
 
     <string name="settings_background_status">状态</string>
     <string name="settings_background_hint">没有加入电池优化白名单时，Android 可能在后台停掉引擎。</string>

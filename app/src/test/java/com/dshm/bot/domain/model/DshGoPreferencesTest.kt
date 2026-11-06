@@ -16,6 +16,8 @@ class DshGoPreferencesTest {
         assertTrue(value.notifyApproval)
         assertTrue(value.notifyQuestion)
         assertTrue(value.foldProcess)
+        // 打开 App 时自动启动引擎（dsh-Go 的 autoStartLocal）默认开着。
+        assertTrue(value.autoStartLocal)
     }
 
     @Test

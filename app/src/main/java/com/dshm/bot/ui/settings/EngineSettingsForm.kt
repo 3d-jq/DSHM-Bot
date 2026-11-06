@@ -1,5 +1,7 @@
 package com.dshm.bot.ui.settings
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,11 +40,14 @@ fun EngineNamespaceSection(
     title: String = SettingsCopy.namespaceTitle(namespace.ns, language),
     showTitle: Boolean = true,
     footer: String? = null,
+    /** true：所有分组合并成一张卡（子代理页的「运行限制」那样）。 */
+    singleCard: Boolean = false,
 ) {
-    val fields = remember(namespace.schema, language) {
-        buildList { flattenFields(namespace.ns, namespace.schema, emptyList(), 0, language, this) }
+    val sections = remember(namespace.schema, language) {
+        formSections(namespace.ns, namespace.schema, emptyList(), 0, language)
     }
-    if (fields.isEmpty()) {
+    val allFields = remember(sections) { sections.flatMap { it.fields } }
+    if (allFields.isEmpty()) {
         if (showTitle) {
             SettingsSection(title = title) {
                 Text(
@@ -55,63 +60,158 @@ fun EngineNamespaceSection(
         }
         return
     }
-    SettingsSection(title = if (showTitle) title else null, footer = footer) {
-        fields.forEachIndexed { index, field ->
-            if (index > 0) SettingsRowDivider()
-            if (field.kind == FieldKind.GROUP) {
-                Text(
-                    text = field.groupTitle.orEmpty(),
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.textSecondary,
-                    modifier = Modifier.padding(
-                        start = Dshm.spacing.lg + Dshm.spacing.md * field.depth,
-                        top = Dshm.spacing.sm,
-                        bottom = Dshm.spacing.xs,
-                    ),
+
+    // dsh-Go 的字段分层：主要 → 常规 → 高级；高级够多时折进「高级」分组。
+    val tiers = remember(allFields) {
+        allFields.associate { field ->
+            field.path to configTierOf(field.path.lastOrNull().orEmpty(), field.node)
+        }
+    }
+    val advancedCount = tiers.values.count { it == ConfigTier.ADVANCED }
+    val collapseDeclared = remember(namespace.schema) { declaresCollapse(namespace.schema) }
+    val foldAdvanced = shouldFoldAdvanced(allFields.size, advancedCount, collapseDeclared)
+
+    // 「全部恢复默认」：引擎的用户层里改过的字段一次性 unset。
+    val modifiedPaths = remember(namespace) {
+        val user = namespace.user
+        if (user == null) {
+            emptyList()
+        } else {
+            buildList {
+                val keys = user.keys()
+                while (keys.hasNext()) {
+                    val path = keys.next().split('\u0000').filter { it.isNotEmpty() }
+                    if (path.isNotEmpty()) add(path)
+                }
+            }
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xxl)) {
+        if (singleCard) {
+            // 合并成一张卡：字段按分组顺序、组内按 tier 顺序。
+            val merged = sections.flatMap { section -> section.fields }
+            val ordered = merged
+                .filter { !foldAdvanced || tiers[it.path] != ConfigTier.ADVANCED }
+                .sortedBy { tierOrder(tiers[it.path]) }
+            if (ordered.isNotEmpty()) {
+                SettingsSection(title = if (showTitle) title else null, footer = footer) {
+                    ordered.forEachIndexed { index, field ->
+                        if (index > 0) SettingsRowDivider()
+                        EngineFieldRow(viewModel, namespace, field, language)
+                    }
+                }
+            }
+        } else {
+            sections.forEach { section ->
+                val visible = section.fields
+                    .filter { !foldAdvanced || tiers[it.path] != ConfigTier.ADVANCED }
+                    .sortedBy { tierOrder(tiers[it.path]) }
+                if (visible.isEmpty()) return@forEach
+                SettingsSection(
+                    title = if (showTitle && section.title == null) title else section.title,
+                    footer = section.footer,
+                ) {
+                    visible.forEachIndexed { index, field ->
+                        if (index > 0) SettingsRowDivider()
+                        EngineFieldRow(viewModel, namespace, field, language)
+                    }
+                }
+            }
+        }
+
+        if (foldAdvanced) {
+            // 高级分组：默认收起，展开才看得到那些超时、限额、路径。
+            val advanced = sections.flatMap { section ->
+                section.fields.filter { tiers[it.path] == ConfigTier.ADVANCED }.map { section.title to it }
+            }
+            SettingsCollapsedSection(
+                title = stringResource(R.string.settings_engine_advanced),
+                count = advanced.size,
+            ) {
+                advanced.forEachIndexed { index, (_, field) ->
+                    if (index > 0) SettingsRowDivider()
+                    EngineFieldRow(viewModel, namespace, field, language)
+                }
+            }
+        }
+
+        if (modifiedPaths.isNotEmpty()) {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_engine_reset_all),
+                    enabled = namespace.writable,
+                    trailing = {},
+                    onClick = {
+                        modifiedPaths.forEach { path -> viewModel.unsetValue(namespace.ns, path) }
+                    },
                 )
-            } else {
-                EngineFieldRow(viewModel, namespace, field, language)
             }
         }
     }
 }
+
+/** 一个 schema 分组（dsh-Go 的 `SchemaFormSection`）。 */
+private data class FormSection(
+    val title: String?,
+    val fields: List<FormField>,
+    val footer: String? = null,
+)
 
 private data class FormField(
     val path: List<String>,
     val node: SettingsSchemaNode,
     val kind: FieldKind,
     val depth: Int,
-    val groupTitle: String? = null,
 )
 
-private fun flattenFields(
+/** tier 的排序权重：主要 → 常规 → 高级。 */
+private fun tierOrder(tier: ConfigTier?): Int = when (tier) {
+    ConfigTier.PRIMARY -> 0
+    ConfigTier.REGULAR -> 1
+    ConfigTier.ADVANCED -> 2
+    null -> 1
+}
+
+/**
+ * 把 schema 切成「一组一张卡」：对象的直接子字段是一组，子对象另起一组，
+ * 标题按 dsh-Go 的「父标题 · 子标题」拼。
+ */
+private fun formSections(
     ns: String,
     schema: SettingsSchemaNode,
     path: List<String>,
     depth: Int,
     language: String,
-    out: MutableList<FormField>,
-) {
-    val fields = schema.fields() ?: return
+): List<FormSection> {
+    val result = mutableListOf<FormSection>()
+    val fields = schema.fields() ?: return result
+    val plain = mutableListOf<FormField>()
     for ((key, node) in fields) {
         val kind = fieldKindOf(node)
         if (kind == FieldKind.HIDDEN) continue
         val childPath = path + key
         if (kind == FieldKind.GROUP) {
-            out.add(
-                FormField(
-                    path = childPath,
-                    node = node,
-                    kind = FieldKind.GROUP,
-                    depth = depth,
-                    groupTitle = labelOf(ns, childPath, node, language),
-                ),
-            )
-            flattenFields(ns, node, childPath, depth + 1, language, out)
+            if (plain.isNotEmpty()) {
+                result += FormSection(null, plain.toList())
+                plain.clear()
+            }
+            val heading = labelOf(ns, childPath, node, language)
+            result += formSections(ns, node, childPath, depth + 1, language).map { section ->
+                section.copy(
+                    title = when {
+                        section.title == null -> heading
+                        heading.isNullOrBlank() -> section.title
+                        else -> "$heading · ${section.title}"
+                    },
+                )
+            }
         } else {
-            out.add(FormField(childPath, node, kind, depth))
+            plain.add(FormField(childPath, node, kind, depth))
         }
     }
+    if (plain.isNotEmpty()) result += FormSection(null, plain.toList())
+    return result
 }
 
 private enum class FieldSheet { TEXT, CHOICE, SECRET, LIST, JSON, BITSET }

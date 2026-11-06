@@ -21,6 +21,17 @@ sealed interface RuntimeState {
     data class Failed(val message: String) : RuntimeState
 }
 
+/** 状态的机读名字（诊断报告里用，不泄露内部实现）。 */
+fun RuntimeState.phaseName(): String = when (this) {
+    RuntimeState.NotInstalled -> "notInstalled"
+    is RuntimeState.Installing -> "installing"
+    is RuntimeState.Installed -> "installed"
+    RuntimeState.Starting -> "starting"
+    is RuntimeState.Running -> "running"
+    RuntimeState.Stopped -> "stopped"
+    is RuntimeState.Failed -> "error"
+}
+
 /**
  * 运行时管理：下载 zip（进度）→ 交给 [RuntimeInstaller] 安装 → 维护 [state]。
  * 下载源可配置，默认用我们 Release 的运行时包。

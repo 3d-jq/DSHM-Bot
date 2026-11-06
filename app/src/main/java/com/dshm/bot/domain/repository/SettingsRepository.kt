@@ -4,9 +4,6 @@ import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ChatFontSize
 import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.domain.model.InterfaceMode
-import com.dshm.bot.domain.model.PerformanceMode
-import com.dshm.bot.domain.model.PetSize
-import com.dshm.bot.domain.model.PetStyle
 import com.dshm.bot.domain.model.PhoneConfirmMode
 import com.dshm.bot.domain.model.ThemeMode
 import com.dshm.bot.domain.model.VoiceMode
@@ -38,22 +35,6 @@ interface SettingsRepository {
 
     fun setVoiceMode(mode: VoiceMode)
 
-    fun observePerformanceMode(): Flow<PerformanceMode>
-
-    fun setPerformanceMode(mode: PerformanceMode)
-
-    fun observePetEnabled(): Flow<Boolean>
-
-    fun setPetEnabled(enabled: Boolean)
-
-    fun observePetStyle(): Flow<PetStyle>
-
-    fun setPetStyle(style: PetStyle)
-
-    fun observePetSize(): Flow<PetSize>
-
-    fun setPetSize(size: PetSize)
-
     fun observePhoneControlEnabled(): Flow<Boolean>
 
     fun setPhoneControlEnabled(enabled: Boolean)
@@ -62,7 +43,7 @@ interface SettingsRepository {
 
     fun setPhoneConfirmMode(mode: PhoneConfirmMode)
 
-    /** dsh-Go 设置 IA 的细分偏好（通知四类、完成后收起过程）。 */
+    /** dsh-Go 设置 IA 的细分偏好（通知四类、完成后收起过程、自动启动引擎）。 */
     fun observeDshGoPreferences(): Flow<DshGoPreferences>
 
     fun setDshGoPreference(key: String, value: Boolean)
