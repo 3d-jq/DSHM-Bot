@@ -23,6 +23,7 @@
     <string name="chat_load_failed">对话加载失败</string>
     <string name="chat_retry">重试</string>
     <string name="chat_send_failed">消息发送失败：%1$s</string>
+    <string name="chat_load_earlier">加载更早的消息</string>
     <string name="chat_engine_off_title">本机引擎未运行</string>
     <string name="chat_engine_off_hint">请先在 设置 → 本机引擎 中启动，再回来对话。</string>
     <string name="web_load_failed">DSH Web 加载失败</string>

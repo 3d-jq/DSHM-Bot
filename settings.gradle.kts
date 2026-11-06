@@ -16,10 +16,15 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // 本地仓库优先：镜像里没有的库从这儿找。
+        mavenLocal()
         maven { url = uri("https://maven.aliyun.com/repository/google") }
         maven { url = uri("https://maven.aliyun.com/repository/central") }
         google()
         mavenCentral()
+        // 阿里云镜像里没有 markdown 渲染器，HEAD 也会超时硬失败 ——
+        // 指向本地的离线仓库（tools/offline-maven），里面是按 maven 布局放好的文件。
+        maven { url = uri("file:///D:/program/DSHM Bot/tools/offline-maven") }
     }
 }
 

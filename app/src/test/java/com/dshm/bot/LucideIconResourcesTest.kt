@@ -42,6 +42,7 @@ class LucideIconResourcesTest {
         "store",
         "shopping_bag",
         "package_search",
+        "chevron_down",
     )
 
     @Test

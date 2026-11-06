@@ -42,6 +42,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -51,9 +53,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -230,6 +234,9 @@ fun BotChatScreen(
                         topPadding = innerPadding.calculateTopPadding(),
                         bottomPadding = 0.dp,
                         working = working,
+                        hasEarlier = state.hasEarlier,
+                        loadingEarlier = state.loadingEarlier,
+                        onLoadEarlier = viewModel::loadEarlier,
                     )
                 }
             }
@@ -282,6 +289,36 @@ fun BotChatScreen(
     }
 }
 
+/**
+ * 顶部的下拉指示：还有更早的消息时显示一个小箭头；
+ * 正在加载时换成转圈。
+ */
+@Composable
+private fun LoadEarlierIndicator(hasMore: Boolean, loading: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(Dshm.spacing.xl),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            loading -> CircularProgressIndicator(
+                color = Dshm.colors.accent,
+                strokeWidth = Dshm.spacing.hairline + Dshm.spacing.xs / 2,
+                modifier = Modifier.size(Dshm.spacing.icon),
+            )
+
+            hasMore -> Icon(
+                painter = painterResource(R.drawable.ic_lucide_chevron_down),
+                contentDescription = stringResource(R.string.chat_load_earlier),
+                tint = Dshm.colors.textTertiary,
+                modifier = Modifier.size(Dshm.spacing.topBarIcon),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatMessages(
     entries: List<ChatEntry>,
@@ -291,19 +328,37 @@ private fun ChatMessages(
     topPadding: Dp,
     bottomPadding: Dp,
     working: Boolean,
+    hasEarlier: Boolean = false,
+    loadingEarlier: Boolean = false,
+    onLoadEarlier: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val typing = working && streaming.isEmpty()
     val count = entries.size + (if (streaming.isNotEmpty()) 1 else 0) + (if (typing) 1 else 0)
-    LaunchedEffect(entries.size, streaming.length, typing) {
-        if (count > 0) {
+    // 滚到底的时机：第一次有内容（进对话要看最新消息）、以及来了新消息。
+    // 往前翻历史时列表变长，但最后一条没变 —— 这时不能滚，会把刚加载的内容刷走。
+    var lastEntryId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(count) {
+        val tailId = entries.lastOrNull()?.id
+        val isNewTail = tailId != null && tailId != lastEntryId
+        val firstLoad = lastEntryId == null && tailId != null
+        lastEntryId = tailId
+        if (count > 0 && (isNewTail || firstLoad)) {
             // 最后一条可能比屏幕高：先定位到它，再滚到列表末尾，保证看到最新内容的底部。
             listState.scrollToItem(count - 1)
             listState.scrollBy(100_000f)
         }
     }
     val scope = rememberCoroutineScope()
+    // 在顶部往下拉：加载更早的历史（就像聊天软件下拉翻上一步）。
+    val pullState = rememberPullToRefreshState()
     Box(modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = loadingEarlier,
+            onRefresh = onLoadEarlier,
+            state = pullState,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -315,6 +370,15 @@ private fun ChatMessages(
         ),
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         ) {
+            // 下拉加载更早的消息：顶部挂一个指示器。
+            if (hasEarlier || loadingEarlier) {
+                item(key = "load-earlier") {
+                    LoadEarlierIndicator(
+                        hasMore = hasEarlier,
+                        loading = loadingEarlier,
+                    )
+                }
+            }
             items(entries, key = { it.id }) { entry ->
                 when (entry.kind) {
                     ChatEntryKind.USER -> UserBubble(entry.text, fontScale)
@@ -340,6 +404,7 @@ private fun ChatMessages(
             if (typing) {
                 item(key = "typing") { ThinkingRow(bot) }
             }
+        }
         }
         if (listState.canScrollForward) {
             Box(

@@ -1,6 +1,7 @@
 package com.dshm.bot.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -619,6 +621,41 @@ private fun shapeLabel(shape: String?): String = when (shape) {
  * 顶栏右侧按钮进入 [BotDetailsScreen] 完整页。
  */
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 权限档位：每一档一行（行高 56dp），右边一个勾选圆点。
+ * 选中的那档用主色，「完全权限」那档用危险色。
+ */
+@Composable
+private fun PermissionRows(current: String?, onSelect: (String) -> Unit) {
+    val language = settingsLanguage()
+    val permissions = listOf("read-only", "workspace-write", "danger-full-access")
+    permissions.forEachIndexed { index, preset ->
+        if (index > 0) SettingsRowDivider()
+        val selected = preset == current
+        SettingsRow(
+            title = SettingsCopy.permissionLabel(preset, language),
+            subtitle = SettingsCopy.permissionHint(preset, language),
+            trailing = {
+                Box(
+                    modifier = Modifier
+                        .size(Dshm.spacing.selectionTick)
+                        .clip(CircleShape)
+                        .background(
+                            if (selected) Dshm.colors.accent else androidx.compose.ui.graphics.Color.Transparent,
+                        )
+                        .border(
+                            Dshm.spacing.hairline + Dshm.spacing.xs / 2,
+                            if (selected) Dshm.colors.accent else Dshm.colors.textTertiary,
+                            CircleShape,
+                        ),
+                )
+            },
+            onClick = { onSelect(preset) },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BotSettingsSheet(
     bot: ChatRowUi,
@@ -646,7 +683,8 @@ fun BotSettingsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Dshm.colors.surface,
+        // 底板底用页面底色，卡片（surface）才分得开 —— 都用 surface 会糊成一片。
+        containerColor = Dshm.colors.pageBackground,
         shape = RoundedCornerShape(topStart = Dshm.radius.xl, topEnd = Dshm.radius.xl),
         scrimColor = Dshm.colors.scrim,
     ) {
@@ -660,36 +698,57 @@ fun BotSettingsSheet(
                 .padding(bottom = Dshm.spacing.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            BotAvatar(
-                inkId = bot.inkId,
-                glyph = bot.glyph,
-                avatarImage = bot.avatarImage,
-                avatarShape = info?.shape ?: bot.avatarShape,
-                size = Dshm.spacing.settingsAvatar + Dshm.spacing.sm,
-            )
-            Spacer(Modifier.padding(top = Dshm.spacing.sm))
-            Text(
-                text = info?.name ?: bot.name,
-                style = Dshm.typography.pageTitle,
-                color = Dshm.colors.textPrimary,
-            )
-            Text(
-                text = info?.role?.takeIf { it.isNotBlank() }
-                    ?: stringResource(R.string.bot_settings_no_role),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textSecondary,
-            )
-            Row(
-                modifier = Modifier.padding(top = Dshm.spacing.md),
-                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
-            ) {
-                Button(onClick = onDetails) { Text(stringResource(R.string.bot_settings_details)) }
-                OutlinedButton(onClick = onBrowser) {
-                    Text(stringResource(R.string.bot_settings_browser))
+            // Hero 区：按设计文档 §8.4，顶部信息包成一张卡。
+            SettingsSection {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    BotAvatar(
+                        inkId = bot.inkId,
+                        glyph = bot.glyph,
+                        avatarImage = bot.avatarImage,
+                        avatarShape = info?.shape ?: bot.avatarShape,
+                        size = Dshm.spacing.settingsAvatar,
+                    )
+                    Spacer(Modifier.height(Dshm.spacing.sm))
+                    Text(
+                        text = info?.name ?: bot.name,
+                        style = Dshm.typography.sheetTitle,
+                        color = Dshm.colors.textPrimary,
+                    )
+                    info?.role?.takeIf { it.isNotBlank() }?.let { role ->
+                        Text(
+                            text = role,
+                            style = Dshm.typography.rowPreview,
+                            color = Dshm.colors.textSecondary,
+                        )
+                    }
+                    Spacer(Modifier.height(Dshm.spacing.md))
+                    // 两个入口：详情 / 浏览器。做成行内动作，不是裸按钮。
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                    ) {
+                        SettingsRow(
+                            title = stringResource(R.string.bot_settings_details),
+                            icon = R.drawable.ic_lucide_info,
+                            modifier = Modifier.weight(1f),
+                            trailing = {},
+                            onClick = onDetails,
+                        )
+                        SettingsRow(
+                            title = stringResource(R.string.bot_settings_browser),
+                            icon = R.drawable.ic_lucide_globe,
+                            modifier = Modifier.weight(1f),
+                            trailing = {},
+                            onClick = onBrowser,
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.padding(top = Dshm.spacing.md))
+            Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_model)) {
                 SettingsRow(
                     title = modelLabel(info?.model, state.models)
@@ -699,49 +758,15 @@ fun BotSettingsSheet(
                 )
             }
 
-            Spacer(Modifier.padding(top = Dshm.spacing.sm))
-            Text(
-                text = stringResource(R.string.bot_settings_permission),
-                style = Dshm.typography.settingsSectionTitle,
-                color = Dshm.colors.textSecondary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = Dshm.spacing.lg, bottom = Dshm.spacing.xs),
-            )
-            val permissions = listOf("read-only", "workspace-write", "danger-full-access")
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Dshm.radius.md))
-                    .background(Dshm.colors.surfaceMuted)
-                    .padding(Dshm.spacing.xxs),
-            ) {
-                permissions.forEach { preset ->
-                    val selected = preset == info?.permission
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(Dshm.radius.sm))
-                            .background(if (selected) Dshm.colors.surface else androidx.compose.ui.graphics.Color.Transparent)
-                            .clickable { viewModel.setPermission(preset) }
-                            .padding(vertical = Dshm.spacing.sm),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = SettingsCopy.permissionLabel(preset, language),
-                            style = Dshm.typography.settingsRowSubtitle.copy(fontSize = 12.sp),
-                            color = if (preset == "danger-full-access") {
-                                Dshm.colors.danger
-                            } else {
-                                Dshm.colors.textPrimary
-                            },
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
+            Spacer(Modifier.height(Dshm.spacing.xxl))
+            SettingsSection(title = stringResource(R.string.bot_settings_permission)) {
+                PermissionRows(
+                    current = info?.permission,
+                    onSelect = { viewModel.setPermission(it) },
+                )
             }
 
-            Spacer(Modifier.padding(top = Dshm.spacing.md))
+            Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_workdir)) {
                 SettingsRow(
                     title = stringResource(R.string.bot_settings_folder),
@@ -750,7 +775,7 @@ fun BotSettingsSheet(
                 )
             }
 
-            Spacer(Modifier.padding(top = Dshm.spacing.sm))
+            Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_memory)) {
                 SettingsRow(
                     title = if (state.memory.isEmpty()) {
@@ -763,7 +788,7 @@ fun BotSettingsSheet(
                 )
             }
 
-            Spacer(Modifier.padding(top = Dshm.spacing.sm))
+            Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_usage)) {
                 SettingsRow(
                     title = info?.name ?: bot.name,
@@ -772,7 +797,7 @@ fun BotSettingsSheet(
                 )
             }
 
-            Spacer(Modifier.padding(top = Dshm.spacing.sm))
+            Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_schedules)) {
                 SettingsRow(
                     title = if (state.schedules.isEmpty()) {
@@ -785,7 +810,7 @@ fun BotSettingsSheet(
                 )
             }
 
-            Spacer(Modifier.padding(top = Dshm.spacing.sm))
+            Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_instructions)) {
                 SettingsRow(
                     title = (info?.instructions?.trim()?.takeIf { it.isNotEmpty() }

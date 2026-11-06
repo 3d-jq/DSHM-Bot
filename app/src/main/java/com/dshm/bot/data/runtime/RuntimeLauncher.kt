@@ -32,6 +32,7 @@ class RuntimeLauncher(
         val rootfs = installer.rootfsDir
         require(rootfs.isDirectory) { "运行时尚未安装" }
         GuestSetup.apply(rootfs)
+        clearOrphanEngines(rootfs)
 
         EngineLog.reset()
         EngineLog.log("launch method: proot")
@@ -123,6 +124,34 @@ class RuntimeLauncher(
     }
 
     private data class EngineProcess(val pid: Int, val cmdline: String)
+
+    /**
+     * 启动前清掉上一次的残留引擎进程。
+     *
+     * App 被系统杀掉时走不到 [stop]，proot 与 node 会变成孤儿继续跑着，
+     * 还握着 `~/.dsh/bot/state.lock` —— 于是新起的引擎只能只读，
+     * 用户看到「The Bot team … is open in another dsh」。
+     * 那个 pid 其实就是上次的自己。
+     */
+    private fun clearOrphanEngines(rootfs: File) {
+        val orphans = engineProcesses(rootfs)
+        if (orphans.isEmpty()) return
+        EngineLog.log("clearing ${orphans.size} orphan engine process(es)")
+        // 先给 node / dsh SIGTERM 让它正常退出（会释放锁）。
+        orphans
+            .filter { it.cmdline.contains("/opt/node") || it.cmdline.contains("/usr/local/bin/dsh") }
+            .forEach { runCatching { Os.kill(it.pid, OsConstants.SIGTERM) } }
+        // 等一会儿；还不走就对 proot 发 SIGQUIT（杀掉所有 tracee）。
+        val deadline = System.currentTimeMillis() + 3_000
+        while (System.currentTimeMillis() < deadline && engineProcesses(rootfs).isNotEmpty()) {
+            Thread.sleep(100)
+        }
+        engineProcesses(rootfs)
+            .filter { it.cmdline.contains("libproot.so") }
+            .forEach { runCatching { Os.kill(it.pid, OsConstants.SIGQUIT) } }
+        // 锁文件也清掉：持有者已经没了，锁留着只会挡住下一个引擎。
+        runCatching { File(rootfs, "root/.dsh/bot/state.lock").delete() }
+    }
 
     private fun engineProcesses(rootfs: File): List<EngineProcess> {
         val dir = File("/proc")

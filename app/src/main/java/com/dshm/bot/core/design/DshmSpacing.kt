@@ -42,8 +42,12 @@ data class DshmSpacing(
     val composerMinHeight: Dp = 56.dp,
     /** 输入框文字上下内边距：让单行文字在 40dp 圆键高度内垂直居中（(40-23.2)/2≈8）。 */
     val composerTextPad: Dp = 8.dp,
-    /** 输入框发送键图标尺寸（dsh-Go 为 22dp）。 */
-    val composerSendIcon: Dp = 22.dp,
+  /** 输入框发送键图标尺寸（dsh-Go 为 22dp）。 */
+  val composerSendIcon: Dp = 22.dp,
+    /** Markdown 表格：一格的最小宽度（内容多了整张表横向滚）。 */
+    val tableCellMinWidth: Dp = 88.dp,
+    /** Markdown 表格：一列的固定宽度。 */
+    val tableCellWidth: Dp = 120.dp,
     /** 顶栏「＋」下拉菜单面板宽度（比默认宽一些）。 */
     val menuWidth: Dp = 220.dp,
     /** 设置页每行的图标尺寸（与 15sp 文字垂直居中对齐）。 */

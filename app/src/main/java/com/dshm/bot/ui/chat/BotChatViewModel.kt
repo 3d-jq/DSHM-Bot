@@ -7,7 +7,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.BotFeedEvent
 import com.dshm.bot.data.remote.DshRemoteApi
+import com.dshm.bot.data.remote.parseChatPage
 import com.dshm.bot.data.remote.RemoteDshApi
+import com.dshm.bot.data.remote.ChatCursor
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.RemoteSpeechRepository
 import com.dshm.bot.data.remote.SpeechRepository
@@ -48,6 +50,10 @@ data class BotChatUiState(
     val memoryNotice: Boolean = false,
     /** 正在流式输出的回复；非空时在列表末尾显示一个临时气泡。 */
     val streaming: String = "",
+    /** 还有更早的历史（游标非空）。 */
+    val hasEarlier: Boolean = false,
+    /** 正在往前翻一页。 */
+    val loadingEarlier: Boolean = false,
 )
 
 /**
@@ -78,6 +84,8 @@ class BotChatViewModel(
 
     private val seen = LinkedHashSet<String>()
     private var sessionId: String? = null
+    /** 更早历史的游标；null 表示没有更早的了。 */
+    private var cursor: ChatCursor? = null
     private var feedJob: Job? = null
     private var reloadJob: Job? = null
     private var statusJob: Job? = null
@@ -189,7 +197,7 @@ class BotChatViewModel(
                     state.copy(
                         sending = false,
                         waitingForReply = false,
-                        error = failure.message ?: "send failed",
+                        error = describeChatError(failure),
                         entries = state.entries.filterNot { it.id == localId },
                     )
                 }
@@ -220,12 +228,14 @@ class BotChatViewModel(
                 }
                 seen.clear()
                 entries.forEach { seen.add(it.id) }
+                cursor = parseChatPage(value).cursor
                 _uiState.update { state ->
                     state.copy(
                         loading = false,
                         engineOff = false,
                         error = null,
                         entries = entries,
+                        hasEarlier = cursor?.hasMore == true,
                     )
                 }
                 clearStreaming()
@@ -234,10 +244,53 @@ class BotChatViewModel(
                 _uiState.update { state ->
                     state.copy(
                         loading = false,
-                        error = if (!initial && loadedOnce) state.error else (failure.message ?: "load failed"),
+                        error = if (!initial && loadedOnce) state.error else describeChatError(failure),
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * 往前翻一页更早的历史。
+     *
+     * 引擎的 `chat` 只给最新 60 条（`EARLIER_PAGE`），要看到更早的得带游标再问一次；
+     * 新的一页插到列表**前面**（对齐 dsh-Go 的 `loadEarlier`）。
+     */
+    fun loadEarlier() {
+        val connection = client ?: return
+        val current = cursor ?: return
+        if (_uiState.value.loadingEarlier) return
+        _uiState.update { it.copy(loadingEarlier = true, error = null) }
+        viewModelScope.launch {
+            val payload = JSONObject().put(if (isGroup) "roomId" else "botId", botId)
+            current.toJson()?.let { payload.put("cursor", it) }
+            runCatching { connection.bot(endpoint = if (isGroup) "room-chat" else "chat", payload = payload) }
+                .onSuccess { value ->
+                    val items = value.optJSONArray("items")
+                    val scope = sessionId ?: botId
+                    val earlier = buildList {
+                        if (items != null) {
+                            for (index in 0 until items.length()) {
+                                val item = items.optJSONObject(index) ?: continue
+                                parseItem(item, scope, "earlier:$index")?.let(::add)
+                            }
+                        }
+                    }
+                    cursor = parseChatPage(value).cursor
+                    _uiState.update { state ->
+                        state.copy(
+                            loadingEarlier = false,
+                            // 更早的插在前面；已经见过的不要重复。
+                            entries = earlier.filterNot { it.id in seen } + state.entries,
+                            hasEarlier = cursor?.hasMore == true,
+                        )
+                    }
+                    earlier.forEach { seen.add(it.id) }
+                }
+                .onFailure { failure ->
+                    _uiState.update { it.copy(loadingEarlier = false, error = describeChatError(failure)) }
+                }
         }
     }
 

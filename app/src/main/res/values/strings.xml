@@ -23,6 +23,7 @@
     <string name="chat_load_failed">Couldn’t load this conversation</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_send_failed">Message not sent: %1$s</string>
+    <string name="chat_load_earlier">Load earlier messages</string>
     <string name="chat_engine_off_title">Local engine is off</string>
     <string name="chat_engine_off_hint">Start it in Settings → Local engine, then come back.</string>
     <string name="web_load_failed">DSH Web couldn’t load</string>

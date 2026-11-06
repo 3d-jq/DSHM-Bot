@@ -1,14 +1,20 @@
 package com.dshm.bot.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -26,6 +32,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import com.dshm.bot.core.design.Dshm
@@ -39,6 +46,12 @@ internal sealed interface MarkdownBlock {
     data class Quote(val text: String) : MarkdownBlock
     data class Code(val text: String) : MarkdownBlock
     data object Divider : MarkdownBlock
+    /** 表格：第一行是表头，其余是数据行；每列有对齐方式。 */
+    data class Table(
+        val header: List<String>,
+        val alignments: List<MarkdownTables.Alignment>,
+        val rows: List<List<String>>,
+    ) : MarkdownBlock
 }
 
 private val HEADING = Regex("^(#{1,6})\\s+(.*)$")
@@ -116,6 +129,20 @@ internal fun parseMarkdown(source: String): List<MarkdownBlock> {
                 flushParagraph()
                 blocks += MarkdownBlock.Divider
                 index += 1
+            }
+
+            // 表格：表头行 + 分隔行 + 数据行。
+            MarkdownTables.isRow(line) -> {
+                val parsed = MarkdownTables.parse(lines, index)
+                if (parsed != null) {
+                    flushParagraph()
+                    blocks += parsed.first
+                    index = parsed.second
+                } else {
+                    if (paragraph.isNotEmpty()) paragraph.append('\n')
+                    paragraph.append(line)
+                    index += 1
+                }
             }
 
             else -> {
@@ -208,8 +235,107 @@ fun MarkdownText(
                     thickness = Dshm.spacing.hairline,
                     color = colors.divider,
                 )
+
+                is MarkdownBlock.Table -> MarkdownTable(
+                    header = block.header,
+                    alignments = block.alignments,
+                    rows = block.rows,
+                    colors = colors,
+                    base = base,
+                )
             }
         }
+    }
+}
+
+/**
+ * 表格：带边框、**横向可滚动**。
+ *
+ * 规格照 DeepSearch 的 `MarkdownText.kt` 的 `TableView`：
+ * 整块表格外面 0.5dp 边框 + 4dp 圆角，表头有底色、每行一条分隔线，
+ * 列固定 120dp（内容长短不影响列宽，表格因此不会因某格太长而歪掉）。
+ */
+@Composable
+private fun MarkdownTable(
+    header: List<String>,
+    alignments: List<MarkdownTables.Alignment>,
+    rows: List<List<String>>,
+    colors: DshmColors,
+    base: TextStyle,
+) {
+    if (header.isEmpty()) return
+    val borderColor = colors.divider
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .border(0.5.dp, borderColor, shape)
+            .clip(shape),
+    ) {
+        Column {
+            // 表头行
+            Row(
+                modifier = Modifier
+                    .background(colors.surfaceMuted)
+                    .height(IntrinsicSize.Min),
+            ) {
+                header.forEachIndexed { column, cell ->
+                    TableCell(
+                        text = cell,
+                        alignment = alignments.getOrElse(column) { MarkdownTables.Alignment.LEFT },
+                        colors = colors,
+                        base = base,
+                        bold = true,
+                    )
+                }
+            }
+            HorizontalDivider(color = borderColor)
+            // 数据行
+            rows.forEach { row ->
+                Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                    header.indices.forEach { column ->
+                        TableCell(
+                            text = row.getOrNull(column).orEmpty(),
+                            alignment = alignments.getOrElse(column) { MarkdownTables.Alignment.LEFT },
+                            colors = colors,
+                            base = base,
+                            bold = false,
+                        )
+                    }
+                }
+                HorizontalDivider(color = borderColor)
+            }
+        }
+    }
+}
+
+/** 表格的一格：固定 120dp 宽，按对齐方式排内容。 */
+@Composable
+private fun TableCell(
+    text: String,
+    alignment: MarkdownTables.Alignment,
+    colors: DshmColors,
+    base: TextStyle,
+    bold: Boolean,
+) {
+    Box(
+        modifier = Modifier
+            .width(Dshm.spacing.tableCellWidth)
+            .padding(horizontal = Dshm.spacing.sm, vertical = 6.dp),
+        contentAlignment = when (alignment) {
+            MarkdownTables.Alignment.CENTER -> Alignment.Center
+            MarkdownTables.Alignment.RIGHT -> Alignment.CenterEnd
+            MarkdownTables.Alignment.LEFT -> Alignment.CenterStart
+        },
+    ) {
+        Text(
+            text = inlineMarkdown(text, colors, base),
+            style = base.copy(
+                fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+                color = colors.textPrimary,
+            ),
+        )
     }
 }
 
