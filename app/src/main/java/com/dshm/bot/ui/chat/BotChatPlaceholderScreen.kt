@@ -55,6 +55,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.conflate
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +67,7 @@ import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -124,6 +128,12 @@ fun BotChatScreen(
     val working = state.sending || state.waitingForReply || state.streaming.isNotEmpty()
     // 审批应答中（按钮禁用，避免重复点）。
     var answeringApproval by remember { mutableStateOf(false) }
+    // 发送了几次 —— 每发一次就重新钉到底（照 DeepSearch 的 SEND-PATH）。
+    var sendCount by remember { mutableIntStateOf(0) }
+    // 输入框的实际高度 —— 列表要留出这么多，消息才不会被输入框压住
+    // （照 DeepSearch 的 bottomChromeHeight + bottomReserve）。
+    var composerHeight by remember { mutableStateOf(56.dp) }
+    val density = LocalDensity.current
     var chatError by remember { mutableStateOf<String?>(null) }
     val workingTransition = rememberInfiniteTransition(label = "bot-working")
     val workingPulse by workingTransition.animateFloat(
@@ -202,15 +212,17 @@ fun BotChatScreen(
             }
         },
     ) { innerPadding ->
-        Column(
+        // 悬浮式底部（照 DeepSearch 的 NmChatBottomLayout）：
+        // 消息列表铺满整屏，输入框叠在它上面 —— 列表能穿过输入框下面看到内容，
+        // 最后一条消息靠 contentPadding 避开输入框。
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding(),
         ) {
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 when {
@@ -240,10 +252,14 @@ fun BotChatScreen(
                         bot = bot,
                         fontScale = fontScale,
                         topPadding = innerPadding.calculateTopPadding(),
-                        bottomPadding = 0.dp,
+                        // 最后一条消息避开输入框：输入框实测高度 + 一点留白
+                        // （照 DeepSearch 的 bottomChromeHeight + bottomReserve）。
+                        bottomPadding = composerHeight + Dshm.spacing.composerClearance,
                         working = working,
                         hasEarlier = state.hasEarlier,
                         loadingEarlier = state.loadingEarlier,
+                        sendCount = sendCount,
+                        composerHeight = composerHeight,
                         autoLoadEnabled = state.error == null,
                         onLoadEarlier = viewModel::loadEarlier,
                     )
@@ -284,6 +300,7 @@ fun BotChatScreen(
                     if (ComposerRules.canSend(draft) && !state.sending) {
                         viewModel.send(draft)
                         draft = ""
+                        sendCount += 1
                     }
                 },
                 placeholder = stringResource(R.string.composer_placeholder, bot.name),
@@ -292,6 +309,8 @@ fun BotChatScreen(
                 speech = viewModel.speechRepository,
                 sendEnabled = ComposerRules.canSend(draft) && !state.sending,
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .onSizeChanged { size -> composerHeight = with(density) { size.height.toDp() } }
                     .padding(horizontal = Dshm.spacing.lg)
                     .padding(
                         bottom = innerPadding.calculateBottomPadding() + Dshm.spacing.composerBottomInset,
@@ -350,7 +369,7 @@ private fun LoadingEarlierRow() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
 @Composable
 private fun ChatMessages(
     entries: List<ChatEntry>,
@@ -362,6 +381,10 @@ private fun ChatMessages(
     working: Boolean,
     hasEarlier: Boolean = false,
     loadingEarlier: Boolean = false,
+    /** 发送了几次 —— 每发一次就重新钉到底。 */
+    sendCount: Int = 0,
+    /** 输入框的实测高度 —— 列表要留出这么多，最后一条消息才不会被盖住。 */
+    composerHeight: Dp = 56.dp,
     /** 上次加载出错时不再自动触发（否则会一直重试）。 */
     autoLoadEnabled: Boolean = true,
     onLoadEarlier: () -> Unit = {},
@@ -407,6 +430,29 @@ private fun ChatMessages(
                 onLoadEarlier()
             }
         }
+    }
+
+    // 发送后立刻滚到底两次（照 DeepSearch 的 SEND-PATH）：
+    // 第一次钉在回显之前，等 100ms 让用户消息到达，再钉一次。
+    LaunchedEffect(sendCount) {
+        if (sendCount == 0) return@LaunchedEffect
+        listState.scrollToItem(0)
+        delay(100)
+        listState.scrollToItem(0)
+    }
+
+    // 流式输出时跟着到底（照 DeepSearch 的 T256 流水线）：
+    // snapshotFlow 发元组 → conflate 丢掉中间值 → sample 限频到约 6.5Hz。
+    // 不用「每个 token 都重启一次滚动动画」—— 那会把 UI 线程压垮。
+    LaunchedEffect(listState) {
+        snapshotFlow { streaming.length to isNearBottom }
+            .conflate()
+            .sample(150L)
+            .collect { (_, nearBottom) ->
+                if (!nearBottom) return@collect
+                if (listState.isScrollInProgress) return@collect
+                listState.scrollToItem(0)
+            }
     }
 
     // 钉到底（照 DeepSearch 的 T170「三段式钉住」）：
@@ -479,8 +525,8 @@ private fun ChatMessages(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    // 紧贴输入框上沿。
-                    .padding(bottom = bottomPadding + Dshm.spacing.xs)
+                    // 贴在输入框上沿（输入框是浮在列表上的，位置要按它的实测高度算）。
+                    .padding(bottom = composerHeight + Dshm.spacing.composerClearance)
                     .size(Dshm.spacing.iconButton)
                     .shadow(
                         elevation = Dshm.spacing.floatingElevation,

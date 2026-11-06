@@ -174,18 +174,18 @@ class BotChatViewModel(
         load(initial = false)
     }
 
+    /**
+     * 发一条消息。
+     *
+     * **不做本地气泡**（照 DeepSearch）：用户消息等服务端回显。
+     * 本地先画一条会让消息「卡在输入框下面」—— 回显时还要再替换它，
+     * 顺序一乱就会看到两条。
+     */
     fun send(raw: String) {
         val connection = client ?: return
         val text = raw.trim()
         if (text.isEmpty() || _uiState.value.sending) return
-        val localId = "local:${System.nanoTime()}"
-        _uiState.update { state ->
-            state.copy(
-                entries = state.entries + ChatEntry(localId, ChatEntryKind.USER, text),
-                sending = true,
-                error = null,
-            )
-        }
+        _uiState.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
             runCatching {
                 connection.bot(
@@ -202,7 +202,6 @@ class BotChatViewModel(
                         sending = false,
                         waitingForReply = false,
                         error = describeChatError(failure),
-                        entries = state.entries.filterNot { it.id == localId },
                     )
                 }
             }
@@ -320,15 +319,9 @@ class BotChatViewModel(
                 // 最终消息已经进列表，立即撤掉流式临时气泡，避免同一段回复出现两遍。
                 if (entry.kind == ChatEntryKind.BOT) clearStreaming()
                 _uiState.update { state ->
-                    val entries = state.entries.toMutableList()
-                    // 发送时先画了本地气泡；服务端回显同一条用户消息时替换它。
-                    if (entry.kind == ChatEntryKind.USER) {
-                        val local = entries.indexOfFirst { it.id.startsWith("local:") && it.text == entry.text }
-                        if (local >= 0) entries.removeAt(local)
-                    }
-                    entries.add(entry)
                     state.copy(
-                        entries = entries,
+                        // 用户消息没有本地气泡，直接追加服务端回显的那条。
+                        entries = state.entries + entry,
                         waitingForReply = if (entry.kind == ChatEntryKind.USER) state.waitingForReply else false,
                     )
                 }

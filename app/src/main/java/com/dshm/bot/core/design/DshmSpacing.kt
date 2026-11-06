@@ -59,7 +59,9 @@ data class DshmSpacing(
     /** 1dp 细线（描边、分割线）。 */
     val hairline: Dp = 1.dp,
     /** 输入框底部安全区留白（与键盘/系统栏之间）。 */
-    val composerBottomInset: Dp = 8.dp,
+    val composerBottomInset: Dp = 16.dp,
+    /** 最后一条消息与输入框之间的可见间隙（照 DeepSearch 约 18dp）。 */
+    val composerClearance: Dp = 18.dp,
     /** 状态点直径（dsh-Go 的 8dp 渠道状态点）。 */
     val statusDot: Dp = 8.dp,
     /** 快捷胶囊高度（容量预设、档位筛选）。 */
