@@ -122,7 +122,7 @@ fun SettingsScreen(
         }
 
         item {
-            SettingsSection {
+            SettingsSection(title = stringResource(R.string.settings_group_ai)) {
                 SettingsRow(
                     title = stringResource(R.string.settings_model),
                     icon = R.drawable.ic_lucide_sparkles,
@@ -147,7 +147,7 @@ fun SettingsScreen(
         }
 
         item {
-            SettingsSection {
+            SettingsSection(title = stringResource(R.string.settings_group_capability)) {
                 SettingsRow(
                     title = stringResource(R.string.settings_web_search),
                     icon = R.drawable.ic_lucide_search,
@@ -173,10 +173,10 @@ fun SettingsScreen(
         }
 
         item {
-            SettingsSection {
+            SettingsSection(title = stringResource(R.string.settings_group_appearance)) {
                 Box(Modifier.onGloballyPositioned { themeAnchorHeight = it.size.height }) {
                     SettingsRow(
-                        title = stringResource(R.string.settings_group_appearance),
+                        title = stringResource(R.string.settings_theme),
                         icon = R.drawable.ic_lucide_palette,
                         value = themeLabel(uiState.themeMode),
                         trailing = {
@@ -228,7 +228,7 @@ fun SettingsScreen(
         }
 
         item {
-            SettingsSection {
+            SettingsSection(title = stringResource(R.string.settings_group_general)) {
                 SettingsRow(
                     title = stringResource(R.string.settings_interface),
                     icon = R.drawable.ic_lucide_layout_dashboard,
@@ -308,7 +308,7 @@ fun SettingsScreen(
         }
 
         item {
-            SettingsSection {
+            SettingsSection(title = stringResource(R.string.settings_group_host)) {
                 SettingsRow(
                     title = stringResource(R.string.settings_local_engine),
                     icon = R.drawable.ic_lucide_server,
@@ -326,7 +326,7 @@ fun SettingsScreen(
         }
 
         item {
-            SettingsSection {
+            SettingsSection(title = stringResource(R.string.settings_group_about)) {
                 SettingsRow(
                     title = stringResource(R.string.settings_version),
                     icon = R.drawable.ic_lucide_info,

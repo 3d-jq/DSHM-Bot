@@ -33,6 +33,14 @@ class DesignTokensTest {
     }
 
     @Test
+    fun petOverlayInsetsStayClearOfComposer() {
+        val spacing = DshmSpacing()
+        assertTrue(spacing.petInsetEnd.value > 0f)
+        assertTrue(spacing.petInsetBottom.value >= spacing.composerMinHeight.value)
+        assertEquals(spacing.lg.value, spacing.petInsetEnd.value, 0f)
+    }
+
+    @Test
     fun radiiArePositiveAndOrdered() {
         val radius = DshmRadius()
         val ordered = listOf(radius.xs.value, radius.sm.value, radius.md.value, radius.lg.value, radius.xl.value)

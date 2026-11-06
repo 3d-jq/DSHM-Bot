@@ -2,19 +2,20 @@ package com.dshm.bot.data.settings
 
 import android.content.Context
 import com.dshm.bot.domain.model.AppLanguage
+import com.dshm.bot.domain.model.ChatFontSize
+import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.domain.model.InterfaceMode
 import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.domain.model.PetSize
 import com.dshm.bot.domain.model.PetStyle
 import com.dshm.bot.domain.model.PhoneConfirmMode
-import com.dshm.bot.domain.model.VoiceMode
-import com.dshm.bot.domain.model.ChatFontSize
 import com.dshm.bot.domain.model.ThemeMode
+import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 
-/** 用 SharedPreferences 持久化 App 设置（主题 / 对话字号 / 语言）。 */
+/** 用 SharedPreferences 持久化 App 设置与 dsh-Go 细分偏好。 */
 class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -30,6 +31,7 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
     private val petSize = MutableStateFlow(readEnum(KEY_PET_SIZE, PetSize.MEDIUM))
     private val phoneControlEnabled = MutableStateFlow(prefs.getBoolean(KEY_PHONE_ENABLED, false))
     private val phoneConfirmMode = MutableStateFlow(readEnum(KEY_PHONE_CONFIRM, PhoneConfirmMode.ASK))
+    private val dshGoPreferences = MutableStateFlow(readDshGoPreferences())
 
     override fun observeThemeMode(): Flow<ThemeMode> = themeMode
 
@@ -115,6 +117,24 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
         phoneConfirmMode.value = mode
     }
 
+    override fun observeDshGoPreferences(): Flow<DshGoPreferences> = dshGoPreferences
+
+    override fun setDshGoPreference(key: String, value: Boolean) {
+        // setFlag 会校验 key，未知 key 直接失败，不静默写入。
+        val next = dshGoPreferences.value.setFlag(key, value)
+        prefs.edit().putBoolean(key, value).apply()
+        dshGoPreferences.value = next
+    }
+
+    /** 默认值统一取自 [DshGoPreferences]，不在这里重复写死。 */
+    private fun readDshGoPreferences(): DshGoPreferences {
+        var result = DshGoPreferences()
+        DshGoPreferences.BOOLEAN_KEYS.forEach { key ->
+            result = result.setFlag(key, prefs.getBoolean(key, result.flag(key)))
+        }
+        return result
+    }
+
     private inline fun <reified T : Enum<T>> readEnum(key: String, default: T): T {
         val raw = prefs.getString(key, null) ?: return default
         return runCatching { enumValueOf<T>(raw) }.getOrDefault(default)
@@ -136,4 +156,3 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
         const val KEY_PHONE_CONFIRM = "phone_confirm_mode"
     }
 }
-

@@ -2,6 +2,7 @@ package com.dshm.bot.data.remote
 
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.BotInks
+import com.dshm.bot.domain.model.BotShapeDefaults
 import com.dshm.bot.domain.model.BotSummary
 import org.json.JSONObject
 import java.time.Instant
@@ -37,7 +38,9 @@ object DsBotParser {
                         glyph = AvatarGlyph.BOT,
                         pinned = item.optBoolean("pinned", false),
                         avatarImage = avatar?.anyOrNull("image") as? String,
-                        avatarShape = avatar?.anyOrNull("shape") as? String,
+                        // 没有自定义形状的 Bot 由 id 决定默认角色（DS Bot 同一套规则）。
+                        avatarShape = (avatar?.anyOrNull("shape") as? String)
+                            ?: BotShapeDefaults.shapeFor(id),
                     ),
                 )
             }

@@ -61,11 +61,13 @@ fun SettingsPage(
     onBack: () -> Unit,
     subtitle: String? = null,
     actions: @Composable RowScope.() -> Unit = {},
+    bottomBar: (@Composable () -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     androidx.compose.material3.Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = Dshm.colors.pageBackground,
+        bottomBar = { bottomBar?.invoke() },
         topBar = {
             Box(
                 modifier = Modifier
@@ -143,7 +145,7 @@ fun SettingsSection(
                 text = title,
                 style = Dshm.typography.settingsSectionTitle,
                 color = if (state == SettingsSectionState.DANGER) Dshm.colors.danger else Dshm.colors.textSecondary,
-                modifier = Modifier.padding(start = Dshm.spacing.lg, bottom = Dshm.spacing.xs),
+                modifier = Modifier.padding(start = Dshm.spacing.lg, bottom = Dshm.spacing.sm),
             )
         }
         val shape = RoundedCornerShape(Dshm.radius.settingsCard)
@@ -336,6 +338,8 @@ fun SettingsInput(
     singleLine: Boolean = true,
     keyboardType: KeyboardType = KeyboardType.Text,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    /** 输入框内的尾部控件（如 API Key 的显示/隐藏），对齐 dsh-Go 的 suffixIcon。 */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(Dshm.radius.md)
     BasicTextField(
@@ -348,20 +352,31 @@ fun SettingsInput(
         visualTransformation = visualTransformation,
         modifier = modifier
             .fillMaxWidth()
+            // 所有输入框统一高度：尾部控件不再把某一个框撑高。
+            .heightIn(min = Dshm.spacing.inputHeight)
             .clip(shape)
             .background(Dshm.colors.surface)
             .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
-            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.md),
+            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
         decorationBox = { inner ->
-            Box {
-                if (value.isEmpty() && placeholder != null) {
-                    Text(
-                        text = placeholder,
-                        style = Dshm.typography.settingsRowTitle,
-                        color = Dshm.colors.textTertiary,
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty() && placeholder != null) {
+                        Text(
+                            text = placeholder,
+                            style = Dshm.typography.settingsRowTitle,
+                            color = Dshm.colors.textTertiary,
+                        )
+                    }
+                    inner()
                 }
-                inner()
+                if (trailing != null) {
+                    Spacer(Modifier.width(Dshm.spacing.xs))
+                    trailing()
+                }
             }
         },
     )
@@ -451,7 +466,8 @@ fun SettingsPrimaryButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.fillMaxWidth(),
+        // 主按钮统一高度：同类按钮在不同页面不能高矮不一。
+        modifier = modifier.fillMaxWidth().heightIn(min = Dshm.spacing.iconButton),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (danger) Dshm.colors.danger else Dshm.colors.accent,
             contentColor = if (danger) Dshm.colors.onInk else Dshm.colors.onAccent,

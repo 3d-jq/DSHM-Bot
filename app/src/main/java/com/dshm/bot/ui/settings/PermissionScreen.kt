@@ -15,7 +15,7 @@ import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.remote.PermissionOption
 
-/** 权限：新会话的默认预设（对齐 dsh-Go PermissionPage 的默认部分）。 */
+// 权限：当前对话、新对话默认、访问手机文件、手机操控确认，对齐 dsh-Go PermissionPage。
 @Composable
 fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
@@ -35,6 +35,17 @@ fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
             SettingsRefreshButton(onClick = viewModel::refresh)
         },
     ) {
+        // 当前对话：dsh-Go 随打开的对话出现，本项目未接入对话级权限，明确标注不可用。
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_permission_current),
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                    enabled = false,
+                )
+            }
+        }
         when {
             state.loading && state.description == null -> item { SettingsLoading() }
             savedError != null && state.description == null -> item {
@@ -44,7 +55,7 @@ fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
             else -> {
                 item {
                     SettingsSection(
-                        title = stringResource(R.string.settings_permission_default),
+                        title = stringResource(R.string.settings_permission_new_default),
                         footer = stringResource(R.string.settings_permission_hint),
                     ) {
                         options.forEachIndexed { index, option ->
@@ -91,6 +102,24 @@ fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
                 if (!writable) {
                     item { SettingsHint(stringResource(R.string.settings_engine_read_only)) }
                 }
+            }
+        }
+        // 访问手机文件 / 手机操控确认：依赖本机引擎与手机操控能力，本项目未接入，标注不可用。
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_permission_phone_files),
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                    enabled = false,
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_permission_phone_confirm),
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                    enabled = false,
+                )
             }
         }
     }

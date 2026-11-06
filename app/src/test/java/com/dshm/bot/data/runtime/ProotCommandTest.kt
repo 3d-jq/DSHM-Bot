@@ -53,4 +53,47 @@ class ProotCommandTest {
         assertNull(ProotCommand.parseToken("starting proot…"))
         assertTrue(ProotCommand.parseToken("dsh web: http://example.com/") == null)
     }
+
+    @Test
+    fun unknownPlaceholdersStayVerbatim() {
+        assertEquals(
+            "/data/user/0/app/files/runtime/rootfs/{UNKNOWN}",
+            ProotCommand.expand("{ROOTFS}/{UNKNOWN}", placeholders),
+        )
+    }
+
+    @Test
+    fun buildArgvExpandsPlaceholdersInsideEachArgument() {
+        val argv = ProotCommand.buildArgv(
+            listOf("proot", "--rootfs={ROOTFS}", "--port={PORT}", "{GUEST_ENV}", "dsh"),
+            placeholders,
+            listOf("A=1"),
+        )
+        assertEquals(
+            listOf(
+                "proot",
+                "--rootfs=/data/user/0/app/files/runtime/rootfs",
+                "--port=3080",
+                "A=1",
+                "dsh",
+            ),
+            argv,
+        )
+    }
+
+    @Test
+    fun parseTokenTrimsWhitespaceButNotLogPrefix() {
+        val ready = ProotCommand.parseToken("  dsh web: http://127.0.0.1:3080/?token=AbC_1  ")
+        assertEquals("http://127.0.0.1:3080/", ready?.baseUrl)
+        assertEquals("AbC_1", ready?.token)
+        assertNull(ProotCommand.parseToken("INFO dsh web: http://127.0.0.1:3080/?token=AbC_1"))
+    }
+
+    @Test
+    fun parseTokenRejectsMalformedReadyLines() {
+        assertNull(ProotCommand.parseToken(""))
+        assertNull(ProotCommand.parseToken("dsh web: http://127.0.0.1:3080/"))
+        assertNull(ProotCommand.parseToken("dsh web: http://127.0.0.1:3080/?token="))
+        assertNull(ProotCommand.parseToken("dsh web: https://example.com/?token=abc"))
+    }
 }

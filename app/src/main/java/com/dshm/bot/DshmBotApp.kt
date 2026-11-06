@@ -26,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.Dshm
@@ -35,7 +34,9 @@ import com.dshm.bot.data.notify.EngineNotifier
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.account.AccountScreen
 import com.dshm.bot.ui.account.AccountViewModel
+import com.dshm.bot.ui.chat.BotBrowserScreen
 import com.dshm.bot.ui.chat.BotChatScreen
+import com.dshm.bot.ui.chat.BotDetailsScreen
 import com.dshm.bot.ui.components.PetOverlay
 import com.dshm.bot.ui.engine.EngineScreen
 import com.dshm.bot.ui.engine.EngineViewModel
@@ -85,6 +86,8 @@ private const val SCREEN_ACCOUNT = "account"
 private const val SCREEN_SETTINGS_PAGE = "settings-page"
 private const val SCREEN_WEB = "web"
 private const val CHAT_PREFIX = "chat:"
+private const val BOT_DETAILS_PREFIX = "bot-details:"
+private const val SCREEN_BOT_BROWSER = "bot-browser"
 
 /**
  * 应用外壳：主界面 ↔ 搜索 ↔ 设置 ↔ Bot 对话。
@@ -92,7 +95,9 @@ private const val CHAT_PREFIX = "chat:"
  */
 @Composable
 fun DshmBotApp(
-    homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory()),
+    homeViewModel: HomeViewModel = viewModel(
+        factory = HomeViewModel.factory(LocalContext.current.applicationContext),
+    ),
     settingsViewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.factory(LocalContext.current.applicationContext),
     ),
@@ -128,6 +133,8 @@ fun DshmBotApp(
         RuntimeState.NotInstalled -> stringResource(R.string.engine_value_not_installed)
     }
     var openBotId by rememberSaveable { mutableStateOf<String?>(null) }
+    var botDetailsOpen by rememberSaveable { mutableStateOf(false) }
+    var botBrowserOpen by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var engineOpen by rememberSaveable { mutableStateOf(false) }
@@ -188,6 +195,8 @@ fun DshmBotApp(
         languageOpen -> SCREEN_LANGUAGE
         accountOpen -> SCREEN_ACCOUNT
         settingsStack.isNotEmpty() -> "$SCREEN_SETTINGS_PAGE:${settingsStack.last()}"
+        botBrowserOpen -> SCREEN_BOT_BROWSER
+        botDetailsOpen && openBotId != null -> BOT_DETAILS_PREFIX + openBotId
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -207,10 +216,12 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsStack.isNotEmpty() || webMode || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || settingsStack.isNotEmpty() || webMode || !onboardingDone) {
         navForward = false
         when {
             !onboardingDone -> Unit
+            botBrowserOpen -> botBrowserOpen = false
+            botDetailsOpen -> botDetailsOpen = false
             engineOpen -> engineOpen = false
             appearanceOpen -> appearanceOpen = false
             chatFontOpen -> chatFontOpen = false
@@ -282,6 +293,58 @@ fun DshmBotApp(
                 },
             )
 
+            key == SCREEN_BOT_BROWSER -> BotBrowserScreen(
+                endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                onBack = {
+                    navForward = false
+                    botBrowserOpen = false
+                },
+            )
+
+            key.startsWith(BOT_DETAILS_PREFIX) -> {
+                val botId = key.removePrefix(BOT_DETAILS_PREFIX)
+                val openBot = uiState.rows.firstOrNull { it.id == botId }
+                if (openBot != null) {
+                    BotDetailsScreen(
+                        bot = openBot,
+                        endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                        onBack = {
+                            navForward = false
+                            botDetailsOpen = false
+                        },
+                        onDeleted = {
+                            navForward = false
+                            botDetailsOpen = false
+                            openBotId = null
+                        },
+                    )
+                } else {
+                    HomeScreen(
+                        uiState = uiState,
+                        onQueryChange = homeViewModel::setQuery,
+                        onOpenBot = {
+                            navForward = true
+                            openBotId = it
+                        },
+                        onCreateBot = {},
+                        onCreateGroup = {},
+                        onOpenSearch = {
+                            navForward = true
+                            searchOpen = true
+                        },
+                        onOpenSettings = {
+                            navForward = true
+                            settingsOpen = true
+                        },
+                        engineLabel = engineNotice,
+                        onEngineClick = {
+                            navForward = true
+                            engineOpen = true
+                        },
+                    )
+                }
+            }
+
             key.startsWith(CHAT_PREFIX) -> {
                 val botId = key.removePrefix(CHAT_PREFIX)
                 val openBot = uiState.rows.firstOrNull { it.id == botId }
@@ -293,7 +356,16 @@ fun DshmBotApp(
                             navForward = false
                             openBotId = null
                         },
+                        onDetails = {
+                            navForward = true
+                            botDetailsOpen = true
+                        },
+                        onOpenBrowser = {
+                            navForward = true
+                            botBrowserOpen = true
+                        },
                         fontScale = settingsUiState.chatFontSize.scale(),
+                        voiceMode = settingsUiState.voiceMode,
                     )
                 } else {
                     HomeScreen(
@@ -394,6 +466,7 @@ fun DshmBotApp(
                         current = settingsUiState.voiceMode,
                         onSelect = settingsViewModel::setVoiceMode,
                         onBack = close,
+                        viewModel = engineSettingsViewModel,
                     )
 
                     SettingsPageId.MODEL -> ModelProvidersScreen(
@@ -421,6 +494,7 @@ fun DshmBotApp(
                     SettingsPageId.PLUGINS -> PluginsScreen(
                         viewModel = engineSettingsViewModel,
                         onBack = close,
+                        onRestartEngine = engineViewModel::restart,
                     )
 
                     SettingsPageId.ENGINE_PARAMS -> EngineSettingsScreen(
@@ -579,7 +653,10 @@ fun DshmBotApp(
             reduceMotion = reduceMotion,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 96.dp),
+                .padding(
+                    end = Dshm.spacing.petInsetEnd,
+                    bottom = Dshm.spacing.petInsetBottom,
+                ),
         )
     }
     }

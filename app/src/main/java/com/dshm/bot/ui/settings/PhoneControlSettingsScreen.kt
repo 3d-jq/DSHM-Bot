@@ -20,7 +20,7 @@ import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.domain.model.PhoneConfirmMode
 
-/** 设置 → 手机操控：无障碍服务状态、总开关与确认方式。 */
+// 设置 → 手机操控：无障碍服务状态、总开关、确认方式与未接入能力说明。
 @Composable
 fun PhoneControlSettingsScreen(
     enabled: Boolean,
@@ -31,7 +31,6 @@ fun PhoneControlSettingsScreen(
 ) {
     val context = LocalContext.current
     val serviceEnabled = rememberAccessibilityServiceEnabled()
-    val zh = SettingsCopy.isChinese(settingsLanguage())
 
     fun openAccessibilitySettings() {
         runCatching {
@@ -46,9 +45,22 @@ fun PhoneControlSettingsScreen(
         title = stringResource(R.string.settings_phone_control),
         onBack = onBack,
     ) {
+        // 说明：如实写明引擎桥接未接入，不假称进阶能力可用
         item {
             SettingsSection(
-                title = stringResource(R.string.phone_control_service),
+                title = stringResource(R.string.settings_phone_before_start),
+                footer = stringResource(R.string.phone_control_bridge_note),
+            ) {
+                SettingsRow(
+                    title = stringResource(R.string.phone_control_service_description),
+                )
+            }
+        }
+
+        // 开启与准备：权限状态、去系统设置、真实开关，以及未接入的读屏 / 自动恢复
+        item {
+            SettingsSection(
+                title = stringResource(R.string.settings_phone_setup),
                 footer = stringResource(R.string.phone_control_service_hint),
             ) {
                 SettingsRow(
@@ -78,9 +90,24 @@ fun PhoneControlSettingsScreen(
                     enabled = serviceEnabled,
                     onCheckedChange = onEnabledChange,
                 )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_phone_read_screen),
+                    enabled = false,
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_phone_restore_a11y),
+                    enabled = false,
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                )
             }
         }
 
+        // 确认方式：三档真实保存的偏好
         item {
             SettingsSection(
                 title = stringResource(R.string.phone_control_confirm),
@@ -89,8 +116,8 @@ fun PhoneControlSettingsScreen(
                 PhoneConfirmMode.entries.forEachIndexed { index, mode ->
                     if (index > 0) SettingsRowDivider()
                     SettingsRow(
-                        title = confirmModeLabel(mode, zh),
-                        subtitle = confirmModeHint(mode, zh),
+                        title = confirmModeLabel(mode),
+                        subtitle = confirmModeHint(mode),
                         trailing = {
                             RadioButton(
                                 selected = mode == confirmMode,
@@ -103,15 +130,34 @@ fun PhoneControlSettingsScreen(
             }
         }
 
+        // 悬浮条 / 应用名单 / 解除限制 / 不打扰模式 / 操作记录：尚未接入，明确标注
+        item {
+            val advanced = listOf(
+                stringResource(R.string.settings_phone_floating_bar),
+                stringResource(R.string.settings_phone_app_rules),
+                stringResource(R.string.settings_phone_unlock),
+                stringResource(R.string.settings_phone_dnd),
+                stringResource(R.string.settings_phone_operation_log),
+            )
+            SettingsSection(
+                title = stringResource(R.string.settings_phone_advanced),
+                footer = stringResource(R.string.settings_engine_required),
+            ) {
+                advanced.forEachIndexed { index, label ->
+                    if (index > 0) SettingsRowDivider()
+                    SettingsRow(
+                        title = label,
+                        enabled = false,
+                        subtitle = stringResource(R.string.settings_unavailable_hint),
+                        value = stringResource(R.string.settings_unavailable),
+                    )
+                }
+            }
+        }
+
         if (!serviceEnabled) {
             item {
-                SettingsHint(
-                    if (zh) {
-                        "需要在系统设置 → 无障碍里启用 DSHM Bot。手机操控的引擎桥接仍未接入，当前版本只提供服务状态与确认偏好。"
-                    } else {
-                        "Enable DSHM Bot in Settings → Accessibility. The engine bridge for phone control is not wired yet; this version only stores the service state and confirmation preference."
-                    },
-                )
+                SettingsHint(stringResource(R.string.settings_phone_service_hint))
             }
         }
     }
@@ -142,14 +188,16 @@ internal fun isAccessibilityEnabled(context: Context): Boolean {
     }
 }
 
-private fun confirmModeLabel(mode: PhoneConfirmMode, zh: Boolean): String = when (mode) {
-    PhoneConfirmMode.ASK -> if (zh) "每次询问" else "Ask every time"
-    PhoneConfirmMode.TASK -> if (zh) "每个任务询问" else "Ask per task"
-    PhoneConfirmMode.ALWAYS -> if (zh) "不再询问" else "Never ask"
+@Composable
+private fun confirmModeLabel(mode: PhoneConfirmMode): String = when (mode) {
+    PhoneConfirmMode.ASK -> stringResource(R.string.phone_confirm_ask)
+    PhoneConfirmMode.TASK -> stringResource(R.string.phone_confirm_task)
+    PhoneConfirmMode.ALWAYS -> stringResource(R.string.phone_confirm_always)
 }
 
-private fun confirmModeHint(mode: PhoneConfirmMode, zh: Boolean): String = when (mode) {
-    PhoneConfirmMode.ASK -> if (zh) "每个动作前确认" else "Confirm before every action"
-    PhoneConfirmMode.TASK -> if (zh) "每个任务开始时确认一次" else "Confirm once per task"
-    PhoneConfirmMode.ALWAYS -> if (zh) "完全信任，动作直接执行" else "Execute actions without asking"
+@Composable
+private fun confirmModeHint(mode: PhoneConfirmMode): String = when (mode) {
+    PhoneConfirmMode.ASK -> stringResource(R.string.phone_confirm_ask_hint)
+    PhoneConfirmMode.TASK -> stringResource(R.string.phone_confirm_task_hint)
+    PhoneConfirmMode.ALWAYS -> stringResource(R.string.phone_confirm_always_hint)
 }

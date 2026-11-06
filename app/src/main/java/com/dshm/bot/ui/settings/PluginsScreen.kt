@@ -24,9 +24,13 @@ import com.dshm.bot.data.remote.PluginBundle
 import com.dshm.bot.data.remote.PluginBundleGroup
 import kotlin.math.abs
 
-/** 插件：DSH 官方可选包 + 第三方已安装包，结构与 dsh-Go 一致（分组、官方徽标、开关）。 */
+// 插件：DSH 官方可选包 + 第三方已安装包，结构与 dsh-Go 一致（分组、官方徽标、开关）。
 @Composable
-fun PluginsScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
+fun PluginsScreen(
+    viewModel: EngineSettingsViewModel,
+    onBack: () -> Unit,
+    onRestartEngine: () -> Unit = {},
+) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
     var openNs by rememberSaveable { mutableStateOf<String?>(null) }
@@ -62,8 +66,24 @@ fun PluginsScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
                 SettingsEmpty(stringResource(R.string.settings_plugins_read_only))
             }
             else -> {
+
                 if (actionError != null) {
                     item { SettingsError(actionError.orEmpty()) }
+                }
+                if (state.pluginRestartNeeded) {
+                    item {
+                        SettingsSection {
+                            SettingsRow(
+                                title = stringResource(R.string.plugins_restart_needed_title),
+                                subtitle = stringResource(R.string.plugins_restart_needed_hint),
+                                value = stringResource(R.string.plugins_restart_now),
+                                onClick = {
+                                    viewModel.clearPluginRestart()
+                                    onRestartEngine()
+                                },
+                            )
+                        }
+                    }
                 }
                 if (installed.isNotEmpty()) {
                     item {
@@ -105,6 +125,45 @@ fun PluginsScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
                                             if (error != null) actionError = error
                                         }
                                     },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 更新 / 卸载：dsh-Go 有、当前版本未接入，明确标注不可用
+                item {
+                    SettingsSection(title = stringResource(R.string.settings_plugins_update_section)) {
+                        SettingsRow(
+                            title = stringResource(R.string.settings_plugins_update),
+                            enabled = false,
+                            subtitle = stringResource(R.string.settings_unavailable_hint),
+                            value = stringResource(R.string.settings_unavailable),
+                        )
+                        SettingsRowDivider()
+                        SettingsRow(
+                            title = stringResource(R.string.settings_plugins_uninstall),
+                            enabled = false,
+                            subtitle = stringResource(R.string.settings_unavailable_hint),
+                            value = stringResource(R.string.settings_unavailable),
+                        )
+                    }
+                }
+
+                // 插件自己的设置项：引擎提供的 namespace 表单
+                val configs = viewModel.pluginConfigNamespaces()
+                if (configs.isNotEmpty()) {
+                    item {
+                        SettingsSection(
+                            title = stringResource(R.string.settings_plugin_configs),
+                            footer = stringResource(R.string.settings_engine_required),
+                        ) {
+                            configs.forEachIndexed { index, ns ->
+                                if (index > 0) SettingsRowDivider()
+                                SettingsRow(
+                                    title = SettingsCopy.namespaceTitle(ns.ns, language),
+                                    subtitle = ns.schema.meta.description?.resolve(language),
+                                    onClick = { openNs = ns.ns },
                                 )
                             }
                         }

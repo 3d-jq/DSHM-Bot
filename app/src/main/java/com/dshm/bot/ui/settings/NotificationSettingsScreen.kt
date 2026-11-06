@@ -7,7 +7,6 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,10 +14,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.domain.model.DshGoPreferences
 
-/** 通知：总开关 + 系统通知权限状态 + 跳系统设置。 */
+// dsh-Go 设置 › 通用 › 通知：允许通知总开关，下面四类提醒是真实可保存的本地偏好。
+// 总开关 enabled 即 notificationsEnabled，关闭时四类子项都不可操作；
+// 系统通知权限状态与跳系统设置沿用原来的 ViewModel 与逻辑，不删真实功能。
 @Composable
 fun NotificationSettingsScreen(
     enabled: Boolean,
@@ -28,6 +32,10 @@ fun NotificationSettingsScreen(
     val context = LocalContext.current
     val systemAllowed = rememberNotificationsAllowed()
     var error by remember { mutableStateOf<String?>(null) }
+    val settingsVm: SettingsViewModel = viewModel(
+        factory = SettingsViewModel.factory(LocalContext.current.applicationContext),
+    )
+    val state by settingsVm.uiState.collectAsStateWithLifecycle()
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -68,13 +76,49 @@ fun NotificationSettingsScreen(
         item {
             SettingsSection(
                 title = stringResource(R.string.settings_notifications_events),
-                footer = stringResource(R.string.settings_notifications_hint),
+                footer = stringResource(R.string.settings_notify_hint),
             ) {
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_notifications_engine_ready),
                     subtitle = stringResource(R.string.settings_notifications_engine_ready_hint),
                     checked = enabled,
                     onCheckedChange = { setEnabled(it) },
+                )
+                SettingsRowDivider()
+                SettingsSwitchRow(
+                    title = stringResource(R.string.settings_notify_turn_done),
+                    checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_TURN_DONE),
+                    onCheckedChange = {
+                        settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_TURN_DONE, it)
+                    },
+                    enabled = enabled,
+                )
+                SettingsRowDivider()
+                SettingsSwitchRow(
+                    title = stringResource(R.string.settings_notify_error),
+                    checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_ERROR),
+                    onCheckedChange = {
+                        settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_ERROR, it)
+                    },
+                    enabled = enabled,
+                )
+                SettingsRowDivider()
+                SettingsSwitchRow(
+                    title = stringResource(R.string.settings_notify_approval),
+                    checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_APPROVAL),
+                    onCheckedChange = {
+                        settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_APPROVAL, it)
+                    },
+                    enabled = enabled,
+                )
+                SettingsRowDivider()
+                SettingsSwitchRow(
+                    title = stringResource(R.string.settings_notify_question),
+                    checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_QUESTION),
+                    onCheckedChange = {
+                        settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_QUESTION, it)
+                    },
+                    enabled = enabled,
                 )
             }
         }

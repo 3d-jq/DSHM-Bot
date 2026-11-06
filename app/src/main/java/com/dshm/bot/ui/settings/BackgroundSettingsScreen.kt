@@ -12,7 +12,7 @@ import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 
-/** 后台运行：电池优化白名单状态与跳转。 */
+// 后台运行：按 dsh-Go 常见问题补充保活指南，保留电池优化白名单状态与跳转。
 @Composable
 fun BackgroundSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -35,6 +35,13 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 )
             }
         }
+    }
+
+    fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
     }
 
     SettingsPage(
@@ -63,6 +70,19 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                         onClick = { openBatterySettings() },
                     )
                 }
+            }
+        }
+
+        item {
+            SettingsSection(
+                title = stringResource(R.string.settings_notifications),
+                footer = stringResource(R.string.settings_notifications_hint),
+            ) {
+                SettingsRow(
+                    title = stringResource(R.string.settings_notifications_open_system),
+                    subtitle = stringResource(R.string.settings_notifications_open_system_hint),
+                    onClick = { openNotificationSettings() },
+                )
             }
         }
 

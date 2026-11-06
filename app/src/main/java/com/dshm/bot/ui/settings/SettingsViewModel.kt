@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
 import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ChatFontSize
+import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.domain.model.InterfaceMode
 import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.domain.model.PetSize
@@ -36,6 +37,7 @@ data class SettingsUiState(
     val petSize: PetSize = PetSize.MEDIUM,
     val phoneControlEnabled: Boolean = false,
     val phoneConfirmMode: PhoneConfirmMode = PhoneConfirmMode.ASK,
+    val dshGo: DshGoPreferences = DshGoPreferences(),
 )
 
 /** 设置页状态层：读/写设置，界面只消费 [uiState]。 */
@@ -68,7 +70,12 @@ class SettingsViewModel(
         repository.observePhoneConfirmMode(),
     ) { enabled, mode -> listOf(enabled, mode) }
 
-    val uiState: StateFlow<SettingsUiState> = combine(core, extended, phone) { base, extra, phoneValues ->
+    val uiState: StateFlow<SettingsUiState> = combine(
+        core,
+        extended,
+        phone,
+        repository.observeDshGoPreferences(),
+    ) { base, extra, phoneValues, dshGo ->
         @Suppress("UNCHECKED_CAST")
         SettingsUiState(
             themeMode = base[0] as ThemeMode,
@@ -83,6 +90,7 @@ class SettingsViewModel(
             petSize = extra[4] as PetSize,
             phoneControlEnabled = phoneValues[0] as Boolean,
             phoneConfirmMode = phoneValues[1] as PhoneConfirmMode,
+            dshGo = dshGo,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -90,17 +98,11 @@ class SettingsViewModel(
         initialValue = SettingsUiState(),
     )
 
-    fun setThemeMode(mode: ThemeMode) {
-        repository.setThemeMode(mode)
-    }
+    fun setThemeMode(mode: ThemeMode) = repository.setThemeMode(mode)
 
-    fun setChatFontSize(size: ChatFontSize) {
-        repository.setChatFontSize(size)
-    }
+    fun setChatFontSize(size: ChatFontSize) = repository.setChatFontSize(size)
 
-    fun setLanguage(language: AppLanguage) {
-        repository.setLanguage(language)
-    }
+    fun setLanguage(language: AppLanguage) = repository.setLanguage(language)
 
     fun setInterfaceMode(mode: InterfaceMode) = repository.setInterfaceMode(mode)
 
@@ -119,6 +121,8 @@ class SettingsViewModel(
     fun setPhoneControlEnabled(enabled: Boolean) = repository.setPhoneControlEnabled(enabled)
 
     fun setPhoneConfirmMode(mode: PhoneConfirmMode) = repository.setPhoneConfirmMode(mode)
+
+    fun setDshGoPreference(key: String, value: Boolean) = repository.setDshGoPreference(key, value)
 
     companion object {
         fun factory(context: Context): ViewModelProvider.Factory = viewModelFactory {

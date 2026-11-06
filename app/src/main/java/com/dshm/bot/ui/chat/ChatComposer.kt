@@ -6,9 +6,15 @@ import android.content.pm.PackageManager
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,20 +22,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,9 +53,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.remote.SpeechRepository
+import com.dshm.bot.domain.model.VoiceMode
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 /** 输入框纯逻辑（便于单测）：空白（含全空格）不能发送。 */
 object ComposerRules {
@@ -72,6 +87,8 @@ fun ChatComposer(
     sendEnabled: Boolean = ComposerRules.canSend(value),
     maxLines: Int = 6,
     textScale: Float = 1f,
+    voiceMode: VoiceMode = VoiceMode.AUTO,
+    speech: SpeechRepository? = null,
 ) {
     val colors = Dshm.colors
     val spacing = Dshm.spacing
@@ -86,11 +103,40 @@ fun ChatComposer(
     var listening by remember { mutableStateOf(false) }
     var partial by remember { mutableStateOf("") }
     var level by remember { mutableFloatStateOf(0f) }
+    var engineActive by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf(false) }
+    var engineReady by remember { mutableStateOf(false) }
     val latestValue = rememberUpdatedState(value)
     val latestOnValueChange = rememberUpdatedState(onValueChange)
+    val scope = rememberCoroutineScope()
+    val engineRecorder = remember { EngineVoiceRecorder(context) }
+    LaunchedEffect(speech, voiceMode) {
+        if (speech == null || voiceMode == VoiceMode.SYSTEM) {
+            engineReady = false
+        } else {
+            repeat(20) {
+                engineReady = runCatching {
+                    speech.catalog()?.usableProvider != null
+                }
+                    .onFailure { android.util.Log.w("DshVoice", "speech/catalog failed", it) }
+                    .getOrDefault(false)
+                android.util.Log.i("DshVoice", "catalog usable=$engineReady mode=$voiceMode")
+                if (engineReady) return@LaunchedEffect
+                kotlinx.coroutines.delay(3_000)
+            }
+        }
+    }
+    val systemVoiceAvailable = remember {
+        runCatching { SpeechRecognizer.isRecognitionAvailable(context) }.getOrDefault(false)
+    }
+    val voiceAvailable = systemVoiceAvailable || (engineReady && voiceMode != VoiceMode.SYSTEM)
 
     val recognizer = remember {
-        runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
+        if (systemVoiceAvailable) {
+            runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
+        } else {
+            null
+        }
     }
     DisposableEffect(recognizer) {
         if (recognizer != null) {
@@ -137,30 +183,13 @@ fun ChatComposer(
                 },
             )
         }
-        onDispose { runCatching { recognizer?.destroy() } }
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) {
-            listening = true
-            partial = ""
-            recognizer?.startListening(
-                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-                },
-            )
+        onDispose {
+            runCatching { recognizer?.destroy() }
+            engineRecorder.release()
         }
     }
 
-    fun startDictation() {
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
-        }
+    fun startSystemListening() {
         listening = true
         partial = ""
         recognizer?.startListening(
@@ -168,6 +197,101 @@ fun ChatComposer(
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            },
+        )
+    }
+
+    fun beginDictation() {
+        if (voiceMode == VoiceMode.SYSTEM || speech == null) {
+            startSystemListening()
+            return
+        }
+        if (!engineReady) {
+            if (voiceMode == VoiceMode.ENGINE || !systemVoiceAvailable) {
+                Toast.makeText(
+                    context,
+                    "请先在 设置 → 语音输入 中下载并准备 SenseVoice 模型",
+                    Toast.LENGTH_LONG,
+                ).show()
+            } else {
+                startSystemListening()
+            }
+            return
+        }
+        scope.launch {
+            val catalog = runCatching { speech.catalog() }.getOrNull()
+            val usable = catalog?.usableProvider
+            if (usable != null && engineRecorder.start()) {
+                listening = true
+                engineActive = true
+                transcribing = false
+                partial = ""
+            } else if (voiceMode == VoiceMode.ENGINE) {
+                listening = false
+                engineActive = false
+                Toast.makeText(
+                    context,
+                    "请先在 设置 → 语音输入 中下载并准备 SenseVoice 模型",
+                    Toast.LENGTH_LONG,
+                ).show()
+            } else {
+                startSystemListening()
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) beginDictation()
+    }
+
+    fun startDictation() {
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        beginDictation()
+    }
+
+    fun cancelDictation() {
+        if (engineActive) {
+            engineRecorder.cancel()
+        } else {
+            runCatching { recognizer?.cancel() }
+        }
+        listening = false
+        engineActive = false
+        transcribing = false
+        partial = ""
+        level = 0f
+    }
+
+    fun stopDictation() {
+        if (!engineActive) {
+            runCatching { recognizer?.stopListening() }
+            return
+        }
+        val repo = speech
+        engineActive = false
+        listening = false
+        partial = ""
+        level = 0f
+        if (repo == null) return
+        transcribing = true
+        engineRecorder.stopAndTranscribe(
+            scope = scope,
+            speech = repo,
+            onText = { text ->
+                val merged = listOf(latestValue.value, text)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ")
+                latestOnValueChange.value(merged)
+                transcribing = false
+            },
+            onError = { message ->
+                transcribing = false
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             },
         )
     }
@@ -193,11 +317,7 @@ fun ChatComposer(
             ComposerKey(
                 icon = R.drawable.ic_lucide_x,
                 contentDescription = stringResource(R.string.composer_voice_cancel),
-                onClick = {
-                    runCatching { recognizer?.cancel() }
-                    listening = false
-                    partial = ""
-                },
+                onClick = { cancelDictation() },
             )
         } else {
             ComposerKey(
@@ -208,7 +328,7 @@ fun ChatComposer(
         }
         Spacer(Modifier.width(spacing.sm))
 
-        if (listening) {
+        if (listening || transcribing) {
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -216,14 +336,20 @@ fun ChatComposer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = partial.ifBlank { stringResource(R.string.composer_voice_listening) },
+                    text = if (transcribing) {
+                        stringResource(R.string.composer_voice_transcribing)
+                    } else {
+                        partial.ifBlank { stringResource(R.string.composer_voice_listening) }
+                    },
                     style = scaledText,
-                    color = if (partial.isBlank()) colors.textTertiary else colors.textPrimary,
+                    color = if (transcribing || partial.isBlank()) colors.textTertiary else colors.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                VoiceLevelBar(level = level)
+                if (listening) {
+                    VoiceLevelBar(level = if (engineActive) engineRecorder.level else level)
+                }
             }
         } else {
             BasicTextField(
@@ -252,8 +378,9 @@ fun ChatComposer(
         Spacer(Modifier.width(spacing.sm))
 
         when {
-            listening -> StopKey(onStop = { runCatching { recognizer?.stopListening() } })
-            value.isBlank() && recognizer != null -> ComposerKey(
+            listening -> StopKey(onStop = { stopDictation() })
+            transcribing -> TranscribingKey()
+            value.isBlank() && voiceAvailable -> ComposerKey(
                 icon = R.drawable.ic_lucide_mic,
                 contentDescription = stringResource(R.string.composer_voice),
                 onClick = { startDictation() },
@@ -263,18 +390,28 @@ fun ChatComposer(
     }
 }
 
-/** 听写中的音量条（用识别 RMS 驱动）。 */
+/** 听写中的音量条：对齐 dsh-Go 的 5 根圆头竖条（4–24dp，真实音量从左进右出）。 */
 @Composable
 private fun VoiceLevelBar(level: Float) {
-    val bars = 3
-    Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Dshm.spacing.xxs)) {
+    val bars = 5
+    val history = remember { mutableStateListOf(0f, 0f, 0f, 0f, 0f) }
+    LaunchedEffect(level) {
+        history.removeAt(0)
+        history.add(level.coerceIn(0f, 1f))
+    }
+    Row(
+        modifier = Modifier.height(24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.5.dp),
+    ) {
         repeat(bars) { index ->
-            val active = level > (index + 1) / (bars + 1f)
+            val height = 4.dp + (24.dp - 4.dp) * history[index]
             Box(
                 modifier = Modifier
-                    .size(width = Dshm.spacing.xxs, height = Dshm.spacing.sm)
+                    .width(3.dp)
+                    .height(height)
                     .clip(CircleShape)
-                    .background(if (active) Dshm.colors.accent else Dshm.colors.textTertiary.copy(alpha = 0.3f)),
+                    .background(Dshm.colors.textPrimary.copy(alpha = 0.6f)),
             )
         }
     }
@@ -320,6 +457,24 @@ private fun SendKey(enabled: Boolean, onSend: () -> Unit) {
             contentDescription = stringResource(R.string.composer_send),
             tint = if (enabled) Dshm.colors.onAccent else Dshm.colors.textTertiary,
             modifier = Modifier.size(Dshm.spacing.composerSendIcon),
+        )
+    }
+}
+
+/** 转写中：右侧圆键显示进度，避免用户重复点击。 */
+@Composable
+private fun TranscribingKey() {
+    Box(
+        modifier = Modifier
+            .size(Dshm.spacing.composerKey)
+            .clip(CircleShape)
+            .background(Dshm.colors.surfaceMuted),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(Dshm.spacing.icon),
+            strokeWidth = 2.dp,
+            color = Dshm.colors.accent,
         )
     }
 }

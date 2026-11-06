@@ -31,6 +31,7 @@ class RuntimeLauncher(
     fun start(manifest: RuntimeManifest, guestEnv: List<String> = emptyList()): RuntimeEndpoint {
         val rootfs = installer.rootfsDir
         require(rootfs.isDirectory) { "运行时尚未安装" }
+        GuestSetup.apply(rootfs)
 
         EngineLog.reset()
         EngineLog.log("launch method: proot")

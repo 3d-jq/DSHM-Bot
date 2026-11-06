@@ -1,17 +1,18 @@
 package com.dshm.bot.domain.repository
 
 import com.dshm.bot.domain.model.AppLanguage
-import com.dshm.bot.domain.model.InterfaceMode
-import com.dshm.bot.domain.model.VoiceMode
-import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.domain.model.ChatFontSize
+import com.dshm.bot.domain.model.DshGoPreferences
+import com.dshm.bot.domain.model.InterfaceMode
+import com.dshm.bot.domain.model.PerformanceMode
 import com.dshm.bot.domain.model.PetSize
 import com.dshm.bot.domain.model.PetStyle
 import com.dshm.bot.domain.model.PhoneConfirmMode
 import com.dshm.bot.domain.model.ThemeMode
+import com.dshm.bot.domain.model.VoiceMode
 import kotlinx.coroutines.flow.Flow
 
-/** App 本地设置（主题、字号、语言；后续的主机、通知等也放这里）。 */
+/** App 本地设置（主题、字号、语言，以及 dsh-Go 设置 IA 的细分偏好）。 */
 interface SettingsRepository {
     fun observeThemeMode(): Flow<ThemeMode>
 
@@ -60,5 +61,9 @@ interface SettingsRepository {
     fun observePhoneConfirmMode(): Flow<PhoneConfirmMode>
 
     fun setPhoneConfirmMode(mode: PhoneConfirmMode)
-}
 
+    /** dsh-Go 设置 IA 的细分偏好（通知四类、完成后收起过程）。 */
+    fun observeDshGoPreferences(): Flow<DshGoPreferences>
+
+    fun setDshGoPreference(key: String, value: Boolean)
+}

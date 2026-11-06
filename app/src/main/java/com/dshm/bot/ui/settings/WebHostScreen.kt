@@ -110,10 +110,12 @@ fun WebHostScreen(endpoint: RuntimeEndpoint?, modifier: Modifier = Modifier) {
                                 Log.i("DshWeb", "page finished: $url")
                                 loading = false
                                 CookieManager.getInstance().flush()
+                                view?.let(::fitWebViewport)
                             }
 
                             override fun onPageCommitVisible(view: WebView?, url: String?) {
                                 Log.i("DshWeb", "commit visible: $url")
+                                view?.let(::fitWebViewport)
                             }
 
                             override fun onReceivedError(
@@ -216,4 +218,19 @@ fun WebHostScreen(endpoint: RuntimeEndpoint?, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+/**
+ * DSH Web 的 `html, body, #root { height: 100% }` 在部分 WebView 上会按 0 高度解析
+ * （首次布局时 WebView 还没拿到尺寸），页面就只剩一层空白。页面加载后把视口高度
+ * 显式写回去，并在尺寸变化时重算。
+ */
+private fun fitWebViewport(view: WebView) {
+    view.evaluateJavascript(
+        "(function(){function f(){var h=window.innerHeight;" +
+            "var d=document.documentElement,b=document.body,r=document.getElementById('root');" +
+            "[d,b,r].forEach(function(e){if(e)e.style.setProperty('height',h+'px','important');});}" +
+            "f();window.addEventListener('resize',f);setTimeout(f,150);setTimeout(f,700);})();",
+        null,
+    )
 }

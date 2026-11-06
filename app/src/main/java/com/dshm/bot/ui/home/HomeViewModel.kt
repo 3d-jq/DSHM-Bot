@@ -1,12 +1,15 @@
 package com.dshm.bot.ui.home
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.data.remote.BotCache
 import com.dshm.bot.data.remote.DsBotRepository
 import com.dshm.bot.data.remote.DshClient
+import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.EmptyBotRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.domain.model.BotInks
@@ -34,13 +37,14 @@ class HomeViewModel(
     clock: Clock = Clock.systemDefaultZone(),
     zoneId: ZoneId = ZoneId.systemDefault(),
     locale: Locale = Locale.getDefault(),
+    private val cache: BotCache? = null,
 ) : ViewModel() {
 
     private var repository: BotRepository = repository
     private var collectJob: Job? = null
-    private val bots = MutableStateFlow<List<BotSummary>>(emptyList())
+    private val bots = MutableStateFlow(cache?.load().orEmpty())
     private val query = MutableStateFlow("")
-    private val loading = MutableStateFlow(true)
+    private val loading = MutableStateFlow(bots.value.isEmpty())
     private val failed = MutableStateFlow(false)
 
     private val timeFormatter = RelativeTimeFormatter(zoneId = zoneId, clock = clock, locale = locale)
@@ -64,14 +68,20 @@ class HomeViewModel(
 
     /** 本机引擎端点变化时切换到真实 DS Bot 数据源；null 表示引擎未运行。 */
     fun setEndpoint(endpoint: RuntimeEndpoint?) {
-        start(if (endpoint == null) EmptyBotRepository() else DsBotRepository(DshClient(endpoint)))
+        start(
+            if (endpoint == null) {
+                EmptyBotRepository()
+            } else {
+                DsBotRepository(DshClients.of(endpoint), cache)
+            },
+        )
     }
 
     private fun start(source: BotRepository) {
         collectJob?.cancel()
         repository = source
-        bots.value = emptyList()
-        loading.value = true
+        bots.value = cache?.load().orEmpty()
+        loading.value = bots.value.isEmpty()
         failed.value = false
         collectJob = viewModelScope.launch {
             repository.observeBots()
@@ -123,8 +133,16 @@ class HomeViewModel(
     }
 
     companion object {
-        fun factory(repository: BotRepository = EmptyBotRepository()): ViewModelProvider.Factory = viewModelFactory {
-            initializer { HomeViewModel(repository) }
+        fun factory(
+            context: Context? = null,
+            repository: BotRepository = EmptyBotRepository(),
+        ): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                HomeViewModel(
+                    repository = repository,
+                    cache = context?.applicationContext?.let(::BotCache),
+                )
+            }
         }
     }
 }

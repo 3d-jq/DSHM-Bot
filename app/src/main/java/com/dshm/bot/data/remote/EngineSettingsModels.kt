@@ -561,6 +561,13 @@ data class PluginBundle(
 
 enum class PluginBundleGroup { INSTALLED, OFFICIAL, HIDDEN }
 
+/** `pluginManager/setBundleEnabled` 的结果：区分“已生效”和“需要重启引擎”。 */
+data class PluginToggleResult(
+    val succeeded: Boolean,
+    val needsRestart: Boolean,
+    val message: String?,
+)
+
 fun parsePluginBundle(raw: JSONObject): PluginBundle = PluginBundle(
     name = raw.optString("name"),
     official = raw.optBoolean("official", false),
@@ -576,6 +583,94 @@ fun parsePluginBundle(raw: JSONObject): PluginBundle = PluginBundle(
         (error.anyOrNull("diagnostic") as? String) ?: (error.anyOrNull("code") as? String)
     },
 )
+
+/** `speech/catalog` 的一个识别器及其模型准备状态（对齐 dsh-Go `SpeechProviderView`）。 */
+data class SpeechProvider(
+    val id: String,
+    val name: String,
+    val location: String,
+    val phase: String,
+    val languages: List<String> = emptyList(),
+    val completedBytes: Long? = null,
+    val totalBytes: Long? = null,
+    val message: String? = null,
+    val downloadReason: String? = null,
+) {
+    /** ready / standby / waking 都可以直接录音识别。 */
+    val usable: Boolean
+        get() = phase == "ready" || phase == "standby" || phase == "waking"
+
+    val busy: Boolean
+        get() = phase == "downloading" || phase == "checking" || phase == "loading" || phase == "waking"
+
+    val fraction: Float?
+        get() {
+            val total = totalBytes ?: return null
+            if (total <= 0L) return null
+            return ((completedBytes ?: 0L).toFloat() / total).coerceIn(0f, 1f)
+        }
+}
+
+/** `speech/catalog`：识别器、当前选择、语言和录音上限。 */
+data class SpeechCatalog(
+    val providers: List<SpeechProvider>,
+    val providerId: String?,
+    val language: String?,
+    val maxAudioBytes: Int = 4 * 1024 * 1024,
+    val maxDurationSeconds: Int = 120,
+) {
+    val selected: SpeechProvider?
+        get() = providers.firstOrNull { it.id == providerId }
+
+    val usableProvider: SpeechProvider?
+        get() = selected?.takeIf { it.usable } ?: providers.firstOrNull { it.usable }
+
+    /** Host 接受的整段录音秒数（WAV 头也算在字节上限里）。 */
+    val maxSeconds: Int
+        get() = minOf((maxAudioBytes - 44).coerceAtLeast(0) / 32000, maxDurationSeconds).coerceAtLeast(1)
+
+    companion object {
+        fun fromJson(root: JSONObject?): SpeechCatalog? {
+            root ?: return null
+            val providers = mutableListOf<SpeechProvider>()
+            root.optJSONArray("providers")?.let { array ->
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val id = item.optString("id")
+                    if (id.isEmpty()) continue
+                    val preparation = item.optJSONObject("preparation")
+                    val download = preparation?.optJSONObject("download")
+                    val languages = mutableListOf<String>()
+                    item.optJSONArray("languages")?.let { list ->
+                        for (languageIndex in 0 until list.length()) {
+                            list.optString(languageIndex).takeIf { it.isNotEmpty() }?.let(languages::add)
+                        }
+                    }
+                    providers += SpeechProvider(
+                        id = id,
+                        name = item.optString("name").ifEmpty { id },
+                        location = item.optString("location").ifEmpty { "host-local" },
+                        phase = preparation?.optString("phase").orEmpty().ifEmpty { item.optString("phase", "ready") },
+                        languages = languages,
+                        completedBytes = (preparation?.anyOrNull("completedBytes") as? Number)?.toLong(),
+                        totalBytes = (preparation?.anyOrNull("totalBytes") as? Number)?.toLong(),
+                        message = preparation?.anyOrNull("message") as? String,
+                        downloadReason = download?.anyOrNull("reason") as? String,
+                    )
+                }
+            }
+            if (providers.isEmpty()) return null
+            val selection = root.optJSONObject("selection")
+            return SpeechCatalog(
+                providers = providers,
+                providerId = selection?.optString("providerId")?.takeIf { it.isNotEmpty() },
+                language = selection?.optString("language")?.takeIf { it.isNotEmpty() },
+                maxAudioBytes = root.optInt("maxAudioBytes", 4 * 1024 * 1024),
+                maxDurationSeconds = (root.anyOrNull("maxDurationSeconds") as? Number)?.toInt() ?: 120,
+            )
+        }
+    }
+}
 
 data class PermissionOption(
     val value: String,

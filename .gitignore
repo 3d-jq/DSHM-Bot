@@ -50,3 +50,6 @@ runtime-dev/
 # Kotlin 编译器临时文件
 .kotlin/
 
+# WorkBuddy 本地工作笔记（不属于项目源码）
+.workbuddy/
+

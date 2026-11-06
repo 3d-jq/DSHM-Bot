@@ -30,11 +30,35 @@ class DshRpcException(
  * 1) `GET /?token=` 换 `dsh-auth-*` cookie；
  * 2) `POST /api/bot` 发 Bot 请求；
  * 3) `GET /api/bot/feed` 读 SSE 事件流。
+ *
+ * 引擎重启后旧 cookie 会失效：所有请求统一走 [withAuthRetry]，401/403 时重新登录再试一次。
  */
 class DshClient(private val endpoint: RuntimeEndpoint) {
 
     @Volatile
     private var cookie: String? = null
+
+    /** 认证失效的内部信号：只在 401/403 时抛，用来触发一次「重新登录 + 重试」。 */
+    private class AuthExpiredException(code: Int) : Exception("DSH 认证已失效：HTTP $code")
+
+    /**
+     * 用当前 cookie 执行一次请求；引擎重启后旧 cookie 作废时（401/403），清掉 cookie
+     * 重新登录并重试一次。业务错误（HTTP 200 + ok=false）不重试，避免重复执行写操作。
+     */
+    private suspend fun <T> withAuthRetry(call: suspend (String) -> T): T {
+        val auth = cookie ?: login()
+        return try {
+            call(auth)
+        } catch (expired: AuthExpiredException) {
+            cookie = null
+            call(login())
+        }
+    }
+
+    /** 在读响应体之前判定认证失效，交给 [withAuthRetry] 处理。 */
+    private fun checkAuthExpired(code: Int) {
+        if (code == HTTP_UNAUTHORIZED || code == HTTP_FORBIDDEN) throw AuthExpiredException(code)
+    }
 
     suspend fun login(): String = withContext(Dispatchers.IO) {
         val url = URL(endpoint.baseUrl + "?token=" + endpoint.token)
@@ -61,36 +85,38 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
      */
     suspend fun bot(endpoint: String, payload: JSONObject = JSONObject()): JSONObject =
         withContext(Dispatchers.IO) {
-            val auth = cookie ?: login()
             val body = JSONObject()
                 .put("endpoint", endpoint)
                 .put("payload", payload)
-            val connection = (URL(this@DshClient.endpoint.baseUrl + "api/bot").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                connectTimeout = 15_000
-                readTimeout = 30_000
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Cookie", auth)
-            }
-            try {
-                connection.outputStream.use { it.write(body.toString().toByteArray()) }
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
-                require(code in 200..299) { "DS Bot 请求失败：HTTP $code $text" }
-                val response = JSONObject(text)
-                if (!response.optBoolean("ok", false)) {
-                    val error = response.optJSONObject("error")
-                    throw DshRpcException(
-                        code = error?.anyOrNull("code") as? String,
-                        message = error?.anyOrNull("message") as? String ?: "DS Bot 请求失败",
-                        details = error?.optJSONObject("details"),
-                    )
+            withAuthRetry { auth ->
+                val connection = (URL(this@DshClient.endpoint.baseUrl + "api/bot").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = 15_000
+                    readTimeout = 30_000
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Cookie", auth)
                 }
-                response.optJSONObject("value") ?: JSONObject()
-            } finally {
-                connection.disconnect()
+                try {
+                    connection.outputStream.use { it.write(body.toString().toByteArray()) }
+                    val code = connection.responseCode
+                    checkAuthExpired(code)
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+                    require(code in 200..299) { "DS Bot 请求失败：HTTP $code $text" }
+                    val response = JSONObject(text)
+                    if (!response.optBoolean("ok", false)) {
+                        val error = response.optJSONObject("error")
+                        throw DshRpcException(
+                            code = error?.anyOrNull("code") as? String,
+                            message = error?.anyOrNull("message") as? String ?: "DS Bot 请求失败",
+                            details = error?.optJSONObject("details"),
+                        )
+                    }
+                    response.optJSONObject("value") ?: JSONObject()
+                } finally {
+                    connection.disconnect()
+                }
             }
         }
 
@@ -126,6 +152,11 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                                 }
                             }
                         }
+                        // 服务端在最后一条事件后没补空行就关闭连接时，缓冲区里仍是一条完整事件，
+                        // 必须派发出去，否则 revision / live 会静默丢失。
+                        if (data.isNotEmpty()) {
+                            emit(BotFeedEvent(event, data.toString()))
+                        }
                     }
                 } finally {
                     connection.disconnect()
@@ -134,8 +165,9 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                 throw cancelled
             } catch (_: Exception) {
                 cookie = null
-                delay(2_000)
             }
+            // 无论异常断线还是被服务端正常关闭，都退避后再重连，避免立刻重连形成忙循环。
+            if (currentCoroutineContext().isActive) delay(RECONNECT_DELAY_MS)
         }
     }.flowOn(Dispatchers.IO)
 
@@ -146,53 +178,64 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
      * 响应：{"type":"server-response","rpcId":...,"result":{"ok":true,"value":...}}，
      * 失败为 ok=false（HTTP 仍 200）。返回 result.value。
      */
-    suspend fun rpc(method: String, args: JSONObject = JSONObject()): JSONObject =
-        rpcValue(method, args) as? JSONObject ?: JSONObject()
+    suspend fun rpc(
+        method: String,
+        args: JSONObject = JSONObject(),
+        timeoutMs: Int = 30_000,
+    ): JSONObject = rpcValue(method, args, timeoutMs) as? JSONObject ?: JSONObject()
 
     /** 同 [rpc]，但返回原始 value（数组/对象/布尔都保留），供列表类接口使用。 */
-    suspend fun rpcValue(method: String, args: JSONObject = JSONObject()): Any? = withContext(Dispatchers.IO) {
-        val auth = cookie ?: login()
+    suspend fun rpcValue(
+        method: String,
+        args: JSONObject = JSONObject(),
+        timeoutMs: Int = 30_000,
+    ): Any? = withContext(Dispatchers.IO) {
         val rpcId = java.util.UUID.randomUUID().toString()
         val envelope = JSONObject()
             .put("type", "client-request")
             .put("rpcId", rpcId)
             .put("method", method)
             .put("payload", JSONObject().put("args", args))
-        val connection = (URL(endpoint.baseUrl + "api/" + method).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Cookie", auth)
-        }
-        try {
-            connection.outputStream.use { it.write(envelope.toString().toByteArray()) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
-            require(code == 200) { "DSH RPC $method 失败：HTTP $code $text" }
-            val response = JSONObject(text)
-            val result = response.optJSONObject("result") ?: error("DSH RPC $method 缺少 result")
-            if (!result.optBoolean("ok", false)) {
-                val error = result.optJSONObject("error")
-                throw DshRpcException(
-                    code = error?.anyOrNull("code") as? String,
-                    message = error?.anyOrNull("message") as? String ?: "DSH RPC $method 失败：$result",
-                    details = error?.optJSONObject("details"),
-                )
+        withAuthRetry { auth ->
+            val connection = (URL(endpoint.baseUrl + "api/" + method).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 15_000
+                readTimeout = timeoutMs
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Cookie", auth)
             }
-            result.opt("value")
-        } finally {
-            connection.disconnect()
+            try {
+                connection.outputStream.use { it.write(envelope.toString().toByteArray()) }
+                val code = connection.responseCode
+                checkAuthExpired(code)
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+                require(code == 200) { "DSH RPC $method 失败：HTTP $code $text" }
+                val response = JSONObject(text)
+                val result = response.optJSONObject("result") ?: error("DSH RPC $method 缺少 result")
+                if (!result.optBoolean("ok", false)) {
+                    val error = result.optJSONObject("error")
+                    throw DshRpcException(
+                        code = error?.anyOrNull("code") as? String,
+                        message = error?.anyOrNull("message") as? String ?: "DSH RPC $method 失败：$result",
+                        details = error?.optJSONObject("details"),
+                    )
+                }
+                result.opt("value")
+            } finally {
+                connection.disconnect()
+            }
         }
     }
 
     /** 账号服务：对齐 dsh-Go account_api.dart 的 Remote 调用。 */
     suspend fun account(method: String, args: JSONObject = JSONObject()): JSONObject =
         rpc("account/$method", args)
+
+    private companion object {
+        const val HTTP_UNAUTHORIZED = 401
+        const val HTTP_FORBIDDEN = 403
+        const val RECONNECT_DELAY_MS = 2_000L
+    }
 }
-
-
-
-

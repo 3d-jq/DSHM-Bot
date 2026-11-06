@@ -1,5 +1,6 @@
 package com.dshm.bot.data.remote
 
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -14,6 +15,9 @@ import org.json.JSONObject
  * - `credentials/describe|set|unset` → API Key（值永远不回显）
  */
 class DshEngineSettingsRepository(private val client: DshClient) {
+
+    /** 语音输入用例，和设置 schema 解耦。 */
+    val speech: SpeechRepository = RemoteSpeechRepository(client)
 
     suspend fun describe(): SettingsDescription {
         val root = client.rpc("settings/describe")
@@ -85,16 +89,23 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         }
     }
 
-    /** 返回 null 表示 Host 接受；否则是错误文案。 */
-    suspend fun setPluginBundleEnabled(name: String, enabled: Boolean): String? {
+    /** Host 的结果：`application=restart-required` 表示已保存但需要重启引擎。 */
+    suspend fun setPluginBundleEnabled(name: String, enabled: Boolean): PluginToggleResult {
         val result = client.rpc(
             "pluginManager/setBundleEnabled",
             JSONObject().put("name", name).put("enabled", enabled),
         )
-        val error = result.optJSONObject("error") ?: return null
-        return (error.anyOrNull("diagnostic") as? String)
-            ?: (error.anyOrNull("code") as? String)
-            ?: "操作失败"
+        val error = result.optJSONObject("error")
+        val message = error?.let {
+            (it.anyOrNull("diagnostic") as? String)
+                ?: (it.anyOrNull("code") as? String)
+                ?: "操作失败"
+        }
+        val application = result.optString("application")
+        val needsRestart = application == "restart-required"
+        val succeeded = error == null &&
+            (application.isEmpty() || application in setOf("applied", "restart-required", "overridden"))
+        return PluginToggleResult(succeeded = succeeded, needsRestart = needsRestart, message = message)
     }
 
     suspend fun permissionCatalog(): PermissionCatalog {
@@ -198,4 +209,41 @@ class DshEngineSettingsRepository(private val client: DshClient) {
 
     /** 权限页：`permission` namespace 的 revision + 用户层 defaultPreset。 */
     suspend fun permissionSection(): SettingsNamespace? = describe().namespace("permission")
+
+    // ---- 语音输入（官方 speech-to-text-sensevoice 插件） ----
+
+    /** `speech/catalog`；插件关闭或旧 Host 没有该接口时返回 null。 */
+    suspend fun speechCatalog(): SpeechCatalog? = runCatching {
+        SpeechCatalog.fromJson(client.rpc("speech/catalog"))
+    }.getOrNull()
+
+    /** `speech/prepare`：让 Host 下载/校验/加载 SenseVoice 模型，立即返回。 */
+    suspend fun prepareSpeech(providerId: String) {
+        client.rpc("speech/prepare", JSONObject().put("providerId", providerId))
+    }
+
+    suspend fun cancelSpeechPreparation(providerId: String) {
+        client.rpc("speech/cancelPreparation", JSONObject().put("providerId", providerId), timeoutMs = 60_000)
+    }
+
+    suspend fun configureSpeech(providerId: String?, language: String?) {
+        val patch = JSONObject()
+        providerId?.takeIf { it.isNotBlank() }?.let { patch.put("providerId", it) }
+        language?.takeIf { it.isNotBlank() }?.let { patch.put("language", it) }
+        client.rpc("speech/configure", JSONObject().put("patch", patch))
+    }
+
+    /** `speech/transcribe`：16 kHz 单声道 PCM16 WAV → 最终文字。 */
+    suspend fun transcribeSpeech(wav: ByteArray): String {
+        val request = JSONObject().put(
+            "audioBase64",
+            Base64.encodeToString(wav, Base64.NO_WRAP),
+        )
+        val result = client.rpc(
+            "speech/transcribe",
+            JSONObject().put("request", request),
+            timeoutMs = 180_000,
+        )
+        return result.optString("text").trim()
+    }
 }

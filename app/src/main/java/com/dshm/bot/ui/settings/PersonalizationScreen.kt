@@ -34,7 +34,7 @@ fun rememberAgentsSummary(context: Context, refreshKey: Any? = Unit): String? {
     return summary
 }
 
-/** 个性化 › 个人偏好：引擎 rootfs 里的 `/root/.agents/AGENTS.md`。 */
+// 个性化：个人偏好、可视化回复、Agent 预设，对齐 dsh-Go PersonalizationPage。
 @Composable
 fun PersonalizationScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -74,7 +74,7 @@ fun PersonalizationScreen(onBack: () -> Unit) {
         } else {
             item {
                 SettingsSection(
-                    title = stringResource(R.string.personalization_section),
+                    title = stringResource(R.string.settings_personal_preference),
                     footer = stringResource(R.string.personalization_hint),
                 ) {
                     androidx.compose.foundation.layout.Column(
@@ -133,6 +133,24 @@ fun PersonalizationScreen(onBack: () -> Unit) {
                             }
                         }
                     },
+                )
+            }
+        }
+        // 可视化回复 / Agent 预设：依赖本机引擎与尚未接入的能力，标注不可用。
+        item {
+            SettingsSection(footer = stringResource(R.string.settings_engine_required)) {
+                SettingsRow(
+                    title = stringResource(R.string.settings_visual_replies),
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                    enabled = false,
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_agent_presets),
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                    enabled = false,
                 )
             }
         }

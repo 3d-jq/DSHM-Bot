@@ -23,6 +23,8 @@ data class DshmTypography(
     /** 设置页等整页标题：比普通顶栏更大，和 44dp 圆钮视觉平衡。 */
     val pageTitle: TextStyle = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
     val sheetTitle: TextStyle = TextStyle(fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold),
+    /** 表单字段标题，对齐 dsh-Go 的 labelLarge（14 / Medium）。 */
+    val formFieldLabel: TextStyle = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
     val sheetAction: TextStyle = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Normal),
     val emptyTitle: TextStyle = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
     val emptyHint: TextStyle = TextStyle(fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.Normal),

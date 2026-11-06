@@ -12,11 +12,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 
-/**
- * 引擎设置 Hub（对齐 dsh-Go `EngineSettingsHubPage`）：
- * 子代理 / Agent 循环 / 命令执行 → 打开 schema 表单；
- * 插件清单与插件自带设置 → 各自的 namespace。
- */
+// 引擎设置 Hub（对齐 dsh-Go EngineSettingsHubPage）：
+// 子代理 / Agent 循环 / 命令执行 → 打开 schema 表单；
+// 插件清单与插件自带设置 → 各自的 namespace。
 @Composable
 fun EngineSettingsScreen(
     viewModel: EngineSettingsViewModel,
@@ -51,7 +49,7 @@ fun EngineSettingsScreen(
                 SettingsError(state.error.orEmpty(), onRetry = viewModel::refresh)
             }
             state.description == null -> item {
-                SettingsEmpty(stringResource(R.string.info_engine_required))
+                SettingsEmpty(stringResource(R.string.settings_engine_required))
             }
             else -> {
                 item {
@@ -100,7 +98,7 @@ fun EngineSettingsScreen(
                         footer = if (state.plugins?.managementAvailable == false) {
                             stringResource(R.string.settings_plugins_read_only)
                         } else {
-                            null
+                            stringResource(R.string.settings_plugins_managed_hint)
                         },
                     ) {
                         SettingsRow(
@@ -134,7 +132,7 @@ fun EngineSettingsScreen(
     }
 }
 
-/** 单个 namespace 的 schema 表单页（引擎 Hub / 插件页共用）。 */
+// 单个 namespace 的 schema 表单页（引擎 Hub / 插件页共用）。
 @Composable
 fun EngineNamespaceScreen(
     viewModel: EngineSettingsViewModel,

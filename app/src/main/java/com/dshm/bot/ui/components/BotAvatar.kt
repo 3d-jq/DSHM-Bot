@@ -1,6 +1,7 @@
 package com.dshm.bot.ui.components
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -10,10 +11,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
@@ -24,8 +33,8 @@ import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.BotInks
 
 /**
- * Bot 头像：优先 DS Bot 自定义头像（data URL），其次 DS Bot 角色形状，最后才是
- * 颜色 + Lucide 占位图标。
+ * Bot 头像：优先自定义照片，其次 DS Bot 的角色形状（whale / star / moon / …），
+ * 群聊用群组图标。形状和颜色都由 Bot id 决定，和 DS Bot 客户端一致。
  */
 @Composable
 fun BotAvatar(
@@ -37,14 +46,20 @@ fun BotAvatar(
     avatarShape: String? = null,
 ) {
     val colors = Dshm.colors
-    // DS Bot 自带的鲸鱼头像已经做成圆形白底，不再垫颜色（否则会多出一圈蓝边）。
-    val dsIcon = avatarShape != null || glyph == AvatarGlyph.BOT
+    val shape = avatarShape
+    val whale = shape == "whale" || (shape == null && glyph == AvatarGlyph.BOT)
+    val drawing = shape != null && shape != "whale" && BotShapeSpecs.all.containsKey(shape)
     Box(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
             .background(
-                if (dsIcon) Color.Transparent else Color(BotInks.color(inkId, colors.isDark)),
+                when {
+                    avatarImage != null -> Color(BotInks.color(inkId, colors.isDark))
+                    // 所有角色头像统一白底圆圈，和 DS Bot 的白底鲸鱼头像同一套观感。
+                    whale || drawing -> colors.surface
+                    else -> Color(BotInks.color(inkId, colors.isDark))
+                },
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -64,13 +79,26 @@ fun BotAvatar(
                     )
                 },
             )
-            // DS Bot 自带的圆形头像：Bot 没有自定义照片/角色时直接用它。
-            avatarShape != null || glyph == AvatarGlyph.BOT -> Image(
+
+            whale -> Image(
                 painter = painterResource(R.drawable.ic_dsbot_avatar),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
+
+            drawing -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(size * 0.08f),
+                contentAlignment = Alignment.Center,
+            ) {
+                ShapeAvatar(
+                    shape = shape ?: BotShapeSpecs.FALLBACK,
+                    inkId = inkId,
+                )
+            }
+
             else -> Icon(
                 painter = painterResource(glyph.drawable()),
                 contentDescription = null,
@@ -80,6 +108,50 @@ fun BotAvatar(
         }
     }
 }
+
+/** 把 DS Bot 的 100×100 SVG 角色画到 Compose Canvas 上（身体、阴影、高光、眼睛）。 */
+@Composable
+private fun ShapeAvatar(shape: String, inkId: String?) {
+    val spec = BotShapeSpecs.all[shape] ?: BotShapeSpecs.all[BotShapeSpecs.FALLBACK] ?: return
+    val body = remember(spec.body) { spec.body.path() }
+    val shade = remember(spec.shade) { spec.shade?.path() }
+    val light = remember(spec.light) { spec.light?.path() }
+    val paints = remember(spec.paints) {
+        spec.paints.map { DrawnPaint(it.path.path(), it.color.toColor(), it.alpha) }
+    }
+    val ink = Color(BotInks.color(inkId, Dshm.colors.isDark))
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val factor = this.size.minDimension / 100f
+        scale(factor, factor, pivot = Offset.Zero) {
+            drawPath(body, ink)
+            paints.forEach { paint ->
+                drawPath(paint.path, paint.color.copy(alpha = paint.alpha))
+            }
+            shade?.let { drawPath(it, Color.Black.copy(alpha = 0.14f)) }
+            light?.let { drawPath(it, Color.White.copy(alpha = 0.16f)) }
+            spec.eyes.forEach { eye ->
+                if (eye.size < 5) return@forEach
+                rotate(degrees = eye[4], pivot = Offset(eye[0], eye[1])) {
+                    drawRoundRect(
+                        color = Color.Black,
+                        topLeft = Offset(eye[0] - eye[2] / 2f, eye[1] - eye[3] / 2f),
+                        size = Size(eye[2], eye[3]),
+                        cornerRadius = CornerRadius(eye[2] / 2f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun String.path(): Path = PathParser().apply { parsePathString(this@path) }.toPath()
+
+private data class DrawnPaint(val path: Path, val color: Color, val alpha: Float)
+
+private fun String.toColor(): Color = runCatching {
+    Color(android.graphics.Color.parseColor(this))
+}.getOrDefault(Color.Black)
 
 @DrawableRes
 private fun AvatarGlyph.drawable(): Int = when (this) {

@@ -7,13 +7,18 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// 构建参数统一从 gradle.properties 读，脚本里不写死时区 / 开关。
+val versionCodeZoneOffset = ZoneOffset.of(providers.gradleProperty("dshm.versionCodeZoneOffset").get())
+val lintWarningsAsErrors = providers.gradleProperty("dshm.lintWarningsAsErrors").get().toBoolean()
+
 /**
- * versionCode 取构建时间（UTC+8），保证每次打包安装都会被系统当成新版本：
+ * versionCode 取构建时间，保证每次打包安装都会被系统当成新版本：
  * 启动器缓存（图标、通知图标）按「包名 + versionCode」判断是否刷新。
+ * 时区由 gradle.properties 的 dshm.versionCodeZoneOffset 注入，脚本里不写死。
  * 编码： (年-2026)*1e8 + MMDDhhmm ，例如 2026-11-01 23:45 -> 11012345。
  */
-fun buildMinuteVersionCode(): Int {
-    val now = ZonedDateTime.now(ZoneOffset.ofHours(8))
+fun buildMinuteVersionCode(zoneOffset: ZoneOffset): Int {
+    val now = ZonedDateTime.now(zoneOffset)
     return (now.year - 2026) * 100_000_000 +
         now.monthValue * 1_000_000 +
         now.dayOfMonth * 10_000 +
@@ -32,7 +37,7 @@ android {
         applicationId = "com.dshm.bot"
         minSdk = 26
         targetSdk = 28
-        versionCode = buildMinuteVersionCode()
+        versionCode = buildMinuteVersionCode(versionCodeZoneOffset)
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -76,9 +81,13 @@ android {
     lint {
         abortOnError = true
         checkDependencies = true
-        warningsAsErrors = false
+        // 由 gradle.properties 的 dshm.lintWarningsAsErrors 控制：
+        // 存量 warning 清完后置 true，把「零 warning」变成构建期硬约束。
+        // 开启前先跑一次 :app:lintDebug，按报告逐条修净，不要直接翻开关卡住构建。
+        warningsAsErrors = lintWarningsAsErrors
         // 版本更新提示不是代码缺陷；依赖版本在 gradle/libs.versions.toml 里手动钉住，
         // 升级是独立任务（见 docs/roadmap.md），不阻塞每次构建。
+        // ExpiredTargetSdkVersion：targetSdk 28 是 PRoot 的取舍，见 docs/architecture.md。
         disable += setOf("GradleDependency", "NewerVersionAvailable", "ExpiredTargetSdkVersion")
     }
 

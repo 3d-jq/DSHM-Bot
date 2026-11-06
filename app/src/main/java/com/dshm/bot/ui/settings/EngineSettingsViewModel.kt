@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.CredentialStatus
 import com.dshm.bot.data.remote.DshClient
+import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.DshEngineSettingsRepository
 import com.dshm.bot.data.remote.DshRpcException
 import com.dshm.bot.data.remote.PROVIDER_NAMESPACE
@@ -19,11 +20,14 @@ import com.dshm.bot.data.remote.ProviderSettings
 import com.dshm.bot.data.remote.SettingsDescription
 import com.dshm.bot.data.remote.SettingsNamespace
 import com.dshm.bot.data.remote.SettingsOp
+import com.dshm.bot.data.remote.SpeechCatalog
 import com.dshm.bot.data.remote.deriveProviderKeyRef
 import com.dshm.bot.data.remote.jsonEquals
 import com.dshm.bot.data.remote.pathKey
 import com.dshm.bot.data.remote.providerRoutePattern
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,10 +59,18 @@ class EngineSettingsViewModel : ViewModel() {
         val fieldErrors: Map<String, String> = emptyMap(),
         val error: String? = null,
         val message: String? = null,
+        /** 插件开关已保存但需要重启本机引擎。 */
+        val pluginRestartNeeded: Boolean = false,
+        /** 官方语音输入插件的 `speech/catalog`。 */
+        val speech: SpeechCatalog? = null,
+        val speechLoading: Boolean = false,
+        val speechError: String? = null,
+        val speechPreparing: Boolean = false,
     )
 
     private var repository: DshEngineSettingsRepository? = null
     private var endpoint: RuntimeEndpoint? = null
+    private var speechPoll: Job? = null
     private val writeMutex = Mutex()
 
     private val _ui = MutableStateFlow(UiState())
@@ -67,7 +79,7 @@ class EngineSettingsViewModel : ViewModel() {
     fun setEndpoint(next: RuntimeEndpoint?) {
         if (endpoint == next && repository != null) return
         endpoint = next
-        repository = next?.let { DshEngineSettingsRepository(DshClient(it)) }
+        repository = next?.let { DshEngineSettingsRepository(DshClients.of(it)) }
         if (repository == null) {
             _ui.value = UiState(error = "本机引擎未运行")
         } else {
@@ -86,22 +98,116 @@ class EngineSettingsViewModel : ViewModel() {
     fun setPluginEnabled(name: String, enabled: Boolean, onDone: (String?) -> Unit = {}) {
         viewModelScope.launch {
             val repo = repository
-            val error = if (repo == null) {
-                "本机引擎未运行"
-            } else {
-                runCatching { repo.setPluginBundleEnabled(name, enabled) }
-                    .getOrElse { describeSettingsError(it) }
+            if (repo == null) {
+                onDone("本机引擎未运行")
+                return@launch
             }
-            if (error == null) {
+            val result = runCatching { repo.setPluginBundleEnabled(name, enabled) }.getOrNull()
+            val error = if (result == null) {
+                "插件操作失败"
+            } else if (!result.succeeded) {
+                result.message ?: "插件操作失败"
+            } else {
+                null
+            }
+            if (result?.succeeded == true) {
                 _ui.update { state ->
                     state.copy(
                         bundles = state.bundles.map {
                             if (it.name == name) it.copy(enabled = enabled) else it
                         },
+                        pluginRestartNeeded = state.pluginRestartNeeded || result.needsRestart,
                     )
                 }
+                if (result.needsRestart) refresh()
             }
             onDone(error)
+        }
+    }
+
+    fun clearPluginRestart() {
+        _ui.update { it.copy(pluginRestartNeeded = false) }
+    }
+
+    /** 读 `speech/catalog`；语音设置页打开时调用。 */
+    fun refreshSpeech() {
+        val repo = repository ?: return
+        speechPoll?.cancel()
+        _ui.update { it.copy(speechLoading = true, speechError = null) }
+        viewModelScope.launch {
+            val catalog = runCatching { repo.speech.catalog() }.getOrNull()
+            _ui.update {
+                it.copy(
+                    speechLoading = false,
+                    speech = catalog,
+                    speechError = if (catalog == null) "语音插件未启用，或本机引擎未运行" else null,
+                    speechPreparing = catalog?.providers?.any { provider -> provider.busy } == true,
+                )
+            }
+            if (catalog?.providers?.any { it.busy } == true) pollSpeech(repo)
+        }
+    }
+
+    /** `speech/prepare`：开始下载/准备 SenseVoice 模型，然后轮询进度。 */
+    fun prepareSpeech() {
+        val repo = repository ?: return
+        val catalog = _ui.value.speech
+        val provider = catalog?.selected ?: catalog?.providers?.firstOrNull()
+        if (provider == null) {
+            _ui.update { it.copy(speechError = "没有可用的语音识别器") }
+            return
+        }
+        _ui.update { it.copy(speechPreparing = true, speechError = null) }
+        viewModelScope.launch {
+            if (provider.languages.isNotEmpty() && catalog?.language.isNullOrBlank()) {
+                // 使用识别器的首选语言，避免 Host 选错语言。
+                runCatching { repo.speech.configure(provider.id, provider.languages.first()) }
+            }
+            runCatching { repo.speech.prepare(provider.id) }
+                .onFailure { error ->
+                    _ui.update {
+                        it.copy(
+                            speechPreparing = false,
+                            speechError = describeSettingsError(error),
+                        )
+                    }
+                }
+                .onSuccess {
+                    pollSpeech(repo)
+                }
+        }
+    }
+
+    fun cancelSpeechPreparation() {
+        val repo = repository ?: return
+        val provider = _ui.value.speech?.selected ?: _ui.value.speech?.providers?.firstOrNull() ?: return
+        viewModelScope.launch {
+            runCatching { repo.speech.cancelPreparation(provider.id) }
+            speechPoll?.cancel()
+            _ui.update { it.copy(speechPreparing = false) }
+            refreshSpeech()
+        }
+    }
+
+    private fun pollSpeech(repo: DshEngineSettingsRepository) {
+        speechPoll?.cancel()
+        speechPoll = viewModelScope.launch {
+            repeat(400) {
+                delay(1_500)
+                val catalog = runCatching { repo.speech.catalog() }.getOrNull() ?: return@repeat
+                _ui.update {
+                    it.copy(
+                        speech = catalog,
+                        speechLoading = false,
+                        speechPreparing = catalog.providers.any { provider -> provider.busy },
+                    )
+                }
+                if (catalog.providers.none { it.busy }) {
+                    _ui.update { it.copy(speechPreparing = false) }
+                    return@launch
+                }
+            }
+            _ui.update { it.copy(speechPreparing = false) }
         }
     }
 
@@ -300,9 +406,14 @@ class EngineSettingsViewModel : ViewModel() {
             onDone("API Key 不能为空")
             return
         }
+        // 安全调用会让「引擎未运行」静默变成保存成功，必须先显式判空。
+        val repo = repository ?: run {
+            onDone("本机引擎未运行")
+            return
+        }
         viewModelScope.launch {
             val error = runCatching {
-                repository?.setCredential(ref, value.trim())
+                repo.setCredential(ref, value.trim())
                 refreshCredentialsNow()
             }.exceptionOrNull()?.let(::describeSettingsError)
             onDone(error)
@@ -310,9 +421,13 @@ class EngineSettingsViewModel : ViewModel() {
     }
 
     fun clearCredential(ref: String, onDone: (String?) -> Unit = {}) {
+        val repo = repository ?: run {
+            onDone("本机引擎未运行")
+            return
+        }
         viewModelScope.launch {
             val error = runCatching {
-                repository?.unsetCredential(ref)
+                repo.unsetCredential(ref)
                 refreshCredentialsNow()
             }.exceptionOrNull()?.let(::describeSettingsError)
             onDone(error)

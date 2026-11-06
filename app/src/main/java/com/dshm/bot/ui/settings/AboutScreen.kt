@@ -9,7 +9,7 @@ import com.dshm.bot.BuildConfig
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 
-/** 关于：版本、DSH 版本、开源许可入口。 */
+// 关于：按 dsh-Go 帮助与关于组补充帮助/社区/诊断与更新项标注，保留版本、DSH 版本、开源许可入口。
 @Composable
 fun AboutScreen(
     dshVersion: String?,
@@ -21,6 +21,30 @@ fun AboutScreen(
         title = stringResource(R.string.settings_group_about),
         onBack = onBack,
     ) {
+        item {
+            SettingsSection {
+                SettingsRow(
+                    title = stringResource(R.string.settings_about_help),
+                    enabled = false,
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_about_community),
+                    enabled = false,
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_about_diagnostics),
+                    enabled = false,
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                )
+            }
+        }
         item {
             SettingsSection(title = stringResource(R.string.settings_about_app)) {
                 SettingsRow(
@@ -36,6 +60,20 @@ fun AboutScreen(
                 SettingsRow(
                     title = stringResource(R.string.settings_local_engine),
                     value = engineStatus,
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_about_check_update),
+                    enabled = false,
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_about_auto_update),
+                    enabled = false,
+                    subtitle = stringResource(R.string.settings_unavailable_hint),
+                    value = stringResource(R.string.settings_unavailable),
                 )
             }
         }
@@ -54,7 +92,7 @@ fun AboutScreen(
     }
 }
 
-/** 开源许可清单。 */
+// 开源许可清单。
 @Composable
 fun LicensesScreen(onBack: () -> Unit) {
     val entries = listOf(

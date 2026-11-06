@@ -6,7 +6,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.BotFeedEvent
-import com.dshm.bot.data.remote.DshClient
+import com.dshm.bot.data.remote.DshRemoteApi
+import com.dshm.bot.data.remote.RemoteDshApi
+import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.RemoteSpeechRepository
+import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -33,6 +37,15 @@ data class BotChatUiState(
     val error: String? = null,
     val entries: List<ChatEntry> = emptyList(),
     val sending: Boolean = false,
+    /** 消息已发出，等 Bot 的第一段回复；此时显示思考动画。 */
+    val waitingForReply: Boolean = false,
+    val botModel: String? = null,
+    val botWorkDir: String? = null,
+    /** 引擎报告的活动：更新记忆 / 思考 / 等待确认。 */
+    val botStatus: String? = null,
+    val botIsMain: Boolean = false,
+    /** DS Bot 的短暂「更新记忆」提示（3.2 秒后收回）。 */
+    val memoryNotice: Boolean = false,
     /** 正在流式输出的回复；非空时在列表末尾显示一个临时气泡。 */
     val streaming: String = "",
 )
@@ -52,7 +65,9 @@ class BotChatViewModel(
     private val endpoint: RuntimeEndpoint?,
 ) : ViewModel() {
 
-    private val client: DshClient? = endpoint?.let(::DshClient)
+    private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
+    /** 语音输入：页面/输入框只依赖接口。 */
+    val speechRepository: SpeechRepository? = endpoint?.let { RemoteSpeechRepository(DshClients.of(it)) }
     private val _uiState = MutableStateFlow(
         BotChatUiState(
             loading = endpoint == null,
@@ -65,16 +80,18 @@ class BotChatViewModel(
     private var sessionId: String? = null
     private var feedJob: Job? = null
     private var reloadJob: Job? = null
+    private var statusJob: Job? = null
+    private var memoryNoticeJob: Job? = null
     private var streamingAttempt: String? = null
     private var streamingText = ""
     private var loadedOnce = false
 
     init {
         if (client != null) {
-            viewModelScope.launch {
-                repairModelIfNeeded()
-                load(initial = true)
-            }
+            // 先读历史，别让补模型/探测目录的 state 调用挡住对话首屏。
+            load(initial = true)
+            viewModelScope.launch { repairModelIfNeeded() }
+            refreshBotStatus()
             feedJob = viewModelScope.launch {
                 client.feed().collect { event -> handleFeed(event) }
             }
@@ -105,6 +122,25 @@ class BotChatViewModel(
             .firstOrNull { it.optString("id") == botId }
             ?: return
         val current = bot.optString("model").ifEmpty { bot.optString("appliedModel") }
+        val modelName = buildString {
+            val models = state.optJSONArray("models")
+            if (models != null) {
+                for (index in 0 until models.length()) {
+                    val item = models.optJSONObject(index) ?: continue
+                    if (item.optString("ref") == current) {
+                        append(item.optString("name").ifEmpty { current })
+                        break
+                    }
+                }
+            }
+            if (isEmpty() && current.isNotEmpty()) append(current)
+        }.takeIf { it.isNotEmpty() }
+        _uiState.update {
+            it.copy(
+                botModel = modelName,
+                botWorkDir = bot.optString("workDir").takeIf { dir -> dir.isNotEmpty() },
+            )
+        }
         if (current.isNotEmpty() && current in served) return
         runCatching {
             connection.bot(
@@ -147,11 +183,12 @@ class BotChatViewModel(
                         .put("text", text),
                 )
             }.onSuccess {
-                _uiState.update { it.copy(sending = false) }
+                _uiState.update { it.copy(sending = false, waitingForReply = true) }
             }.onFailure { failure ->
                 _uiState.update { state ->
                     state.copy(
                         sending = false,
+                        waitingForReply = false,
                         error = failure.message ?: "send failed",
                         entries = state.entries.filterNot { it.id == localId },
                     )
@@ -233,7 +270,10 @@ class BotChatViewModel(
                         if (local >= 0) entries.removeAt(local)
                     }
                     entries.add(entry)
-                    state.copy(entries = entries)
+                    state.copy(
+                        entries = entries,
+                        waitingForReply = if (entry.kind == ChatEntryKind.USER) state.waitingForReply else false,
+                    )
                 }
             }
 
@@ -251,7 +291,10 @@ class BotChatViewModel(
                         viewModelScope.launch {
                             // 最终 message 通常先到并已清掉流式气泡；这里只兜底。
                             delay(200)
-                            if (streamingAttempt == attempt) clearStreaming()
+                            if (streamingAttempt == attempt) {
+                                clearStreaming()
+                                _uiState.update { it.copy(waitingForReply = false) }
+                            }
                         }
                     }
 
@@ -270,6 +313,49 @@ class BotChatViewModel(
             }
 
             "hello", "revision" -> scheduleReload()
+            "live" -> refreshBotStatus()
+        }
+    }
+
+    /** 读活动/记忆新闻，给名字胶囊下面那行状态用。 */
+    private fun refreshBotStatus() {
+        val connection = client ?: return
+        statusJob?.cancel()
+        statusJob = viewModelScope.launch {
+            delay(350)
+            val state = runCatching { connection.bot("state") }.getOrNull() ?: return@launch
+            val bots = state.optJSONArray("bots")
+            val bot = bots?.let { array ->
+                (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == botId }
+            }
+            val role = bot?.optString("role").orEmpty().trim()
+            val mainIds = buildSet {
+                state.optJSONArray("mainBotIds")?.let { array ->
+                    for (index in 0 until array.length()) {
+                        array.optString(index).takeIf { it.isNotEmpty() }?.let(::add)
+                    }
+                }
+            }
+            val isMain = botId in mainIds
+            val news = state.optJSONObject("memoryNews")?.optJSONObject(botId)
+            val newsAt = news?.optLong("at", 0L) ?: 0L
+            val recentNews = newsAt > 0L && System.currentTimeMillis() - newsAt < 5 * 60_000L
+            if (recentNews) {
+                _uiState.update { it.copy(memoryNotice = true) }
+                memoryNoticeJob?.cancel()
+                memoryNoticeJob = viewModelScope.launch {
+                    delay(3_200)
+                    _uiState.update { it.copy(memoryNotice = false) }
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    botStatus = role.takeIf { name -> name.isNotEmpty() }
+                        ?: if (isMain) "主 Bot" else "空闲",
+                    botIsMain = isMain,
+                )
+            }
         }
     }
 
