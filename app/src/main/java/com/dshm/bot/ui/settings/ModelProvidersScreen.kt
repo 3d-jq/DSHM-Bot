@@ -407,6 +407,7 @@ private fun ProviderEditorScreen(
     onSaved: () -> Unit,
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
+    @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
     val providers = viewModel.providers()
     val existing = draft.existing

@@ -112,7 +112,6 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.xz)
     implementation(libs.coil.compose)
-    implementation(libs.markdown.renderer)
     implementation(libs.security.crypto)
 
     implementation(platform(libs.compose.bom))

@@ -20,13 +20,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -68,6 +71,7 @@ import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -105,7 +109,7 @@ import kotlinx.coroutines.launch
  * Bot 对话页：原生 Compose 界面，数据来自本机 DSH 的 DS Bot 插件。
  * 顶栏：左「返回」、右「详情」两个悬浮圆钮；中间「头像 + 名字胶囊」作为详情入口。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun BotChatScreen(
     bot: ChatRowUi,
@@ -134,6 +138,16 @@ fun BotChatScreen(
     // （照 DeepSearch 的 bottomChromeHeight + bottomReserve）。
     var composerHeight by remember { mutableStateOf(56.dp) }
     val density = LocalDensity.current
+    // 输入法高度与系统导航栏高度分开取 —— 两个间隙要能各自调。
+    val imeInset = with(density) { WindowInsets.Companion.ime.getBottom(this).toDp() }
+    val systemBarInset = with(density) { WindowInsets.Companion.navigationBars.getBottom(this).toDp() }
+    // 输入框到系统底部的距离：输入法在场就用输入法的高度（它已含导航栏），
+    // 否则用系统导航栏的高度。再加一点自己的间隙。
+    val composerBottomInset = if (imeInset > systemBarInset) {
+        imeInset + Dshm.spacing.composerImeGap
+    } else {
+        systemBarInset + Dshm.spacing.composerBottomInset
+    }
     var chatError by remember { mutableStateOf<String?>(null) }
     val workingTransition = rememberInfiniteTransition(label = "bot-working")
     val workingPulse by workingTransition.animateFloat(
@@ -146,6 +160,9 @@ fun BotChatScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Dshm.colors.background,
+        // 底部 inset 我们自己算（见下面的 composerBottomInset）——
+        // Scaffold 默认会消费导航栏，再叠 imePadding() 就会多出一段间隙。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Column(
                 modifier = Modifier
@@ -215,10 +232,14 @@ fun BotChatScreen(
         // 悬浮式底部（照 DeepSearch 的 NmChatBottomLayout）：
         // 消息列表铺满整屏，输入框叠在它上面 —— 列表能穿过输入框下面看到内容，
         // 最后一条消息靠 contentPadding 避开输入框。
+        // 照 DeepSearch（ChatScreen.kt 2720）：整个内容区被输入法顶上去，
+        // 输入框自己再处理系统栏留白。两者分开，别手动混算。
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding(),
+                // 底部让位：输入法在场就用输入法的高度（它含导航栏），
+                // 否则用系统导航栏的高度。只算一次，别叠加。
+                .padding(bottom = composerBottomInset),
         ) {
             Box(
                 modifier = Modifier
@@ -252,8 +273,8 @@ fun BotChatScreen(
                         bot = bot,
                         fontScale = fontScale,
                         topPadding = innerPadding.calculateTopPadding(),
-                        // 最后一条消息避开输入框：输入框实测高度 + 一点留白
-                        // （照 DeepSearch 的 bottomChromeHeight + bottomReserve）。
+                        // 最后一条消息避开输入框（输入框浮在列表上面）：
+                        // 输入框高度 + 一点留白。
                         bottomPadding = composerHeight + Dshm.spacing.composerClearance,
                         working = working,
                         hasEarlier = state.hasEarlier,
@@ -311,10 +332,7 @@ fun BotChatScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .onSizeChanged { size -> composerHeight = with(density) { size.height.toDp() } }
-                    .padding(horizontal = Dshm.spacing.lg)
-                    .padding(
-                        bottom = innerPadding.calculateBottomPadding() + Dshm.spacing.composerBottomInset,
-                    ),
+                    .padding(horizontal = Dshm.spacing.lg),
             )
         }
     }
@@ -485,6 +503,8 @@ private fun ChatMessages(
                 top = topPadding + Dshm.spacing.md,
                 bottom = bottomPadding + Dshm.spacing.md,
             ),
+            // 气泡间距：同一个人的连续气泡 8dp；换人说话（用户→大模型）多留一点，
+            // 让「谁在说话」一眼能分出来。
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         ) {
             // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
@@ -503,6 +523,15 @@ private fun ChatMessages(
             }
             items(entries.size, key = { index -> entries[entries.size - 1 - index].id }) { index ->
                 val entry = entries[entries.size - 1 - index]
+                // 倒序：上一条在列表里是「更新的那条」（index - 1）。
+                val newer = entries.getOrNull(entries.size - index)
+                val turnsChanged = newer != null && newer.kind != entry.kind &&
+                    (newer.kind == ChatEntryKind.USER || entry.kind == ChatEntryKind.USER)
+                Column(
+                    modifier = Modifier.padding(
+                        top = if (turnsChanged) Dshm.spacing.turnGap - Dshm.spacing.sm else Dshm.spacing.xs,
+                    ),
+                ) {
                 when (entry.kind) {
                     ChatEntryKind.USER -> UserBubble(entry.text, fontScale)
                     ChatEntryKind.BOT -> BotBubble(
@@ -512,6 +541,7 @@ private fun ChatMessages(
                         fontScale = fontScale,
                     )
                     ChatEntryKind.EVENT -> EventLine(entry.text)
+                }
                 }
             }
             // 更早的历史：加载圈挂在列表顶部。

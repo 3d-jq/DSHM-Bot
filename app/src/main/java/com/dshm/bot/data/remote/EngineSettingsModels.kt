@@ -2,6 +2,7 @@ package com.dshm.bot.data.remote
 
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.ConsistentCopyVisibility
 
 /**
  * 引擎设置协议模型：对齐 dsh-Go `packages/dsh_client/lib/src/engine_settings_api.dart`。
@@ -742,6 +743,7 @@ data class CredentialStatus(
 )
 
 /** 一次 `settings/mutate` 的路径编辑。 */
+@ConsistentCopyVisibility
 data class SettingsOp private constructor(
     val op: String,
     val path: List<String>,

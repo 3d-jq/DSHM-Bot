@@ -58,10 +58,32 @@ data class DshmSpacing(
     val composerElevation: Dp = 12.dp,
     /** 1dp 细线（描边、分割线）。 */
     val hairline: Dp = 1.dp,
-    /** 输入框底部安全区留白（与键盘/系统栏之间）。 */
-    val composerBottomInset: Dp = 16.dp,
-    /** 最后一条消息与输入框之间的可见间隙（照 DeepSearch 约 18dp）。 */
-    val composerClearance: Dp = 18.dp,
+    /**
+     * 输入框离**系统导航栏**的额外留白。
+     *
+     * 系统栏本身由 `navigationBarsPadding()` 处理，这里只加一点自己的间隙。
+     */
+    val composerBottomInset: Dp = 8.dp,
+    /**
+     * 输入框离**输入法**的额外留白。
+     *
+     * 输入法的高度本身由外层的 `imePadding()` 顶开，这里只加一点自己的间隙。
+     */
+    val composerImeGap: Dp = 0.dp,
+    /**
+     * 最后一条气泡与输入框之间的可见间隙。
+     *
+     * 和气泡之间的间距一致 —— 气泡离输入框太远会看着「脱开」，
+     * 最后一颗气泡和输入框看起来不是一组的。
+     */
+    val composerClearance: Dp = 8.dp,
+    /**
+     * 一轮对话里「用户气泡 → 大模型气泡」之间的额外间距。
+     *
+     * 同一个人的连续气泡之间只留 [sm]（8dp），换人说话时多留一点，
+     * 让「谁在说话」一眼能分出来。
+     */
+    val turnGap: Dp = 12.dp,
     /** 状态点直径（dsh-Go 的 8dp 渠道状态点）。 */
     val statusDot: Dp = 8.dp,
     /** 快捷胶囊高度（容量预设、档位筛选）。 */
