@@ -569,6 +569,13 @@ data class PluginBundle(
     val error: String?,
     /** 包里的 Loader 条目（找「哪个包声明了某个预设」要用）。 */
     val rows: List<PluginBundleRow> = emptyList(),
+    /** 安装目标（`npm:pkg` / `git:...`）：重新安装与更新要用它。 */
+    val installTargetSpec: String? = null,
+    val installTargetVersion: String? = null,
+    /** `profile`（本机 profile）/ `installation`（装在引擎里）/ `missing`。 */
+    val availability: String = "profile",
+    /** 来源：`npm` / `git` / 本地路径。 */
+    val source: String? = null,
 ) {
     /** dsh-Go `bundleGroup`：第三方的归「已安装」，官方可选/已装的归「DSH 官方」。 */
     val group: PluginBundleGroup
@@ -621,6 +628,10 @@ fun parsePluginBundle(raw: JSONObject): PluginBundle {
             (error.anyOrNull("diagnostic") as? String) ?: (error.anyOrNull("code") as? String)
         },
         rows = rows,
+        installTargetSpec = raw.optJSONObject("installTarget")?.opt("spec") as? String,
+        installTargetVersion = raw.optJSONObject("installTarget")?.opt("version") as? String,
+        availability = raw.opt("availability") as? String ?: "profile",
+        source = raw.opt("source") as? String,
     )
 }
 

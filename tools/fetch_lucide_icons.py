@@ -71,6 +71,9 @@ ICONS = [
     "clock-3",
     "key-round",
     "chart-column",
+    "store",
+    "shopping-bag",
+    "package-search",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

@@ -48,6 +48,8 @@ import com.dshm.bot.ui.settings.AboutScreen
 import com.dshm.bot.ui.settings.AgentPresetsScreen
 import com.dshm.bot.ui.settings.AppearanceScreen
 import com.dshm.bot.ui.settings.BackgroundSettingsScreen
+import com.dshm.bot.ui.settings.PluginMarketScreen
+import com.dshm.bot.ui.settings.PluginMarketViewModel
 import com.dshm.bot.ui.settings.ScheduledTasksScreen
 import com.dshm.bot.ui.settings.ScheduledTasksViewModel
 import com.dshm.bot.ui.settings.ChatFontScreen
@@ -111,6 +113,7 @@ fun DshmBotApp(
     scheduledTasksViewModel: ScheduledTasksViewModel = viewModel(
         factory = ScheduledTasksViewModel.factory(LocalContext.current.applicationContext),
     ),
+    pluginMarketViewModel: PluginMarketViewModel = viewModel(factory = PluginMarketViewModel.factory()),
 ) {
     val appContext = LocalContext.current
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
@@ -126,6 +129,7 @@ fun DshmBotApp(
         val endpoint = (engineState as? RuntimeState.Running)?.endpoint
         accountViewModel.setEndpoint(endpoint)
         scheduledTasksViewModel.setEndpoint(endpoint)
+        pluginMarketViewModel.setEndpoint(endpoint)
         engineSettingsViewModel.setEndpoint(endpoint)
         homeViewModel.setEndpoint(endpoint)
     }
@@ -562,6 +566,12 @@ fun DshmBotApp(
                         viewModel = engineSettingsViewModel,
                         onBack = close,
                         onRestartEngine = engineViewModel::restart,
+                        onOpenMarket = {
+                            navForward = true
+                            settingsStack = ArrayList(settingsStack).apply {
+                                add(SettingsPageId.PLUGIN_MARKET.name)
+                            }
+                        },
                     )
 
                     SettingsPageId.ENGINE_PARAMS -> EngineSettingsScreen(
@@ -579,6 +589,11 @@ fun DshmBotApp(
                                 add(SettingsPageId.MODEL.name)
                             }
                         },
+                    )
+
+                    SettingsPageId.PLUGIN_MARKET -> PluginMarketScreen(
+                        viewModel = pluginMarketViewModel,
+                        onBack = close,
                     )
 
                     SettingsPageId.SCHEDULES -> ScheduledTasksScreen(

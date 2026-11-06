@@ -39,6 +39,9 @@ class LucideIconResourcesTest {
         "clock_3",
         "key_round",
         "chart_column",
+        "store",
+        "shopping_bag",
+        "package_search",
     )
 
     @Test

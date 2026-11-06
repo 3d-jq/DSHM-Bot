@@ -114,6 +114,27 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         )
     }
 
+    /**
+     * 卸载一个插件包（`pluginManager/removeBundle`）。
+     * 引擎会把它卸掉并恢复原来的文件。
+     */
+    suspend fun removeBundle(name: String) {
+        client.rpc("pluginManager/removeBundle", JSONObject().put("name", name), timeoutMs = 600_000)
+    }
+
+    /**
+     * 按安装目标重新安装一个包 —— 「更新」就是重装一遍。
+     * 安装要跑 pnpm 加激活，很慢，所以给 30 分钟。
+     */
+    suspend fun installBundle(spec: String, enabled: Boolean?) {
+        val options = JSONObject().apply { if (enabled != null) put("enabled", enabled) }
+        client.rpc(
+            "pluginManager/installBundle",
+            JSONObject().put("spec", spec).put("options", options),
+            timeoutMs = 30 * 60_000,
+        )
+    }
+
     /** `pluginManager/listBundles`：官方可选包 + 第三方已安装包（隐藏基础设施包）。 */
     suspend fun pluginBundles(): List<PluginBundle> {
         val array = client.rpcValue("pluginManager/listBundles") as? JSONArray ?: return emptyList()

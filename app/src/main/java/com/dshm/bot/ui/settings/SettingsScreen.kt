@@ -32,6 +32,7 @@ import com.dshm.bot.BuildConfig
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.domain.model.AppLanguage
+import com.dshm.bot.data.remote.PluginBundleGroup
 import com.dshm.bot.domain.model.ThemeMode
 
 /**
@@ -68,7 +69,11 @@ fun SettingsScreen(
     val permissionName = permission?.let { SettingsCopy.permissionLabel(it, language) }
     val webApi = engineState.description?.namespace("web")?.valueOf(listOf("searchProvider")) == "deepseek-search-api"
     val webServed = engineState.description?.served("web") == true
-    val pluginCount = engineState.bundles.takeIf { it.isNotEmpty() }?.count { it.installed }
+    // 数「页面上会显示的」那些：官方可选包（optional）和已装的都算 ——
+    // 只数 installed 的话，官方可选包一个都不算，计数会是 0。
+    val pluginCount = engineState.bundles
+        .takeIf { it.isNotEmpty() }
+        ?.count { it.group != PluginBundleGroup.HIDDEN }
     val batteryExempt = rememberBatteryExempt()
     val notificationsAllowed = rememberNotificationsAllowed()
     val accessibilityEnabled = rememberAccessibilityServiceEnabled()

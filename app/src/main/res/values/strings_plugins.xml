@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 插件市场（Plugin market） -->
+    <string name="plugins_market_title">Plugin market</string>
+    <string name="plugins_market_hint">Install and remove plugins · some plugins need an engine restart</string>
+    <string name="plugins_market_index_source">Index source</string>
+    <string name="plugins_market_index_none">No index configured</string>
+    <string name="plugins_market_loading">Reading the plugin index…</string>
+    <string name="plugins_market_empty">The plugin index has no plugins.</string>
+    <string name="plugins_market_error_engine">The local engine is not running.</string>
+    <string name="plugins_market_error_index">Could not read the plugin index: %1$s</string>
+    <string name="plugins_market_error_action">Operation failed: %1$s</string>
+    <string name="plugins_market_install">Install</string>
+    <string name="plugins_market_installing">Installing…</string>
+    <string name="plugins_market_uninstall">Uninstall</string>
+    <string name="plugins_market_installed">Installed</string>
+    <string name="plugins_market_not_installed">Not installed</string>
+    <string name="plugins_market_danger">Risky plugin</string>
+    <string name="plugins_market_danger_hint">The market flagged this plugin. Only install it if you trust the author.</string>
+    <string name="plugins_market_version">v%1$s</string>
+    <string name="plugins_market_author">by %1$s</string>
+    <string name="plugins_market_uninstall_confirm_title">Uninstall %1$s?</string>
+    <string name="plugins_market_uninstall_confirm_body">The plugin files will be removed from the engine profile. You can install it again later.</string>
+    <string name="plugins_market_build_approval_title">Approve build scripts?</string>
+    <string name="plugins_market_build_approval_body">These packages run build scripts while installing: %1$s</string>
+    <string name="plugins_market_build_approval_action">Approve and install</string>
+    <string name="plugins_market_cancel_install">Cancel the running install</string>
+    <string name="plugins_market_cancel_install_hint">Installing runs pnpm and can take a while.</string>
+    <string name="plugins_market_installed_notice">%1$s is installed.</string>
+    <string name="plugins_market_removed_notice">%1$s was removed.</string>
+    <string name="plugins_market_install_cancelled">The install was cancelled.</string>
+    <string name="plugins_market_install_too_late">The install already finished; it cannot be cancelled.</string>
+</resources>

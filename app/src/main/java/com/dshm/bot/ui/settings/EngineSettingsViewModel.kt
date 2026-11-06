@@ -750,6 +750,46 @@ class EngineSettingsViewModel : ViewModel() {
      * （网页客户端 dsh-go-bridge / dsh-app）私有状态的、并且被**已启用的
      * 组合包声明**的，才算插件设置。
      */
+    /**
+     * 卸载一个插件包（`pluginManager/removeBundle`）。
+     * 引擎会把它卸掉并恢复原来的文件；有些包标了「只读 / 由配置文件固定」，卸不掉。
+     */
+    fun removeBundle(name: String, onDone: (String?) -> Unit = {}) {
+        val repo = repository ?: run {
+            onDone("本机引擎未运行")
+            return
+        }
+        viewModelScope.launch {
+            val error = runCatching { repo.removeBundle(name) }
+                .exceptionOrNull()
+                ?.let { describeSettingsError(it) }
+            if (error == null) refresh()
+            onDone(error)
+        }
+    }
+
+    /**
+     * 重新安装一个插件包 —— 「更新」就是按它的安装目标重装一遍。
+     */
+    fun reinstallBundle(bundle: PluginBundle, onDone: (String?) -> Unit = {}) {
+        val repo = repository ?: run {
+            onDone("本机引擎未运行")
+            return
+        }
+        val spec = bundle.installTargetSpec
+        if (spec.isNullOrBlank()) {
+            onDone("这个包没有安装来源，无法重新安装")
+            return
+        }
+        viewModelScope.launch {
+            val error = runCatching { repo.installBundle(spec, enabled = bundle.enabled) }
+                .exceptionOrNull()
+                ?.let { describeSettingsError(it) }
+            if (error == null) refresh()
+            onDone(error)
+        }
+    }
+
     fun pluginConfigNamespaces(): List<SettingsNamespace> {
         val description = _ui.value.description ?: return emptyList()
         val declared = PluginConfigScope.declaredRows(

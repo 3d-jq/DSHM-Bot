@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 插件市场（Plugin market） -->
+    <string name="plugins_market_title">插件市场</string>
+    <string name="plugins_market_hint">安装与卸载插件 · 部分插件需要重启引擎</string>
+    <string name="plugins_market_index_source">索引来源</string>
+    <string name="plugins_market_index_none">没有配置索引</string>
+    <string name="plugins_market_loading">正在读取插件索引…</string>
+    <string name="plugins_market_empty">插件索引里没有插件。</string>
+    <string name="plugins_market_error_engine">本机引擎未运行。</string>
+    <string name="plugins_market_error_index">读取插件索引失败：%1$s</string>
+    <string name="plugins_market_error_action">操作失败：%1$s</string>
+    <string name="plugins_market_install">安装</string>
+    <string name="plugins_market_installing">安装中…</string>
+    <string name="plugins_market_uninstall">卸载</string>
+    <string name="plugins_market_installed">已安装</string>
+    <string name="plugins_market_not_installed">未安装</string>
+    <string name="plugins_market_danger">有风险</string>
+    <string name="plugins_market_danger_hint">市场检查标记了这个插件，确认作者可信再安装。</string>
+    <string name="plugins_market_version">v%1$s</string>
+    <string name="plugins_market_author">作者 %1$s</string>
+    <string name="plugins_market_uninstall_confirm_title">卸载 %1$s？</string>
+    <string name="plugins_market_uninstall_confirm_body">插件文件会从引擎 profile 里删掉，之后可以再装回来。</string>
+    <string name="plugins_market_build_approval_title">批准构建脚本？</string>
+    <string name="plugins_market_build_approval_body">这些包安装时会执行构建脚本：%1$s</string>
+    <string name="plugins_market_build_approval_action">批准并安装</string>
+    <string name="plugins_market_cancel_install">取消正在进行的安装</string>
+    <string name="plugins_market_cancel_install_hint">安装要跑 pnpm，可能要很久。</string>
+    <string name="plugins_market_installed_notice">%1$s 已安装。</string>
+    <string name="plugins_market_removed_notice">%1$s 已卸载。</string>
+    <string name="plugins_market_install_cancelled">安装已取消。</string>
+    <string name="plugins_market_install_too_late">安装已经结束，取消不了。</string>
+</resources>

@@ -1,15 +1,20 @@
 package com.dshm.bot.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,11 +35,14 @@ fun PluginsScreen(
     viewModel: EngineSettingsViewModel,
     onBack: () -> Unit,
     onRestartEngine: () -> Unit = {},
+    onOpenMarket: () -> Unit = {},
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
     var openNs by rememberSaveable { mutableStateOf<String?>(null) }
     var actionError by rememberSaveable { mutableStateOf<String?>(null) }
+    var busy by rememberSaveable { mutableStateOf<String?>(null) }
+    var uninstallFor by remember { mutableStateOf<PluginBundle?>(null) }
 
     val namespace = openNs?.let { viewModel.namespace(it) }
     if (namespace != null) {
@@ -131,22 +139,79 @@ fun PluginsScreen(
                     }
                 }
 
-                // 更新 / 卸载：dsh-Go 有、当前版本未接入，明确标注不可用
+                // 插件市场：远程索引 + 安装
                 item {
-                    SettingsSection(title = stringResource(R.string.settings_plugins_update_section)) {
+                    SettingsSection {
                         SettingsRow(
-                            title = stringResource(R.string.settings_plugins_update),
-                            enabled = false,
-                            subtitle = stringResource(R.string.settings_unavailable_hint),
-                            value = stringResource(R.string.settings_unavailable),
+                            title = stringResource(R.string.plugins_market_title),
+                            icon = R.drawable.ic_lucide_store,
+                            subtitle = stringResource(R.string.plugins_market_hint),
+                            onClick = onOpenMarket,
                         )
-                        SettingsRowDivider()
-                        SettingsRow(
-                            title = stringResource(R.string.settings_plugins_uninstall),
-                            enabled = false,
-                            subtitle = stringResource(R.string.settings_unavailable_hint),
-                            value = stringResource(R.string.settings_unavailable),
-                        )
+                    }
+                }
+
+                // 更新 / 卸载：重新安装 = 按安装目标重装一遍；卸载 = removeBundle
+                val operable = bundles.filter {
+                    it.removable || !it.installTargetSpec.isNullOrBlank()
+                }
+                if (operable.isNotEmpty()) {
+                    item {
+                        SettingsSection(
+                            title = stringResource(R.string.settings_plugins_update_section),
+                            footer = stringResource(R.string.settings_plugins_update_hint),
+                        ) {
+                            operable.forEachIndexed { index, bundle ->
+                                if (index > 0) SettingsRowDivider()
+                                val title = bundle.meta?.title?.resolve(language)?.takeIf { it.isNotBlank() }
+                                    ?: SettingsCopy.humanize(bundle.name)
+                                SettingsRow(
+                                    title = title,
+                                    subtitle = bundle.version?.let { version ->
+                                        "$version · ${bundle.source ?: bundle.availability}"
+                                    },
+                                    trailing = {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
+                                            if (!bundle.installTargetSpec.isNullOrBlank()) {
+                                                TextButton(
+                                                    onClick = {
+                                                        busy = bundle.name
+                                                        actionError = null
+                                                        viewModel.reinstallBundle(bundle) { error ->
+                                                            busy = null
+                                                            if (error != null) actionError = error
+                                                        }
+                                                    },
+                                                    enabled = busy == null,
+                                                ) {
+                                                    Text(
+                                                        text = stringResource(R.string.settings_plugins_update),
+                                                        style = Dshm.typography.rowPreview,
+                                                        color = if (busy == null) {
+                                                            Dshm.colors.accent
+                                                        } else {
+                                                            Dshm.colors.textTertiary
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                            if (bundle.removable) {
+                                                TextButton(
+                                                    onClick = { uninstallFor = bundle },
+                                                    enabled = busy == null,
+                                                ) {
+                                                    Text(
+                                                        text = stringResource(R.string.settings_plugins_uninstall),
+                                                        style = Dshm.typography.rowPreview,
+                                                        color = Dshm.colors.danger,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -171,6 +236,47 @@ fun PluginsScreen(
                 }
             }
         }
+    }
+
+    // 卸载确认
+    val removing = uninstallFor
+    if (removing != null) {
+        AlertDialog(
+            onDismissRequest = { uninstallFor = null },
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(R.string.plugins_uninstall_title, removing.name),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.plugins_uninstall_hint),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    uninstallFor = null
+                    busy = removing.name
+                    actionError = null
+                    viewModel.removeBundle(removing.name) { error ->
+                        busy = null
+                        if (error != null) actionError = error
+                    }
+                }) {
+                    Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { uninstallFor = null }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
     }
 }
 
