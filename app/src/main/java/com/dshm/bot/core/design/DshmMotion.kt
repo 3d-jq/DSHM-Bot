@@ -22,4 +22,7 @@ object DshmMotion {
 
     /** 旧页面在切换时向左退的距离占屏宽的比例（iOS 视差）。 */
     const val outgoingParallaxFraction: Float = 0.25f
+
+    /** 控件内的小动画时长（分段滑块、胶囊选中态）。 */
+    const val quickMs: Int = 200
 }

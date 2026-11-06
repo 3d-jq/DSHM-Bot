@@ -8,9 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,24 +42,48 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmMotion
+import com.dshm.bot.data.remote.ModelDefaults
 import com.dshm.bot.data.remote.PROVIDER_NAMESPACE
 import com.dshm.bot.data.remote.ProviderHealth
 import com.dshm.bot.data.remote.ProviderHealthEvaluator
+import com.dshm.bot.data.remote.ProviderModelSpec
 import com.dshm.bot.data.remote.ProviderProfile
 import com.dshm.bot.data.remote.deriveProviderKeyRef
 import com.dshm.bot.data.remote.providerRoutePattern
 
-/** 渠道子页面目标：列表 → 详情 → 编辑，对齐 dsh-Go 的三层页面。 */
+/** 渠道子页面目标：列表 → 详情 → 编辑 → 模型设置。 */
 private sealed interface ProviderTarget {
-    data class Detail(val profile: ProviderProfile) : ProviderTarget
+    data class Detail(val route: String) : ProviderTarget
+
     data class Editor(val existing: ProviderProfile?) : ProviderTarget
+
+    /**
+     * 模型设置页。
+     *
+     * @param writes true = 从渠道详情页进来，保存直接写引擎；
+     *   false = 从渠道表单进来，完成后把规格交回表单，跟着表单一起保存。
+     */
+    data class Model(
+        val route: String,
+        val model: ProviderModelSpec,
+        val writes: Boolean,
+    ) : ProviderTarget
 }
+
+/** 渠道表单的草稿：放在页面外壳里，模型设置页返回时才有地方回填。 */
+private data class ProviderDraft(
+    val existing: ProviderProfile?,
+    val displayName: String,
+    val api: String,
+    val baseUrl: String,
+    val apiKey: String,
+    val showKey: Boolean,
+    val models: List<ProviderModelSpec>,
+)
 
 private val providerProtocols = listOf(
     "openai-completions" to "OpenAI",
@@ -82,6 +104,7 @@ fun ModelProvidersScreen(
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
     var page by remember { mutableStateOf<ProviderTarget?>(null) }
+    var draft by remember { mutableStateOf<ProviderDraft?>(null) }
     val providers = viewModel.providers()
     val customRoutes = providers.profiles.map { it.route }.toSet()
     // DeepSeek 的渠道由上面的官方卡统一表示，不再重复列 deepseek-official/account。
@@ -131,6 +154,7 @@ fun ModelProvidersScreen(
             when (target) {
                 is ProviderTarget.Detail -> "detail"
                 is ProviderTarget.Editor -> "editor"
+                is ProviderTarget.Model -> "model"
                 null -> "providers"
             },
         ) {
@@ -138,16 +162,81 @@ fun ModelProvidersScreen(
             if (current is ProviderTarget.Detail) {
                 ProviderDetailPage(
                     viewModel = viewModel,
-                    profile = current.profile,
+                    route = current.route,
                     onBack = { page = null },
-                    onEdit = { page = ProviderTarget.Editor(current.profile) },
+                    onEdit = { profile ->
+                        draft = ProviderDraft(
+                            existing = profile,
+                            displayName = profile?.displayName.orEmpty(),
+                            api = profile?.api ?: providerProtocols.first().first,
+                            baseUrl = profile?.baseUrl.orEmpty(),
+                            apiKey = "",
+                            showKey = false,
+                            models = profile?.models.orEmpty(),
+                        )
+                        page = ProviderTarget.Editor(profile)
+                    },
+                    onOpenModel = { model ->
+                        page = ProviderTarget.Model(current.route, model, writes = true)
+                    },
                 )
             } else if (current is ProviderTarget.Editor) {
-                ProviderEditorScreen(
-                    viewModel = viewModel,
-                    existing = current.existing,
-                    language = language,
-                    onBack = { page = null },
+                val currentDraft = draft
+                if (currentDraft == null) {
+                    page = null
+                } else {
+                    ProviderEditorScreen(
+                        viewModel = viewModel,
+                        draft = currentDraft,
+                        onDraftChange = { draft = it },
+                        language = language,
+                        reduceMotion = reduceMotion,
+                        onBack = { page = null },
+                        onOpenModel = { route, model ->
+                            page = ProviderTarget.Model(route, model, writes = false)
+                        },
+                        onSaved = { page = null },
+                    )
+                }
+            } else if (current is ProviderTarget.Model) {
+                val ui = remember(current) { mutableStateOf(ModelSaveUi()) }
+                ProviderModelPage(
+                    model = current.model,
+                    defaults = ModelDefaults.of(
+                        providers.profiles.firstOrNull { it.route == current.route },
+                    ),
+                    submitLabel = stringResource(
+                        if (current.writes) R.string.action_save else R.string.settings_model_item_done,
+                    ),
+                    saving = ui.value.saving,
+                    error = ui.value.error,
+                    reduceMotion = reduceMotion,
+                    onSubmit = { spec ->
+                        if (current.writes) {
+                            // 详情页进来：直接写引擎，写完回到详情页。
+                            ui.value = ui.value.copy(saving = true, error = null)
+                            viewModel.saveProviderModel(current.route, spec) { failure ->
+                                ui.value = ui.value.copy(saving = false, error = failure)
+                                if (failure == null) page = ProviderTarget.Detail(current.route)
+                            }
+                        } else {
+                            // 表单进来：交回表单，跟着表单一起保存。
+                            val editing = draft
+                            if (editing != null) {
+                                draft = editing.copy(
+                                    models = editing.models.map { if (it.id == spec.id) spec else it },
+                                )
+                                page = ProviderTarget.Editor(editing.existing)
+                            }
+                        }
+                    },
+                    onBack = {
+                        page = if (current.writes) {
+                            ProviderTarget.Detail(current.route)
+                        } else {
+                            ProviderTarget.Editor(draft?.existing)
+                        }
+                    },
                 )
             } else {
                 SettingsPage(
@@ -264,7 +353,7 @@ fun ModelProvidersScreen(
                                                 }
                                             },
                                             onClick = {
-                                                page = ProviderTarget.Detail(profile)
+                                                page = ProviderTarget.Detail(profile.route)
                                             },
                                         )
                                     }
@@ -274,6 +363,15 @@ fun ModelProvidersScreen(
                                         enabled = state.description?.namespace(PROVIDER_NAMESPACE)?.writable == true,
                                         trailing = {},
                                         onClick = {
+                                            draft = ProviderDraft(
+                                                existing = null,
+                                                displayName = "",
+                                                api = providerProtocols.first().first,
+                                                baseUrl = "",
+                                                apiKey = "",
+                                                showKey = false,
+                                                models = emptyList(),
+                                            )
                                             page = ProviderTarget.Editor(null)
                                         },
                                     )
@@ -291,35 +389,38 @@ fun ModelProvidersScreen(
     }
 }
 
+/** 模型设置页的保存状态（保存中 / 错误）。 */
+private data class ModelSaveUi(
+    val saving: Boolean = false,
+    val error: String? = null,
+)
+
 @Composable
 private fun ProviderEditorScreen(
     viewModel: EngineSettingsViewModel,
-    existing: ProviderProfile?,
+    draft: ProviderDraft,
+    onDraftChange: (ProviderDraft) -> Unit,
     language: String,
+    reduceMotion: Boolean,
     onBack: () -> Unit,
+    onOpenModel: (route: String, model: ProviderModelSpec) -> Unit,
+    onSaved: () -> Unit,
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     val providers = viewModel.providers()
-    var displayName by remember(existing) { mutableStateOf(existing?.displayName.orEmpty()) }
-    var api by remember(existing) { mutableStateOf(existing?.api ?: providerProtocols.first().first) }
-    var baseUrl by remember(existing) { mutableStateOf(existing?.baseUrl.orEmpty()) }
-    // 模型按 dsh-Go 逐条管理（可单独删除、可手动添加），不再塞进一个多行文本框。
-    var models by remember(existing) { mutableStateOf(existing?.models?.map { it.id }.orEmpty()) }
-    var apiKey by remember(existing) { mutableStateOf("") }
-    var showKey by remember { mutableStateOf(false) }
+    val existing = draft.existing
     var saving by remember { mutableStateOf(false) }
     var discovering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
-    var discovered by remember { mutableStateOf<Int?>(null) }
     // dsh-Go：拿到模型后先弹层勾选，不直接覆盖清单。
     var pickerCandidates by remember { mutableStateOf<List<String>>(emptyList()) }
     var showModelPicker by remember { mutableStateOf(false) }
     var showManualModel by remember { mutableStateOf(false) }
     var manualModelId by remember { mutableStateOf("") }
     var manualModelError by remember { mutableStateOf<String?>(null) }
-    val route = existing?.route ?: derivedRoute(displayName, providers.profiles)
+    val route = existing?.route ?: derivedRoute(draft.displayName, providers.profiles)
     val keyRef = existing?.apiKeyEnv ?: deriveProviderKeyRef(route)
     val credential = state.credentials[keyRef]
     val configured = credential?.configured == true
@@ -334,20 +435,20 @@ private fun ProviderEditorScreen(
 
     fun attemptSave() {
         error = null
-        val modelIds = models
-        if (apiKey.isNotBlank() && !keyWritable) {
+        val models = draft.models
+        if (draft.apiKey.isNotBlank() && !keyWritable) {
             error = credentialLockedText
             return
         }
-        if (displayName.isBlank()) {
+        if (draft.displayName.isBlank()) {
             error = enterNameText
             return
         }
-        if (baseUrl.isBlank()) {
+        if (draft.baseUrl.isBlank()) {
             error = enterBaseUrlText
             return
         }
-        if (modelIds.isEmpty()) {
+        if (models.isEmpty()) {
             error = needModelText
             return
         }
@@ -358,15 +459,15 @@ private fun ProviderEditorScreen(
         saving = true
         viewModel.saveProvider(
             route = route,
-            displayName = displayName,
-            api = api,
-            baseUrl = baseUrl,
-            modelIds = modelIds,
-            apiKey = apiKey,
+            displayName = draft.displayName,
+            api = draft.api,
+            baseUrl = draft.baseUrl,
+            models = models,
+            apiKey = draft.apiKey,
             existing = existing,
         ) { failure ->
             saving = false
-            if (failure == null) onBack() else error = failure
+            if (failure == null) onSaved() else error = failure
         }
     }
 
@@ -404,9 +505,9 @@ private fun ProviderEditorScreen(
             SettingsSection(title = stringResource(R.string.settings_model_basic)) {
                 ProviderField(
                     label = stringResource(R.string.settings_model_name),
-                    value = displayName,
+                    value = draft.displayName,
                     onValueChange = {
-                        displayName = it
+                        onDraftChange(draft.copy(displayName = it))
                         error = null
                     },
                     placeholder = stringResource(R.string.settings_model_name_hint),
@@ -424,7 +525,11 @@ private fun ProviderEditorScreen(
                     ),
                 )
                 Spacer(Modifier.height(Dshm.spacing.xs))
-                ProtocolSelector(selected = api, onSelect = { api = it })
+                ProtocolSelector(
+                    selected = draft.api,
+                    onSelect = { onDraftChange(draft.copy(api = it)) },
+                    reduceMotion = reduceMotion,
+                )
                 Spacer(Modifier.height(Dshm.spacing.lg))
             }
         }
@@ -433,13 +538,13 @@ private fun ProviderEditorScreen(
             SettingsSection(title = stringResource(R.string.settings_model_connection)) {
                 ProviderField(
                     label = stringResource(R.string.settings_model_base_url),
-                    value = baseUrl,
+                    value = draft.baseUrl,
                     onValueChange = {
-                        baseUrl = it
+                        onDraftChange(draft.copy(baseUrl = it))
                         error = null
                     },
                     // dsh-Go：Anthropic 协议不带 /v1，其余协议带。
-                    placeholder = if (api == "anthropic-messages") {
+                    placeholder = if (draft.api == "anthropic-messages") {
                         "https://api.example.com"
                     } else {
                         "https://api.example.com/v1"
@@ -451,9 +556,9 @@ private fun ProviderEditorScreen(
                 // 「显示 / 隐藏」在输入框内，两框宽度一致才不显得歪。
                 ProviderField(
                     label = stringResource(R.string.settings_model_api_key_label),
-                    value = apiKey,
+                    value = draft.apiKey,
                     onValueChange = {
-                        apiKey = it
+                        onDraftChange(draft.copy(apiKey = it))
                         error = null
                     },
                     placeholder = if (configured) {
@@ -462,7 +567,7 @@ private fun ProviderEditorScreen(
                         "sk-…"
                     },
                     keyboardType = KeyboardType.Password,
-                    visualTransformation = if (showKey) {
+                    visualTransformation = if (draft.showKey) {
                         VisualTransformation.None
                     } else {
                         PasswordVisualTransformation()
@@ -475,7 +580,7 @@ private fun ProviderEditorScreen(
                             style = Dshm.typography.settingsRowSubtitle,
                             color = Dshm.colors.accent,
                             modifier = Modifier.clickable {
-                                clipboard.getText()?.text?.trim()?.let { apiKey = it }
+                                clipboard.getText()?.text?.trim()?.let { onDraftChange(draft.copy(apiKey = it)) }
                                 error = null
                             },
                         )
@@ -485,9 +590,9 @@ private fun ProviderEditorScreen(
                         // 最小尺寸 48dp，会把这个输入框整体撑高，两个框就高矮不一了。
                         Icon(
                             painter = painterResource(
-                                if (showKey) R.drawable.ic_lucide_eye_off else R.drawable.ic_lucide_eye,
+                                if (draft.showKey) R.drawable.ic_lucide_eye_off else R.drawable.ic_lucide_eye,
                             ),
-                            contentDescription = if (showKey) {
+                            contentDescription = if (draft.showKey) {
                                 stringResource(R.string.settings_model_hide_key)
                             } else {
                                 stringResource(R.string.settings_model_show_key)
@@ -495,7 +600,7 @@ private fun ProviderEditorScreen(
                             tint = Dshm.colors.textTertiary,
                             modifier = Modifier
                                 .size(Dshm.spacing.topBarIcon)
-                                .clickable { showKey = !showKey },
+                                .clickable { onDraftChange(draft.copy(showKey = !draft.showKey)) },
                         )
                     },
                 )
@@ -520,10 +625,10 @@ private fun ProviderEditorScreen(
         item {
             SettingsSection(
                 // dsh-Go：模型为空时标题是「模型」，有模型时是「模型 · N」。
-                title = if (models.isEmpty()) {
+                title = if (draft.models.isEmpty()) {
                     stringResource(R.string.settings_model_models)
                 } else {
-                    stringResource(R.string.settings_model_detail_models, models.size)
+                    stringResource(R.string.settings_model_detail_models, draft.models.size)
                 },
             ) {
                 SettingsRow(
@@ -549,7 +654,7 @@ private fun ProviderEditorScreen(
                     onClick = {
                         error = null
                         discovering = true
-                        viewModel.discoverModels(baseUrl, api, apiKey) { ids, failure ->
+                        viewModel.discoverModels(draft.baseUrl, draft.api, draft.apiKey) { ids, failure ->
                             discovering = false
                             if (failure != null) {
                                 error = failure
@@ -561,15 +666,22 @@ private fun ProviderEditorScreen(
                     },
                 )
                 SettingsRowDivider()
-                // dsh-Go 的模型卡只有「获取模型」+ 已选模型（逐条可删）+「手动添加」，
+                // dsh-Go 的模型卡只有「获取模型」+ 已选模型（逐条可删、可打开设置）+「手动添加」，
                 // 没有「暂无模型」占位行，也没有独立的「模型设置」行。
-                models.forEach { id ->
+                draft.models.forEach { model ->
                     SettingsRowDivider()
                     SettingsRow(
-                        title = id,
+                        title = model.label,
                         icon = R.drawable.ic_lucide_bot,
+                        subtitle = ProviderModelSummary(
+                            model,
+                            ModelDefaults.of(existing),
+                        ).takeIf { it.isNotEmpty() },
+                        onClick = { onOpenModel(route, model) },
                         trailing = {
-                            IconButton(onClick = { models = models - id }) {
+                            IconButton(onClick = {
+                                onDraftChange(draft.copy(models = draft.models - model))
+                            }) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_lucide_x),
                                     contentDescription = stringResource(R.string.action_delete),
@@ -598,11 +710,22 @@ private fun ProviderEditorScreen(
 
         if (existing != null && viewModel.providers().removable(existing.route)) {
             item {
-                SettingsDangerButton(
-                    text = stringResource(R.string.settings_model_delete),
-                    enabled = !saving,
-                    onClick = { confirmDelete = true },
-                )
+                // 删除渠道单独一张卡，按钮居中（和详情页同一套）。
+                SettingsSection {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Spacer(Modifier.height(Dshm.spacing.sm))
+                        SettingsDangerButton(
+                            text = stringResource(R.string.settings_model_delete),
+                            icon = R.drawable.ic_lucide_trash_2,
+                            enabled = !saving,
+                            onClick = { confirmDelete = true },
+                        )
+                        Spacer(Modifier.height(Dshm.spacing.sm))
+                    }
+                }
             }
         }
     }
@@ -610,11 +733,15 @@ private fun ProviderEditorScreen(
     if (showModelPicker) {
         ModelPickerSheet(
             candidates = pickerCandidates,
-            alreadyAdded = models.toSet(),
+            alreadyAdded = draft.models.map { it.id }.toSet(),
             onConfirm = { picked ->
                 // dsh-Go：发现到的模型是追加进渠道，不是覆盖已有清单。
-                models = (models + picked).distinct()
-                discovered = models.size
+                onDraftChange(
+                    draft.copy(
+                        models = (draft.models + picked.map { ProviderModelSpec.create(it) })
+                            .distinctBy { it.id },
+                    ),
+                )
                 showModelPicker = false
             },
             onDismiss = { showModelPicker = false },
@@ -658,9 +785,11 @@ private fun ProviderEditorScreen(
                         val id = manualModelId.trim()
                         when {
                             id.isEmpty() -> Unit
-                            id in models -> manualModelError = duplicateText
+                            id in draft.models.map { it.id } -> manualModelError = duplicateText
                             else -> {
-                                models = models + id
+                                onDraftChange(
+                                    draft.copy(models = draft.models + ProviderModelSpec.create(id)),
+                                )
                                 manualModelId = ""
                                 manualModelError = null
                                 showManualModel = false
@@ -704,7 +833,7 @@ private fun ProviderEditorScreen(
                     saving = true
                     viewModel.deleteProvider(existing.route) { failure ->
                         saving = false
-                        if (failure == null) onBack() else error = failure
+                        if (failure == null) onSaved() else error = failure
                     }
                 }) {
                     Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
@@ -746,88 +875,20 @@ private fun protocolLabel(api: String?): String = when (api) {
 }
 
 @Composable
-private fun ProviderField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String? = null,
-    keyboardType: KeyboardType = KeyboardType.Text,
-    visualTransformation: VisualTransformation = VisualTransformation.None,
-    /** 字段组顶部留白；每张卡的第一个字段用 md（dsh-Go 的 FormFieldGroup 上 12dp）。 */
-    top: Dp = Dshm.spacing.none,
-    /** 标签行右侧的控件（如「粘贴」）。 */
-    trailing: (@Composable () -> Unit)? = null,
-    /** 输入框内的尾部控件（如 API Key 的显示/隐藏）。 */
-    suffix: (@Composable () -> Unit)? = null,
+private fun ProtocolSelector(
+    selected: String,
+    onSelect: (String) -> Unit,
+    reduceMotion: Boolean = false,
 ) {
-    // dsh-Go 的 FormFieldGroup / FormFieldBlock：
-    // 字段组顶部 12dp、标题缩进 4dp、标题到字段 4dp、字段下方 16dp。
-    Column(
-        modifier = Modifier.padding(horizontal = Dshm.spacing.lg, vertical = top),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = label,
-                style = Dshm.typography.formFieldLabel,
-                color = Dshm.colors.textPrimary,
-                // dsh-Go：字段标题缩进 4dp，与字段边缘对齐。
-                modifier = Modifier.padding(start = Dshm.spacing.xs),
-            )
-            if (trailing != null) {
-                Spacer(Modifier.width(Dshm.spacing.sm))
-                trailing()
-            }
-        }
-        Spacer(Modifier.height(Dshm.spacing.xs))
-        SettingsInput(
-            value = value,
-            onValueChange = onValueChange,
-            placeholder = placeholder,
-            keyboardType = keyboardType,
-            visualTransformation = visualTransformation,
-            trailing = suffix,
-        )
-        Spacer(Modifier.height(Dshm.spacing.lg))
-    }
-}
-
-@Composable
-private fun ProtocolSelector(selected: String, onSelect: (String) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Dshm.spacing.lg)
-            .clip(RoundedCornerShape(Dshm.radius.md))
-            .background(Dshm.colors.surfaceMuted)
-            .padding(Dshm.spacing.xxs),
-        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
-    ) {
-        providerProtocols.forEach { (wire, label) ->
-            val active = selected == wire
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(Dshm.radius.sm))
-                    .then(
-                        if (active) {
-                            Modifier.background(Dshm.colors.surface)
-                                .border(Dshm.spacing.hairline, Dshm.colors.divider, RoundedCornerShape(Dshm.radius.sm))
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .clickable { onSelect(wire) }
-                    .padding(vertical = Dshm.spacing.sm),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = label,
-                    style = Dshm.typography.rowPreview,
-                    color = if (active) Dshm.colors.textPrimary else Dshm.colors.textSecondary,
-                )
-            }
-        }
-    }
+    SettingsSegmentedPill(
+        options = providerProtocols.map { it.second },
+        selected = protocolLabel(selected),
+        onSelect = { label ->
+            providerProtocols.firstOrNull { it.second == label }?.let { onSelect(it.first) }
+        },
+        modifier = Modifier.padding(horizontal = Dshm.spacing.lg),
+        reduceMotion = reduceMotion,
+    )
 }
 
 /** dsh-Go 的「添加渠道」行图标：主色 + 号，无箭头。 */

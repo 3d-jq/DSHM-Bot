@@ -23,6 +23,9 @@ class LucideIconResourcesTest {
         "chevron_right",
         "square_user",
         "arrow_up",
+        "pencil",
+        "check",
+        "trash_2",
     )
 
     @Test

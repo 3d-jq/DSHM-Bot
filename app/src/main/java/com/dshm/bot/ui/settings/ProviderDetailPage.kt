@@ -24,11 +24,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.remote.ModelDefaults
 import com.dshm.bot.data.remote.ProviderHealth
 import com.dshm.bot.data.remote.ProviderHealthEvaluator
 import com.dshm.bot.data.remote.ProviderModelSpec
 import com.dshm.bot.data.remote.ProviderProfile
 import com.dshm.bot.data.remote.deriveProviderKeyRef
+import com.dshm.bot.ui.components.FloatingIconButton
 
 /**
  * 渠道详情页，对齐 dsh-Go `app/lib/ui/providers/provider_detail_page.dart`：
@@ -39,27 +41,46 @@ import com.dshm.bot.data.remote.deriveProviderKeyRef
 @Composable
 fun ProviderDetailPage(
     viewModel: EngineSettingsViewModel,
-    profile: ProviderProfile,
+    route: String,
     onBack: () -> Unit,
-    onEdit: () -> Unit,
+    onEdit: (ProviderProfile?) -> Unit,
+    onOpenModel: (ProviderModelSpec) -> Unit,
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
-    val keyRef = profile.apiKeyEnv ?: deriveProviderKeyRef(profile.route)
+    // 按 route 现取渠道，模型设置页写完引擎后这一页立刻能看到新值。
+    val profile = viewModel.providers().profiles.firstOrNull { it.route == route }
+    val keyRef = profile?.apiKeyEnv ?: deriveProviderKeyRef(route)
     val keyStored = state.credentials[keyRef]?.configured == true
-    val health = ProviderHealthEvaluator.evaluate(profile, keyStored)
     var testing by remember { mutableStateOf(false) }
     var testPassed by remember { mutableStateOf<Int?>(null) }
     var testFailed by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
 
+    if (profile == null) {
+        // 渠道被删掉了（或者引擎还没读回来）：回列表，不留一个空壳页面。
+        SettingsPage(
+            title = stringResource(R.string.settings_model),
+            onBack = onBack,
+        ) {
+            item { SettingsHint(stringResource(R.string.settings_model_empty)) }
+        }
+        return
+    }
+
+    val health = ProviderHealthEvaluator.evaluate(profile, keyStored)
+
     SettingsPage(
         title = profile.label,
         onBack = onBack,
         actions = {
-            TextButton(onClick = onEdit, enabled = !deleting) {
-                Text(stringResource(R.string.settings_model_detail_edit), color = Dshm.colors.accent)
-            }
+            // dsh-Go：顶栏右侧是一个图标按钮（铅笔），不是文字链接。
+            FloatingIconButton(
+                icon = R.drawable.ic_lucide_pencil,
+                contentDescription = stringResource(R.string.settings_model_detail_edit),
+                onClick = { onEdit(profile) },
+                enabled = !deleting,
+            )
         },
     ) {
         item {
@@ -97,7 +118,7 @@ fun ProviderDetailPage(
             item {
                 SettingsPrimaryButton(
                     text = stringResource(R.string.settings_model_detail_enter_key),
-                    onClick = onEdit,
+                    onClick = { onEdit(profile) },
                 )
             }
         }
@@ -119,7 +140,7 @@ fun ProviderDetailPage(
                     } else {
                         stringResource(R.string.settings_model_detail_api_key_missing)
                     },
-                    onClick = onEdit,
+                    onClick = { onEdit(profile) },
                 )
                 SettingsRowDivider()
                 SettingsRow(
@@ -180,13 +201,13 @@ fun ProviderDetailPage(
                     profile.models.forEachIndexed { index, model ->
                         if (index > 0) SettingsRowDivider()
                         SettingsRow(
-                            title = model.name ?: model.id,
+                            title = model.label,
                             icon = R.drawable.ic_lucide_bot,
-                            subtitle = modelSummary(model),
-                            // 单模型设置（上下文 / 最大输出 / 输入类型 / 思考档位）要引擎的
-                            // modelOverrides 写入能力，本项目未接入，先标清楚而不是假装能编辑。
-                            value = stringResource(R.string.settings_unavailable),
-                            enabled = false,
+                            subtitle = ProviderModelSummary(
+                                model,
+                                ModelDefaults.of(profile),
+                            ).takeIf { it.isNotEmpty() },
+                            onClick = { onOpenModel(model) },
                         )
                     }
                 }
@@ -194,16 +215,21 @@ fun ProviderDetailPage(
         }
 
         item {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Spacer(Modifier.height(Dshm.spacing.lg))
-                SettingsDangerButton(
-                    text = stringResource(R.string.settings_model_delete),
-                    enabled = !deleting,
-                    onClick = { confirmDelete = true },
-                )
+            // 删除渠道单独一张卡，按钮居中（和其它卡片同一套圆角与留白）。
+            SettingsSection {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(Modifier.height(Dshm.spacing.sm))
+                    SettingsDangerButton(
+                        text = stringResource(R.string.settings_model_delete),
+                        icon = R.drawable.ic_lucide_trash_2,
+                        enabled = !deleting,
+                        onClick = { confirmDelete = true },
+                    )
+                    Spacer(Modifier.height(Dshm.spacing.sm))
+                }
             }
         }
     }
@@ -253,15 +279,4 @@ private fun healthLabel(health: ProviderHealth): String = when (health) {
     ProviderHealth.MISSING_KEY -> stringResource(R.string.settings_model_health_missing_key)
     ProviderHealth.MISCONFIGURED -> stringResource(R.string.settings_model_health_misconfigured)
     ProviderHealth.DISABLED -> stringResource(R.string.settings_model_health_disabled)
-}
-
-@Composable
-private fun modelSummary(model: ProviderModelSpec): String {
-    val parts = mutableListOf<String>()
-    model.contextWindow?.let { parts += stringResource(R.string.settings_model_detail_context, it) }
-    model.maxTokens?.let { parts += stringResource(R.string.settings_model_detail_max_output, it) }
-    if (model.input.isNotEmpty()) {
-        parts += stringResource(R.string.settings_model_detail_input_types, model.input.joinToString("/"))
-    }
-    return parts.joinToString(" · ")
 }

@@ -62,6 +62,16 @@ data class DshmSpacing(
     val petInsetBottom: Dp = 96.dp,
     /** 状态点直径（dsh-Go 的 8dp 渠道状态点）。 */
     val statusDot: Dp = 8.dp,
+    /** 快捷胶囊高度（容量预设、档位筛选）。 */
+    val capsuleHeight: Dp = 32.dp,
+    /** 分段控件高度。 */
+    val segmentedHeight: Dp = 36.dp,
+    /** 分段滑块与底槽四周的间隙。 */
+    val segmentedInset: Dp = 3.dp,
+    /** 档位行高度（思考深度多选）。 */
+    val levelRowHeight: Dp = 44.dp,
+    /** 勾选圆点直径。 */
+    val selectionTick: Dp = 20.dp,
 )
 
 val LocalDshmSpacing = staticCompositionLocalOf { DshmSpacing() }

@@ -55,6 +55,9 @@ ICONS = [
     "x",
     "square",
     "audio-lines",
+    "pencil",
+    "check",
+    "trash-2",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

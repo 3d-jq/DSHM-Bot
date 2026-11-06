@@ -85,7 +85,8 @@ fun WebHostScreen(endpoint: RuntimeEndpoint?, modifier: Modifier = Modifier) {
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
-                            databaseEnabled = true
+                            // WebSettings.setDatabaseEnabled 自 API 33 起废弃（Web SQL 已下线），
+                            // 页面存储由上面的 DOM Storage 承担，这里不再调用。
                             mediaPlaybackRequiresUserGesture = false
                             useWideViewPort = true
                             loadWithOverviewMode = true

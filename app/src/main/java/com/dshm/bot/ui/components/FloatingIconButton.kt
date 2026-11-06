@@ -25,6 +25,7 @@ fun FloatingIconButton(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier = modifier
@@ -37,13 +38,19 @@ fun FloatingIconButton(
             )
             .clip(CircleShape)
             .background(Dshm.colors.surface)
-            .clickable(onClick = onClick),
+            .then(
+                if (enabled) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             painter = painterResource(icon),
             contentDescription = contentDescription,
-            tint = Dshm.colors.iconTint,
+            tint = if (enabled) Dshm.colors.iconTint else Dshm.colors.textTertiary,
             modifier = Modifier.size(Dshm.spacing.topBarIcon),
         )
     }

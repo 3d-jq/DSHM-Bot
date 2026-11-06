@@ -712,15 +712,105 @@ data class SettingsOp private constructor(
 // 模型渠道（llm-pi-ai）
 // ---------------------------------------------------------------------------
 
+/**
+ * `llm-pi-ai` 适配器认识的全部思考档位（按升级顺序），对齐 dsh-Go
+ * `piAiThinkingLevels`。`off` 表示「不思考」，其余档位是思考深度。
+ */
+val piAiThinkingLevels = listOf("off", "minimal", "low", "medium", "high", "xhigh", "max")
+
+/** 适配器在模型没声明时的默认上下文长度（`DEFAULT_CONTEXT_WINDOW`）。 */
+const val PIAI_DEFAULT_CONTEXT_WINDOW = 262144
+
+/** 适配器在模型没声明时的默认最大输出（`DEFAULT_MAX_TOKENS`）。 */
+const val PIAI_DEFAULT_MAX_TOKENS = 32768
+
+/**
+ * 一个渠道的 `models` 列表里的一条模型规格，对齐 dsh-Go
+ * `packages/dsh_client/lib/src/providers_api.dart` 的 `ProviderModelSpec`。
+ *
+ * - 建模字段：`id` / `name` / `contextWindow` / `maxTokens` / `input`；
+ * - 未建模字段（`compat`、`reasoningEfforts` …）原样放在 [extra] 里回写，
+ *   编辑一次不会把引擎自己写的字段弄丢；
+ * - `reasoningEfforts` 是一张「思考档位 → 实际发送值」的表，
+ *   引擎认识的档位之外的会被丢掉（否则适配器下次启动会校验失败）。
+ */
 data class ProviderModelSpec(
     val id: String,
     val name: String?,
     val contextWindow: Int?,
     val maxTokens: Int?,
     val input: List<String>,
-    private val raw: JSONObject,
+    /** 未建模字段，原样回写。 */
+    val extra: JSONObject = JSONObject(),
 ) {
-    fun toJson(): JSONObject = JSONObject(raw.toString()).apply {
+    /** 选择器上的名字；没有名字就用 id。 */
+    val label: String get() = name?.takeIf { it.isNotBlank() } ?: id
+
+    /**
+     * `reasoningEfforts`：这个模型提供的思考档位 → 实际发送的值。
+     * null 表示没有声明（模型不思考）；`off` 的值是 null（不发送任何东西）。
+     */
+    val reasoningEfforts: Map<String, String?>?
+        get() {
+            val raw = extra.opt("reasoningEfforts")
+            if (raw !is JSONObject) return null
+            val levels = LinkedHashMap<String, String?>()
+            val keys = raw.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = raw.opt(key)
+                when {
+                    value == null || value == JSONObject.NULL -> levels[key] = null
+                    value is String -> levels[key] = value
+                    else -> return null
+                }
+            }
+            return levels
+        }
+
+    /** 提供的思考档位（按升级顺序）；不思考的模型是空表。 */
+    val thinkingLevels: List<String>
+        get() {
+            val efforts = reasoningEfforts ?: return emptyList()
+            return piAiThinkingLevels.filter { efforts.containsKey(it) }
+        }
+
+    /** 是否有思考档位（只声明 `off` 不算思考）。 */
+    val thinks: Boolean get() = thinkingLevels.any { it != "off" }
+
+    /** 是否接受图片；没声明输入类型时用渠道默认值。 */
+    fun acceptsImages(routeDefault: List<String> = listOf("text")): Boolean =
+        (if (input.isEmpty()) routeDefault else input).contains("image")
+
+    /**
+     * 换一份 `reasoningEfforts`。空集合表示「不声明任何档位」；
+     * 只剩 `off` 时按适配器规则显式关闭思考（写 `false`），
+     * 因为一个只有 `off` 的表会被适配器判为非法。
+     */
+    fun withReasoningEfforts(levels: Iterable<String>?): ProviderModelSpec {
+        val before = reasoningEfforts.orEmpty()
+        val wanted = levels?.toSet().orEmpty()
+        val next = JSONObject(extra.toString())
+        if (wanted.isEmpty()) {
+            // 已经是显式关闭就保留，其它情况整个字段去掉。
+            if (next.opt("reasoningEfforts") != false) next.remove("reasoningEfforts")
+        } else {
+            val known = JSONObject()
+            for (level in piAiThinkingLevels) {
+                if (!wanted.contains(level)) continue
+                val value: Any? = when {
+                    before.containsKey(level) && (before[level] != null || level == "off") -> before[level]
+                    level == "off" -> JSONObject.NULL
+                    else -> level
+                }
+                known.put(level, value)
+            }
+            next.put("reasoningEfforts", knownReasoningEfforts(known))
+        }
+        return copy(extra = next)
+    }
+
+    fun toJson(): JSONObject = JSONObject(extra.toString()).apply {
         put("id", id)
         if (name.isNullOrBlank()) remove("name") else put("name", name)
         if (contextWindow == null) remove("contextWindow") else put("contextWindow", contextWindow)
@@ -729,22 +819,67 @@ data class ProviderModelSpec(
     }
 
     companion object {
+        /** 建模字段；不在表里的键都进 [extra]。 */
+        private val modelFields = setOf("id", "name", "contextWindow", "maxTokens", "input")
+
         fun fromJson(raw: JSONObject): ProviderModelSpec? {
             val id = raw.optString("id").trim()
             if (id.isEmpty()) return null
             val input = raw.optJSONArray("input")?.toStringList().orEmpty()
+            val extra = JSONObject()
+            val keys = raw.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (key in modelFields) continue
+                val value = raw.opt(key)
+                extra.put(key, if (key == "reasoningEfforts") knownReasoningEfforts(value) else value)
+            }
             return ProviderModelSpec(
                 id = id,
                 name = raw.anyOrNull("name") as? String,
                 contextWindow = (raw.anyOrNull("contextWindow") as? Number)?.toInt(),
                 maxTokens = (raw.anyOrNull("maxTokens") as? Number)?.toInt(),
                 input = input,
-                raw = raw,
+                extra = extra,
             )
         }
 
-        fun create(id: String): ProviderModelSpec =
-            ProviderModelSpec(id, null, null, null, emptyList(), JSONObject().put("id", id))
+        fun create(id: String): ProviderModelSpec = ProviderModelSpec(id, null, null, null, emptyList())
+
+        /**
+         * 只保留适配器认识的档位。剩下的只有 `off` 时显式关闭思考：
+         * 空表或只有 `off` 的表是非法的，而整个字段不写又可能继承
+         * 目录里的档位（导入的模型并不支持）。
+         */
+        fun knownReasoningEfforts(raw: Any?): Any? {
+            if (raw !is JSONObject) return raw
+            val known = JSONObject()
+            val keys = raw.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (key !in piAiThinkingLevels) continue
+                known.put(key, raw.opt(key))
+            }
+            val names = known.keys().asSequence().toList()
+            return if (names.any { it != "off" }) known else false
+        }
+    }
+}
+
+/**
+ * 渠道给「没声明字段的模型」的默认值，对齐 dsh-Go 的 `ModelDefaults`。
+ */
+data class ModelDefaults(
+    val contextWindow: Int = PIAI_DEFAULT_CONTEXT_WINDOW,
+    val maxTokens: Int = PIAI_DEFAULT_MAX_TOKENS,
+    val input: List<String> = listOf("text"),
+) {
+    companion object {
+        fun of(profile: ProviderProfile?): ModelDefaults = ModelDefaults(
+            contextWindow = profile?.defaultContextWindow ?: PIAI_DEFAULT_CONTEXT_WINDOW,
+            maxTokens = profile?.defaultMaxTokens ?: PIAI_DEFAULT_MAX_TOKENS,
+            input = profile?.defaultInput?.takeIf { it.isNotEmpty() } ?: listOf("text"),
+        )
     }
 }
 
@@ -755,6 +890,12 @@ data class ProviderProfile(
     val baseUrl: String?,
     val apiKeyEnv: String?,
     val models: List<ProviderModelSpec>,
+    /** 渠道给「没声明字段的模型」的默认上下文长度。 */
+    val defaultContextWindow: Int? = null,
+    /** 渠道给「没声明字段的模型」的默认最大输出。 */
+    val defaultMaxTokens: Int? = null,
+    /** 渠道给「没声明字段的模型」的默认输入类型。 */
+    val defaultInput: List<String>? = null,
     private val raw: JSONObject,
 ) {
     val label: String get() = displayName?.takeIf { it.isNotBlank() } ?: route
@@ -782,6 +923,9 @@ data class ProviderProfile(
                 baseUrl = raw.anyOrNull("baseURL") as? String,
                 apiKeyEnv = raw.anyOrNull("apiKeyEnv") as? String,
                 models = models,
+                defaultContextWindow = (raw.anyOrNull("defaultContextWindow") as? Number)?.toInt(),
+                defaultMaxTokens = (raw.anyOrNull("defaultMaxTokens") as? Number)?.toInt(),
+                defaultInput = raw.optJSONArray("defaultInput")?.toStringList(),
                 raw = raw,
             )
         }

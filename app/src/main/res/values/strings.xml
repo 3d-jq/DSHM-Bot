@@ -571,6 +571,34 @@
     <string name="settings_model_add_manual_duplicate">This model is already added</string>
     <string name="settings_model_fetching">Fetching models…</string>
     <string name="account_auto_start_hint">Opening the app starts the engine automatically</string>
+    <!-- 模型设置页（对齐 dsh-Go provider_model_page） -->
+    <string name="settings_model_item_settings">Model settings</string>
+    <string name="settings_model_item_basic">Basic information</string>
+    <string name="settings_model_item_name">Name</string>
+    <string name="settings_model_item_limits">Token limits</string>
+    <string name="settings_model_item_context">Context length</string>
+    <string name="settings_model_item_context_value">Context %1$s</string>
+    <string name="settings_model_item_max_output">Max output</string>
+    <string name="settings_model_item_capabilities">Capabilities</string>
+    <string name="settings_model_item_input_type">Input type</string>
+    <string name="settings_model_item_input_text">Text</string>
+    <string name="settings_model_item_input_text_image">Text + image</string>
+    <string name="settings_model_item_thinking">Thinking</string>
+    <string name="settings_model_item_levels">Available levels</string>
+    <string name="settings_model_item_need_level">Pick at least one level</string>
+    <string name="settings_model_item_default_size">Default %1$s</string>
+    <string name="settings_model_item_token_invalid">Enter a token count such as 128K</string>
+    <string name="settings_model_item_done">Done</string>
+    <string name="settings_model_item_vision">Vision</string>
+    <string name="settings_model_item_thinking_badge">Thinking</string>
+    <string name="settings_model_effort_off">Off</string>
+    <string name="settings_model_effort_minimal">Minimal</string>
+    <string name="settings_model_effort_low">Low</string>
+    <string name="settings_model_effort_medium">Medium</string>
+    <string name="settings_model_effort_high">High</string>
+    <string name="settings_model_effort_xhigh">Extra high</string>
+    <string name="settings_model_effort_max">Max</string>
+    <string name="action_done">Done</string>
 </resources>
 
 

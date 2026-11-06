@@ -1,26 +1,33 @@
 package com.dshm.bot.ui.settings
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -33,6 +40,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +57,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.DshmMotion
 import com.dshm.bot.ui.components.FloatingIconButton
 
 /** 测试用 tag：设置列表。 */
@@ -486,9 +495,24 @@ fun SettingsDangerButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    /** 可选的删除图标（dsh-Go 的 TextButton.icon）。 */
+    @DrawableRes icon: Int? = null,
 ) {
     TextButton(onClick = onClick, enabled = enabled, modifier = modifier) {
-        Text(text, color = Dshm.colors.danger, style = Dshm.typography.rowTitle)
+        if (icon != null) {
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = null,
+                tint = if (enabled) Dshm.colors.danger else Dshm.colors.textTertiary,
+                modifier = Modifier.size(Dshm.spacing.settingsRowIcon),
+            )
+            Spacer(Modifier.width(Dshm.spacing.xs))
+        }
+        Text(
+            text = text,
+            color = if (enabled) Dshm.colors.danger else Dshm.colors.textTertiary,
+            style = Dshm.typography.rowTitle,
+        )
     }
 }
 
@@ -501,4 +525,212 @@ fun SettingsReadOnlyValue(label: String, value: String, subtitle: String? = null
         value = value.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_value_not_set),
         enabled = false,
     )
+}
+
+// ---------------------------------------------------------------------------
+// 胶囊 / 分段 / 勾选（dsh-Go 的 CapsuleGrid、SegmentedPill、SelectionTick）
+// ---------------------------------------------------------------------------
+
+/**
+ * 分段控件：一条胶囊底槽，选中项是一颗会滑动的胶囊。
+ *
+ * dsh-Go 用它代替 Material 的 SegmentedButton —— 后者的等宽分段在窄屏或大字号下
+ * 会把中文标签折成一列一个。这里各段等宽、文字永远一行。
+ */
+@Composable
+fun SettingsSegmentedPill(
+    options: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    reduceMotion: Boolean = false,
+) {
+    if (options.isEmpty()) return
+    val index = options.indexOf(selected).let { if (it < 0) 0 else it }
+    val inset = Dshm.spacing.segmentedInset
+    val track = Dshm.colors.textPrimary.copy(alpha = 0.06f)
+    // 深色主题下底槽是「白 7%」，滑块要更亮一档才分得开。
+    val thumb = if (Dshm.colors.isDark) {
+        Dshm.colors.textPrimary.copy(alpha = 0.2f)
+    } else {
+        Dshm.colors.surface
+    }
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(Dshm.spacing.segmentedHeight)
+            .clip(RoundedCornerShape(Dshm.radius.pill))
+            .background(track),
+    ) {
+        val segment = (maxWidth - inset * 2) / options.size
+        val offset by animateDpAsState(
+            targetValue = inset + segment * index,
+            animationSpec = tween(
+                durationMillis = if (reduceMotion) 0 else DshmMotion.quickMs,
+                easing = DshmMotion.standard,
+            ),
+            label = "segmented-thumb",
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = offset)
+                .width(segment)
+                .height(Dshm.spacing.segmentedHeight - inset * 2)
+                .clip(RoundedCornerShape(Dshm.radius.pill))
+                .background(thumb),
+        )
+        Row(modifier = Modifier.fillMaxSize()) {
+            options.forEachIndexed { position, label ->
+                val active = position == index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .then(
+                            if (enabled) {
+                                Modifier.clickable { onSelect(label) }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = label,
+                        style = Dshm.typography.rowPreview,
+                        color = if (active) Dshm.colors.textPrimary else Dshm.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = Dshm.spacing.sm),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 等宽的快捷胶囊网格：每行 [columns] 个，横向纵向都留 8dp。
+ * 网格铺满父级，所以它的左右边缘和上面的字段对齐。
+ */
+@Composable
+fun SettingsCapsuleGrid(
+    columns: Int,
+    children: List<@Composable () -> Unit>,
+    modifier: Modifier = Modifier,
+) {
+    if (columns <= 0 || children.isEmpty()) return
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+    ) {
+        children.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
+                row.forEach { child ->
+                    Box(Modifier.weight(1f)) { child() }
+                }
+                // 末行不足时补空位，保持列宽一致。
+                repeat(columns - row.size) { Box(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/** 网格里的一颗快捷胶囊：安静的一格，选中时反色。 */
+@Composable
+fun SettingsChoiceCapsule(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fill = if (selected) {
+        Dshm.colors.textPrimary
+    } else {
+        Dshm.colors.textPrimary.copy(alpha = 0.05f)
+    }
+    val ink = if (selected) Dshm.colors.surface else Dshm.colors.textSecondary
+    Box(
+        modifier = modifier
+            .height(Dshm.spacing.capsuleHeight)
+            .clip(RoundedCornerShape(Dshm.radius.pill))
+            .background(fill)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = Dshm.typography.rowPreview,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = Dshm.spacing.sm),
+        )
+    }
+}
+
+/** 勾选圆点：选中是实心主色 + 对勾，未选中是空心圆环。 */
+@Composable
+fun SettingsSelectionTick(
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    dimmed: Boolean = false,
+) {
+    val ring = Dshm.colors.textPrimary.copy(alpha = 0.18f)
+    val fill = if (dimmed) {
+        Dshm.colors.textPrimary.copy(alpha = 0.28f)
+    } else {
+        Dshm.colors.accent
+    }
+    Box(
+        modifier = modifier
+            .size(Dshm.spacing.selectionTick)
+            .clip(CircleShape)
+            .then(
+                if (checked) {
+                    Modifier.background(fill)
+                } else {
+                    Modifier.border(Dshm.spacing.hairline + Dshm.spacing.xs / 2, ring, CircleShape)
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (checked) {
+            Icon(
+                painter = painterResource(R.drawable.ic_lucide_check),
+                contentDescription = null,
+                tint = Dshm.colors.onAccent,
+                modifier = Modifier.size(Dshm.spacing.topBarIcon - Dshm.spacing.xs),
+            )
+        }
+    }
+}
+
+/** 档位行：勾选圆点在左，名字在右，整行可点。 */
+@Composable
+fun SettingsLevelRow(
+    label: String,
+    checked: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = Dshm.spacing.levelRowHeight)
+            .clip(RoundedCornerShape(Dshm.radius.md))
+            .clickable(onClick = onClick)
+            .padding(horizontal = Dshm.spacing.xs, vertical = Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SettingsSelectionTick(checked = checked)
+        Spacer(Modifier.width(Dshm.spacing.md))
+        Text(
+            text = label,
+            style = Dshm.typography.settingsRowTitle,
+            color = Dshm.colors.textPrimary,
+        )
+    }
 }

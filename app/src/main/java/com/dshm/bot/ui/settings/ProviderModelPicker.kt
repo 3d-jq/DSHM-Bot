@@ -4,9 +4,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -24,7 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 
@@ -33,6 +36,9 @@ import com.dshm.bot.core.design.Dshm
  * - 候选 ≤ [SEARCH_THRESHOLD] 时**默认全选**，超过才默认空选并给搜索框；
  * - 已经在渠道里的模型显示「已添加」，勾选框禁用，不能重复加；
  * - 顶部显示候选数量，全选按钮在「全选 / 全不选」之间切换。
+ *
+ * 面板**弹起就是固定高度**（屏高的 70%），不是 Material3 默认的半屏：
+ * `skipPartiallyExpanded` 让它跳过「半屏」那一档直接展开，高度由内容区定死。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,7 +58,10 @@ fun ModelPickerSheet(
         )
     }
     var query by remember { mutableStateOf("") }
-    val sheetState = rememberModalBottomSheetState()
+    // 跳过半屏那一档：弹起来就是完整高度（带原生把手）。
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 内容区固定占屏高的 70%，候选再多也只是列表内部滚动。
+    val panelHeight = LocalConfiguration.current.screenHeightDp.dp * PANEL_HEIGHT_FRACTION
 
     val visible = remember(candidates, query) {
         if (query.isBlank()) {
@@ -72,6 +81,8 @@ fun ModelPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(panelHeight)
+                .imePadding()
                 .padding(horizontal = Dshm.spacing.lg)
                 .padding(bottom = Dshm.spacing.xxl),
         ) {
@@ -130,10 +141,13 @@ fun ModelPickerSheet(
                     style = Dshm.typography.rowPreview,
                     color = Dshm.colors.textTertiary,
                 )
+                // 列表区是固定高度，空列表也要占位，否则底下的按钮会顶上来。
+                Spacer(Modifier.weight(1f))
             } else {
                 Column(
                     modifier = Modifier
-                        .heightIn(max = Dshm.spacing.composerMinHeight * 5)
+                        .weight(1f)
+                        .fillMaxHeight()
                         .verticalScroll(rememberScrollState()),
                 ) {
                     visible.forEach { id ->
@@ -195,3 +209,6 @@ fun ModelPickerSheet(
 
 /** 候选超过这个数量才默认空选并给搜索框，和 dsh-Go 的 `shortList` 一致。 */
 private const val SEARCH_THRESHOLD = 8
+
+/** 面板固定占屏高的比例（dsh-Go 的 ModelPickerSheet 用屏高的一半给列表）。 */
+private const val PANEL_HEIGHT_FRACTION = 0.70f

@@ -15,6 +15,7 @@ import com.dshm.bot.data.remote.PROVIDER_NAMESPACE
 import com.dshm.bot.data.remote.PermissionCatalog
 import com.dshm.bot.data.remote.PluginBundle
 import com.dshm.bot.data.remote.PluginInventory
+import com.dshm.bot.data.remote.ProviderModelSpec
 import com.dshm.bot.data.remote.ProviderProfile
 import com.dshm.bot.data.remote.ProviderSettings
 import com.dshm.bot.data.remote.SettingsDescription
@@ -320,7 +321,7 @@ class EngineSettingsViewModel : ViewModel() {
         displayName: String,
         api: String,
         baseUrl: String,
-        modelIds: List<String>,
+        models: List<ProviderModelSpec>,
         apiKey: String,
         existing: ProviderProfile?,
         onDone: (String?) -> Unit = {},
@@ -334,7 +335,7 @@ class EngineSettingsViewModel : ViewModel() {
             onDone("请填写服务地址")
             return
         }
-        if (modelIds.isEmpty()) {
+        if (models.isEmpty()) {
             onDone("至少填写一个模型")
             return
         }
@@ -344,15 +345,8 @@ class EngineSettingsViewModel : ViewModel() {
             put("api", api)
             put("baseURL", baseUrl.trim())
             put("apiKeyEnv", keyRef)
-            put(
-                "models",
-                JSONArray().apply {
-                    modelIds.forEach { id ->
-                        val prior = existing?.models?.firstOrNull { it.id == id }
-                        put(prior?.toJson() ?: JSONObject().put("id", id))
-                    }
-                },
-            )
+            // 模型规格整份写入：上下文长度、输入类型、思考档位都在这条里。
+            put("models", JSONArray().apply { models.forEach { put(it.toJson()) } })
         }
         viewModelScope.launch {
             val error = applyWrite(
@@ -366,6 +360,36 @@ class EngineSettingsViewModel : ViewModel() {
                     refreshCredentialsNow()
                 }.onFailure { onDone(describeSettingsError(it)); return@launch }
             }
+            onDone(error)
+        }
+    }
+
+    /**
+     * 只改一个模型：写整份 `models` 列表（对齐 dsh-Go 的 `saveModel`）。
+     * 引擎按 `providers.<route>.models` 存模型规格，没有单独的覆盖字段。
+     */
+    fun saveProviderModel(route: String, model: ProviderModelSpec, onDone: (String?) -> Unit = {}) {
+        if (repository == null) {
+            onDone("本机引擎未运行")
+            return
+        }
+        viewModelScope.launch {
+            val current = providers().profiles.firstOrNull { it.route == route }
+            if (current == null) {
+                onDone("渠道已不存在")
+                return@launch
+            }
+            val merged = current.models.map { if (it.id == model.id) model else it }
+            val error = applyWrite(
+                PROVIDER_NAMESPACE,
+                listOf(
+                    SettingsOp.set(
+                        listOf("providers", route, "models"),
+                        JSONArray().apply { merged.forEach { put(it.toJson()) } },
+                    ),
+                ),
+                listOf(listOf("providers", route, "models")),
+            )
             onDone(error)
         }
     }
