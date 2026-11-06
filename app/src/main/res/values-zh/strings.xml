@@ -550,6 +550,7 @@
     <string name="settings_model_need_model">至少填写一个模型</string>
     <string name="settings_model_invalid_route">名称生成的渠道 ID 不合法，请换一个名称</string>
     <string name="settings_plugins_update_section">更新与卸载</string>
+    <string name="plugins_tab_installed">已安装</string>
     <string name="settings_plugins_update_hint">更新就是按安装来源重新装一遍。</string>
     <string name="plugins_uninstall_title">卸载“%1$s”？</string>
     <string name="plugins_uninstall_hint">这个包会被移除，引擎可能需要重启。</string>

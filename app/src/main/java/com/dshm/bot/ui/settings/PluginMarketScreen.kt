@@ -1,6 +1,8 @@
 package com.dshm.bot.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,98 +33,90 @@ import com.dshm.bot.data.remote.MarketPlugin
  *
  * 索引里声明了要批准构建脚本的包，安装前会弹确认。
  */
+/**
+ * 插件市场面板：索引来源 → 错误/空态 → 插件列表，外加装卸的弹窗。
+ *
+ * 既是「插件市场」独立页的内容，也是「插件」页里「插件市场」那一段的内容。
+ */
 @Composable
-fun PluginMarketScreen(
+fun PluginMarketPanel(
     viewModel: PluginMarketViewModel,
-    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
     var uninstalling by remember { mutableStateOf<MarketPlugin?>(null) }
 
-    SettingsPage(
-        title = stringResource(R.string.plugins_market_title),
-        subtitle = stringResource(R.string.plugins_market_hint),
-        onBack = onBack,
-        actions = { SettingsRefreshButton(onClick = viewModel::refresh) },
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         // 索引来源：这一页的数据来自哪里，刷新时用的是它。
-        item {
-            SettingsSection {
-                SettingsRow(
-                    title = stringResource(R.string.plugins_market_index_source),
-                    subtitle = state.indexSource,
-                    value = if (state.indexSource == null) {
-                        stringResource(R.string.plugins_market_index_none)
-                    } else {
-                        null
-                    },
-                )
-            }
+        SettingsSection {
+            SettingsRow(
+                title = stringResource(R.string.plugins_market_index_source),
+                subtitle = state.indexSource,
+                value = if (state.indexSource == null) {
+                    stringResource(R.string.plugins_market_index_none)
+                } else {
+                    null
+                },
+            )
         }
 
         val error = state.error
         if (error != null) {
-            item {
-                SettingsError(
-                    text = when (error) {
-                        PluginMarketError.EngineUnavailable -> stringResource(R.string.plugins_market_error_engine)
-                        is PluginMarketError.IndexUnreadable ->
-                            stringResource(R.string.plugins_market_error_index, error.reason)
-                        is PluginMarketError.ActionFailed ->
-                            stringResource(R.string.plugins_market_error_action, error.reason)
-                    },
-                    onRetry = viewModel::refresh,
-                )
-            }
+            SettingsError(
+                text = when (error) {
+                    PluginMarketError.EngineUnavailable -> stringResource(R.string.plugins_market_error_engine)
+                    is PluginMarketError.IndexUnreadable ->
+                        stringResource(R.string.plugins_market_error_index, error.reason)
+                    is PluginMarketError.ActionFailed ->
+                        stringResource(R.string.plugins_market_error_action, error.reason)
+                },
+                onRetry = viewModel::refresh,
+            )
         }
 
         when {
-            state.loading && state.index == null -> item {
+            state.loading && state.index == null -> {
                 SettingsHint(stringResource(R.string.plugins_market_loading))
                 SettingsLoading()
             }
-            state.index?.plugins.isNullOrEmpty() -> item {
+            state.index?.plugins.isNullOrEmpty() -> {
                 SettingsEmpty(stringResource(R.string.plugins_market_empty))
             }
             else -> {
                 val notice = state.notice
                 if (notice != null) {
-                    item { SettingsHint(noticeText(notice)) }
+                    SettingsHint(noticeText(notice))
                 }
                 // 正在装：给一个取消入口（引擎那边是 cancelInstall）。
                 if (state.busy.isNotEmpty() && state.installRequestId != null) {
-                    item {
-                        SettingsSection {
-                            SettingsRow(
-                                title = stringResource(R.string.plugins_market_cancel_install),
-                                subtitle = stringResource(R.string.plugins_market_cancel_install_hint),
-                                value = stringResource(R.string.plugins_market_installing),
-                                onClick = viewModel::cancelInstall,
-                            )
-                        }
+                    SettingsSection {
+                        SettingsRow(
+                            title = stringResource(R.string.plugins_market_cancel_install),
+                            subtitle = stringResource(R.string.plugins_market_cancel_install_hint),
+                            value = stringResource(R.string.plugins_market_installing),
+                            onClick = viewModel::cancelInstall,
+                        )
                     }
                 }
-                item {
-                    val plugins = state.index?.plugins.orEmpty()
-                    SettingsSection(
-                        footer = if (plugins.any { it.dangerous }) {
-                            stringResource(R.string.plugins_market_danger_hint)
-                        } else {
-                            null
-                        },
-                    ) {
-                        plugins.forEachIndexed { index, plugin ->
-                            if (index > 0) SettingsRowDivider()
-                            PluginMarketRow(
-                                plugin = plugin,
-                                language = language,
-                                installed = isMarketPluginInstalled(plugin.name, state.installed),
-                                busy = plugin.name in state.busy,
-                                onInstall = { viewModel.install(plugin.name) },
-                                onUninstall = { uninstalling = plugin },
-                            )
-                        }
+                val plugins = state.index?.plugins.orEmpty()
+                SettingsSection(
+                    footer = if (plugins.any { it.dangerous }) {
+                        stringResource(R.string.plugins_market_danger_hint)
+                    } else {
+                        null
+                    },
+                ) {
+                    plugins.forEachIndexed { index, plugin ->
+                        if (index > 0) SettingsRowDivider()
+                        PluginMarketRow(
+                            plugin = plugin,
+                            language = language,
+                            installed = isMarketPluginInstalled(plugin.name, state.installed),
+                            busy = plugin.name in state.busy,
+                            onInstall = { viewModel.install(plugin.name) },
+                            onUninstall = { uninstalling = plugin },
+                        )
                     }
                 }
             }

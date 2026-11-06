@@ -16,7 +16,6 @@ enum class SettingsPageId {
     PHONE_CONTROL,
     WEB_SEARCH,
     PLUGINS,
-    PLUGIN_MARKET,
     VOICE,
     ENGINE_PARAMS,
     SCHEDULES,

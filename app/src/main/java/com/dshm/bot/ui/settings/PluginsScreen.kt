@@ -30,13 +30,21 @@ import com.dshm.bot.data.remote.PluginBundleGroup
 import kotlin.math.abs
 
 // 插件：DSH 官方可选包 + 第三方已安装包，结构与 dsh-Go 一致（分组、官方徽标、开关）。
+/** 插件页的两个分段（对齐 dsh-Go 的 PluginsTab）。 */
+enum class PluginsTab { INSTALLED, MARKET }
+
 @Composable
 fun PluginsScreen(
     viewModel: EngineSettingsViewModel,
     onBack: () -> Unit,
     onRestartEngine: () -> Unit = {},
-    onOpenMarket: () -> Unit = {},
+    marketViewModel: PluginMarketViewModel? = null,
 ) {
+    // dsh-Go：一个页面两个分段 ——「已安装」/「插件市场」。
+    var tab by rememberSaveable { mutableStateOf(PluginsTab.INSTALLED) }
+    // 分段文案要先取好：点击回调里不能再调 stringResource。
+    val installedLabel = stringResource(R.string.plugins_tab_installed)
+    val marketLabel = stringResource(R.string.plugins_market_title)
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
     var openNs by rememberSaveable { mutableStateOf<String?>(null) }
@@ -61,10 +69,20 @@ fun PluginsScreen(
 
     SettingsPage(
         title = stringResource(R.string.settings_plugins),
-        subtitle = stringResource(R.string.plugins_manage_hint),
         onBack = onBack,
         actions = { SettingsRefreshButton(onClick = viewModel::refresh) },
     ) {
+        item {
+            SettingsSegmentedPill(
+                options = listOf(installedLabel, marketLabel),
+                selected = if (tab == PluginsTab.INSTALLED) installedLabel else marketLabel,
+                onSelect = { picked ->
+                    tab = if (picked == installedLabel) PluginsTab.INSTALLED else PluginsTab.MARKET
+                },
+                modifier = Modifier.padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
+            )
+        }
+        if (tab == PluginsTab.INSTALLED) {
         when {
             state.loading && bundles.isEmpty() -> item { SettingsLoading() }
             state.error != null && bundles.isEmpty() -> item {
@@ -136,18 +154,6 @@ fun PluginsScreen(
                                 )
                             }
                         }
-                    }
-                }
-
-                // 插件市场：远程索引 + 安装
-                item {
-                    SettingsSection {
-                        SettingsRow(
-                            title = stringResource(R.string.plugins_market_title),
-                            icon = R.drawable.ic_lucide_store,
-                            subtitle = stringResource(R.string.plugins_market_hint),
-                            onClick = onOpenMarket,
-                        )
                     }
                 }
 
@@ -233,6 +239,15 @@ fun PluginsScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+        } else {
+            item {
+                if (marketViewModel != null) {
+                    PluginMarketPanel(marketViewModel)
+                } else {
+                    SettingsEmpty(stringResource(R.string.plugins_market_hint))
                 }
             }
         }

@@ -48,7 +48,6 @@ import com.dshm.bot.ui.settings.AboutScreen
 import com.dshm.bot.ui.settings.AgentPresetsScreen
 import com.dshm.bot.ui.settings.AppearanceScreen
 import com.dshm.bot.ui.settings.BackgroundSettingsScreen
-import com.dshm.bot.ui.settings.PluginMarketScreen
 import com.dshm.bot.ui.settings.PluginMarketViewModel
 import com.dshm.bot.ui.settings.ScheduledTasksScreen
 import com.dshm.bot.ui.settings.ScheduledTasksViewModel
@@ -566,12 +565,7 @@ fun DshmBotApp(
                         viewModel = engineSettingsViewModel,
                         onBack = close,
                         onRestartEngine = engineViewModel::restart,
-                        onOpenMarket = {
-                            navForward = true
-                            settingsStack = ArrayList(settingsStack).apply {
-                                add(SettingsPageId.PLUGIN_MARKET.name)
-                            }
-                        },
+
                     )
 
                     SettingsPageId.ENGINE_PARAMS -> EngineSettingsScreen(
@@ -589,11 +583,6 @@ fun DshmBotApp(
                                 add(SettingsPageId.MODEL.name)
                             }
                         },
-                    )
-
-                    SettingsPageId.PLUGIN_MARKET -> PluginMarketScreen(
-                        viewModel = pluginMarketViewModel,
-                        onBack = close,
                     )
 
                     SettingsPageId.SCHEDULES -> ScheduledTasksScreen(
