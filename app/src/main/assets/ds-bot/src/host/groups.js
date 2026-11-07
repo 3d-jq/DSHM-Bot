@@ -419,7 +419,7 @@ export function install(rt) {
       const content = Array.isArray(message.content) ? message.content : []
       const text = textOf(content)
       if (text === '' || content.some(block => block?.type !== 'text') || text.includes('dsh-session:')) break
-      lines.push({ id: message.id, text })
+      lines.push({ id: message.id, text, ...(typeof message.source?.rpcId === 'string' ? { rpcId: message.source.rpcId } : {}) })
     }
     return lines
   })
@@ -438,7 +438,7 @@ export function install(rt) {
     const members = room.members.map(rt.botOf).filter(Boolean)
     for (const line of lines) {
       appendRoom(room, { who: 'User', text: line.text })
-      round.replies.push({ kind: 'user', text: line.text, time: Date.now() })
+      round.replies.push({ kind: 'user', text: line.text, ...(line.rpcId ? { rpcId: line.rpcId } : {}), time: Date.now() })
       const { all, found } = mentionsIn(line.text, members)
       const note = all || found.length > 0 ? 'the user mentioned you' : 'new message from the user'
       callMembers(round, index - 1, openingSpeakers(room, { text: line.text }), note, undefined, 'user')

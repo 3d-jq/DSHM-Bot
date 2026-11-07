@@ -57,7 +57,7 @@ function reminderText(text) {
 function replyItem(reply, id, extra = {}) {
   const who = { ...(reply.botId ? { botId: reply.botId } : {}), ...(reply.name ? { name: reply.name } : {}), ...(reply.color ? { color: reply.color } : {}) }
   const time = Number.isFinite(reply.time) ? reply.time : null
-  if (reply.kind === 'user') return { id, kind: 'user', text: String(reply.text ?? ''), time, ...extra }
+  if (reply.kind === 'user') return { id, kind: 'user', text: String(reply.text ?? ''), ...(reply.rpcId ? { rpcId: reply.rpcId } : {}), time, ...extra }
   if (reply.kind === undefined) return { id, kind: 'bot', ...who, text: String(reply.text ?? ''), time, ...(Number.isFinite(reply.duration) ? { duration: reply.duration } : {}), ...extra }
   if (!ROUND_EVENTS.has(reply.kind)) return undefined
   return {
@@ -81,7 +81,8 @@ export function roomItems(events) {
       const content = Array.isArray(event.data?.content) ? event.data.content : []
       if (source?.kind === 'user') {
         const images = content.filter(block => block?.type === 'image').length
-        items.push({ id: `${seq}`, kind: 'user', text: textOf(content), ...(images > 0 ? { images } : {}), time: event.time ?? null })
+        const rpcId = typeof source.rpcId === 'string' ? source.rpcId : undefined
+        items.push({ id: `${seq}`, kind: 'user', text: textOf(content), ...(images > 0 ? { images } : {}), ...(rpcId ? { rpcId } : {}), time: event.time ?? null })
       } else if (source?.kind === 'schedule') {
         items.push({ id: `${seq}`, kind: 'event', event: 'schedule', text: reminderText(textOf(content)), time: event.time ?? null })
       } else if (source?.kind === SOURCE_KIND && source.role === 'post') {

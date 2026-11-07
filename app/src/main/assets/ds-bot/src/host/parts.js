@@ -1268,7 +1268,8 @@ export function install(rt) {
       if (source?.kind === 'user') {
         const content = Array.isArray(event.data.content) ? event.data.content : []
         const images = content.filter(block => block?.type === 'image').length
-        stamp(event, { kind: 'user', text: textOf(content), ...(images > 0 ? { images } : {}), time: event.time })
+        const rpcId = typeof source.rpcId === 'string' ? source.rpcId : undefined
+        stamp(event, { kind: 'user', text: textOf(content), ...(images > 0 ? { images } : {}), ...(rpcId ? { rpcId } : {}), time: event.time })
       } else if (source?.kind === REPLY_KIND) {
         const text = textOf(event.data.content)
         const reply = readReply(text)

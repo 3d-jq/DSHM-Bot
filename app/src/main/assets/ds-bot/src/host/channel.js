@@ -415,13 +415,17 @@ export function install(rt) {
         case 'send': {
           const text = String(body.text ?? '').trim()
           if (text === '' || typeof body.sessionId !== 'string') return fail('Nothing to send', 'bot/invalid')
+          // The mobile client paints the user's bubble before this call returns and
+          // passes the id it used; the Host echoes it as source.rpcId so the echo
+          // can be skipped without guessing by text.
+          const requestId = typeof body.requestId === 'string' && body.requestId !== '' ? body.requestId : randomUUID()
           await rt.load()
           // A Bot id or an earlier part of its own chat means the current part.
           const past = rt.pastOwners.get(body.sessionId)
           const sessionId = rt.botOf(body.sessionId) ? rt.chatOf(body.sessionId) : past && past.roomId === undefined ? rt.chatOf(past.botId) : body.sessionId
           await rt.ensureCapabilities(sessionId)
           await ctx.sessionController.prompt({
-            requestId: randomUUID(),
+            requestId,
             sessionId,
             mode: 'queue',
             content: [{ type: 'text', text }],

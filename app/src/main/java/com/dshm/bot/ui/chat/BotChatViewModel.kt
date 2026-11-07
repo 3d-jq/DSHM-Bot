@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.util.UUID
 
 /** 对话里的一行：用户消息、Bot 消息、或系统事件。 */
 enum class ChatEntryKind { USER, BOT, EVENT }
@@ -111,6 +112,8 @@ class BotChatViewModel(
     private var streamingAttempt: String? = null
     private var streamingText = ""
     private var loadedOnce = false
+    /** 本屏发出的用户气泡；服务端回显用 `requestId` 认出同一条，不画第二条。 */
+    private val localUserEntries = LinkedHashMap<String, ChatEntry>()
 
     init {
         if (client != null) {
@@ -270,33 +273,46 @@ class BotChatViewModel(
         load(initial = false)
     }
 
-    /**
-     * 发一条消息。
-     *
-     * **不做本地气泡**（照 DeepSearch）：用户消息等服务端回显。
-     * 本地先画一条会让消息「卡在输入框下面」—— 回显时还要再替换它，
-     * 顺序一乱就会看到两条。
-     */
+    /** 发一条消息：用户气泡立刻上屏，服务端回显按 requestId 跳过。 */
     fun send(raw: String) {
         val connection = client ?: return
         val text = raw.trim()
         if (text.isEmpty() || _uiState.value.sending) return
-        _uiState.update { it.copy(sending = true, error = null) }
+        val requestId = UUID.randomUUID().toString()
+        val bubble = ChatEntry(
+            id = "user:$requestId",
+            kind = ChatEntryKind.USER,
+            text = text,
+        )
+        localUserEntries[requestId] = bubble
+        seen.add(bubble.id)
+        // 点击那一帧就画出来，不等 HTTP / SSE 回显。
+        _uiState.update { state ->
+            state.copy(
+                sending = true,
+                error = null,
+                entries = state.entries + bubble,
+            )
+        }
         viewModelScope.launch {
             runCatching {
                 connection.bot(
                     endpoint = "send",
                     payload = JSONObject()
                         .put("sessionId", botId)
+                        .put("requestId", requestId)
                         .put("text", text),
                 )
             }.onSuccess {
                 _uiState.update { it.copy(sending = false, waitingForReply = true) }
             }.onFailure { failure ->
+                localUserEntries.remove(requestId)
+                seen.remove(bubble.id)
                 _uiState.update { state ->
                     state.copy(
                         sending = false,
                         waitingForReply = false,
+                        entries = state.entries.filterNot { it.id == bubble.id },
                         error = describeChatError(failure),
                     )
                 }
@@ -325,15 +341,19 @@ class BotChatViewModel(
                         }
                     }
                 }
+                // 历史还没追上这次发送时，本地气泡也不能被刷新弄丢。
+                val withLocal = entries + localUserEntries.values.filterNot { local ->
+                    entries.any { it.id == local.id }
+                }
                 seen.clear()
-                entries.forEach { seen.add(it.id) }
+                withLocal.forEach { seen.add(it.id) }
                 cursor = parseChatPage(value).cursor
                 _uiState.update { state ->
                     state.copy(
                         loading = false,
                         engineOff = false,
                         error = null,
-                        entries = entries,
+                        entries = withLocal,
                         hasEarlier = cursor?.hasMore == true,
                     )
                 }
@@ -418,7 +438,6 @@ class BotChatViewModel(
                 if (entry.kind == ChatEntryKind.BOT) clearStreaming()
                 _uiState.update { state ->
                     state.copy(
-                        // 用户消息没有本地气泡，直接追加服务端回显的那条。
                         entries = state.entries + entry,
                         waitingForReply = if (entry.kind == ChatEntryKind.USER) state.waitingForReply else false,
                     )
@@ -596,9 +615,10 @@ class BotChatViewModel(
             if (seq >= 0L) "$scope:$seq" else fallbackId
         }
         val text = item.optString("text")
+        val rpcId = item.optString("rpcId").takeIf { it.isNotEmpty() }
         return when (item.optString("kind")) {
             "user" -> text.takeIf { it.isNotBlank() }
-                ?.let { ChatEntry(id, ChatEntryKind.USER, it) }
+                ?.let { ChatEntry(if (rpcId != null) "user:$rpcId" else id, ChatEntryKind.USER, it) }
 
             "bot" -> text.takeIf { it.isNotBlank() }
                 ?.let {
