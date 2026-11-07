@@ -19,6 +19,8 @@ import org.json.JSONObject
 
 data class BotModelOption(val ref: String, val name: String)
 
+data class BotPermissionOption(val ref: String, val name: String, val hint: String? = null)
+
 data class BotMemoryEntry(val scope: String, val topic: String?, val text: String)
 
 data class BotScheduleTask(
@@ -46,11 +48,13 @@ data class BotDetailsUiState(
     val saving: Boolean = false,
     val info: BotDetailsInfo? = null,
     val models: List<BotModelOption> = emptyList(),
+    val permissions: List<BotPermissionOption> = emptyList(),
     val memory: List<BotMemoryEntry> = emptyList(),
     val schedules: List<BotScheduleTask> = emptyList(),
     val usageTokens: Long = 0L,
     val cacheHit: Float? = null,
     val mainBotIds: Set<String> = emptySet(),
+    val memoryEnabled: Boolean = true,
     val error: String? = null,
 ) {
     val isMain: Boolean get() = info?.id in mainBotIds
@@ -96,6 +100,20 @@ class BotDetailsViewModel(
                             }
                         }
                     }
+                    val permissions = mutableListOf<BotPermissionOption>()
+                    val permissionCatalog = state.optJSONObject("permissions")
+                    permissionCatalog?.optJSONArray("options")?.let { array ->
+                        for (index in 0 until array.length()) {
+                            val item = array.optJSONObject(index) ?: continue
+                            val ref = item.optString("value").ifEmpty { item.optString("id") }
+                            if (ref.isEmpty()) continue
+                            permissions += BotPermissionOption(
+                                ref = ref,
+                                name = item.optString("name").ifEmpty { ref },
+                                hint = item.optString("hint").takeIf { hint -> hint.isNotEmpty() },
+                            )
+                        }
+                    }
                     val avatar = bot.optJSONObject("avatar")
                     val mainIds = buildSet {
                         state.optJSONArray("mainBotIds")?.let { array ->
@@ -109,7 +127,9 @@ class BotDetailsViewModel(
                             loading = false,
                             error = null,
                             models = models,
+                            permissions = permissions,
                             mainBotIds = mainIds,
+                            memoryEnabled = state.optBoolean("memory", true),
                             info = BotDetailsInfo(
                                 id = botId,
                                 name = bot.optString("name").ifEmpty { "Bot" },
@@ -120,9 +140,9 @@ class BotDetailsViewModel(
                                     .ifEmpty { bot.optString("appliedModel") }
                                     .takeIf { ref -> ref.isNotEmpty() },
                                 workDir = bot.optString("workDir").takeIf { dir -> dir.isNotEmpty() },
-                                permission = state.optJSONObject("permissions")
-                                    ?.optString("defaultPreset")
-                                    ?.takeIf { preset -> preset.isNotEmpty() },
+                                permission = bot.optString("permission").takeIf { preset -> preset.isNotEmpty() }
+                                    ?: permissionCatalog?.optString("defaultPreset")
+                                        ?.takeIf { preset -> preset.isNotEmpty() },
                                 instructions = bot.optString("instructions"),
                                 hidden = bot.optBoolean("hidden", false),
                             ),
@@ -200,9 +220,17 @@ class BotDetailsViewModel(
         }
     }
 
-    fun update(patch: JSONObject, onDone: (String?) -> Unit = {}) {
+    fun update(
+        patch: JSONObject,
+        optimistic: (BotDetailsInfo) -> BotDetailsInfo = { it },
+        onDone: (String?) -> Unit = {},
+    ) {
         val connection = client ?: return
+        val previous = _ui.value.info
         _ui.update { it.copy(saving = true) }
+        _ui.update { state ->
+            state.info?.let { info -> state.copy(info = optimistic(info)) } ?: state
+        }
         viewModelScope.launch {
             runCatching {
                 connection.bot("update-bot", JSONObject().put("id", botId).also { target ->
@@ -213,36 +241,20 @@ class BotDetailsViewModel(
                 load()
                 onDone(null)
             }.onFailure {
-                _ui.update { state -> state.copy(saving = false, error = it.message) }
+                _ui.update { state ->
+                    state.copy(saving = false, info = previous, error = it.message)
+                }
                 onDone(it.message ?: "保存失败")
             }
         }
     }
 
-    fun setPermission(preset: String, onDone: (String?) -> Unit = {}) {        val connection = client ?: return
-        _ui.update { it.copy(saving = true) }
-        viewModelScope.launch {
-            runCatching {
-                connection.rpc(
-                    "commands/execute",
-                    JSONObject()
-                        .put("agentId", botId)
-                        .put("line", "/permission $preset")
-                        .put("submittedAttachments", JSONArray()),
-                )
-            }.onSuccess {
-                _ui.update { state ->
-                    state.copy(
-                        saving = false,
-                        info = state.info?.copy(permission = preset),
-                    )
-                }
-                onDone(null)
-            }.onFailure {
-                _ui.update { state -> state.copy(saving = false) }
-                onDone(it.message ?: "权限切换失败")
-            }
-        }
+    fun setPermission(preset: String, onDone: (String?) -> Unit = {}) {
+        update(
+            patch = JSONObject().put("permission", preset),
+            optimistic = { it.copy(permission = preset) },
+            onDone = onDone,
+        )
     }
 
     fun setHidden(hidden: Boolean, onDone: (String?) -> Unit = {}) {

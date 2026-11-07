@@ -203,6 +203,37 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 cancel），
 需要连引擎跑一轮确认。
 
+## 对话顶栏胶囊状态后续（2026-11-07，⬜ 暂不处理）
+
+范围**只看 DS Bot**，不把 DeepSearch 的名字胶囊状态行口径混进来：
+
+- DS Bot 的名字胶囊内只有短暂「记忆已更新」提示；思考短语、工具文案、等待回答和计时属于独立的
+  `ActivityIndicator`（对话流里的活动行），不是胶囊里的常驻状态行。边界见
+  [reference-baselines.md](reference-baselines.md)。
+- 当前简化实现：`BotChatViewModel.refreshBotStatus()` 只看 `memoryNews[botId].at` 是否在近 5 分钟内，
+  每次状态刷新都可能重放同一条旧 news；群聊没看成员；提示期间点击胶囊仍打开快捷设置。
+  `BotTitleCapsule` 也只有文字，没有记忆图标与展开/收回动画。
+- 待补：按 bot / 群聊成员取最新 `seen`，只在 `at` 变化时触发一次且页面刚打开不重放历史；
+  3.2s 倒计时、记忆图标与动画、点击打开对应记忆、`roster.memory === false` 时不显示；
+  再核对胶囊小头像的 `idle / thinking / searching / working / sending / waiting / alert` 状态。
+- 若以后决定把「思考 / 工具 / 等待审批」常驻放进胶囊，那是**本项目自定义设计**，需单独确认，
+  不能写成「对齐 DS Bot」。
+
+## 对话底部 Bot 面板（2026-11-07，🔄 本轮修正）
+
+- 点击名字胶囊弹出的 `BotSettingsSheet` 顶部按 DS Bot 改成「详情 / 浏览器」同一组分类栏，
+  不再是两颗并列跳转按钮。浏览器当前版本未做，点它只给「当前版本未做」提示，不跳到假的 DSH Web。
+- 「详情」分类下保留真实入口：点「设置」行关闭面板并进入 `BotDetailsScreen` 完整设置页。
+- 模型选择改为乐观回显：点中即显示新模型，后台仍走 `update-bot` 校验并 `load()`；失败回滚并显示错误。
+  名称 / 角色 / 形象 / 工作文件夹 / 说明也同步乐观回显。
+- 权限改走 DS Bot 的 `update-bot {permission}`，不再用旧的 `commands/execute /permission`；
+  档位和文案从 `state.permissions.options` 读取，缺省回退到本地三档。
+- 面板接线核对：模型、权限、工作目录、说明、记忆查看/删除、用量、定时任务查看/新建/删除都走真实
+  `/api/bot`。**仍未接**：浏览器标签页、记忆新增/编辑（`memory-add` / `memory-edit`）、
+  文件夹选择器（`folder-list` / `folder-pick`）和运行统计（`run-stats`）。
+- 以后做浏览器要按 DS Bot `DetailsDrawer` / `BotPanel` 的「Bot 专属浏览器标签页」口径，
+  不是把当前 `WebHostScreen` 的 general DSH Web 当浏览器入口。
+
 ## 已知工程债（与修 bug 并行清）
 
 - 测试覆盖：`data/runtime`、`data/remote`、`ui/settings` 相对 UI 偏薄，补 JVM 测试与契约测试

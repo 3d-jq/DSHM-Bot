@@ -391,10 +391,7 @@ fun BotChatScreen(
                 quickSettings = false
                 onDetails()
             },
-            onBrowser = {
-                quickSettings = false
-                onOpenBrowser()
-            },
+            onBrowser = {},
         )
     }
 }

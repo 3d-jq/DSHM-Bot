@@ -57,6 +57,7 @@ import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
+import com.dshm.bot.ui.settings.SettingsSegmentedPill
 import com.dshm.bot.ui.settings.settingsLanguage
 import org.json.JSONObject
 
@@ -209,7 +210,12 @@ fun BotDetailsScreen(
                     title = stringResource(R.string.bot_settings_note_save),
                     value = if (state.saving) stringResource(R.string.bot_settings_saving) else null,
                     enabled = instructions.trim() != info?.instructions.orEmpty().trim(),
-                    onClick = { viewModel.update(JSONObject().put("instructions", instructions.trim())) },
+                    onClick = {
+                        viewModel.update(
+                            patch = JSONObject().put("instructions", instructions.trim()),
+                            optimistic = { it.copy(instructions = instructions.trim()) },
+                        )
+                    },
                 )
             }
         }
@@ -317,7 +323,10 @@ fun BotDetailsScreen(
             onDismiss = { editName = false },
             onSave = { value ->
                 editName = false
-                viewModel.update(JSONObject().put("name", value))
+                viewModel.update(
+                    patch = JSONObject().put("name", value),
+                    optimistic = { it.copy(name = value) },
+                )
             },
         )
     }
@@ -328,7 +337,10 @@ fun BotDetailsScreen(
             onDismiss = { editRole = false },
             onSave = { value ->
                 editRole = false
-                viewModel.update(JSONObject().put("role", value))
+                viewModel.update(
+                    patch = JSONObject().put("role", value),
+                    optimistic = { it.copy(role = value) },
+                )
             },
         )
     }
@@ -345,7 +357,10 @@ fun BotDetailsScreen(
                                 .fillMaxWidth()
                                 .clickable {
                                     pickModel = false
-                                    viewModel.update(JSONObject().put("model", option.ref))
+                                    viewModel.update(
+                                        patch = JSONObject().put("model", option.ref),
+                                        optimistic = { it.copy(model = option.ref) },
+                                    )
                                 }
                                 .padding(vertical = Dshm.spacing.xs),
                             verticalAlignment = Alignment.CenterVertically,
@@ -386,7 +401,8 @@ fun BotDetailsScreen(
                                 .clickable {
                                     pickShape = false
                                     viewModel.update(
-                                        JSONObject().put("avatar", JSONObject().put("shape", shape)),
+                                        patch = JSONObject().put("avatar", JSONObject().put("shape", shape)),
+                                        optimistic = { it.copy(shape = shape) },
                                     )
                                 }
                                 .padding(vertical = Dshm.spacing.xs),
@@ -438,7 +454,10 @@ fun BotDetailsScreen(
             onDismiss = { editWorkdir = false },
             onSave = { value ->
                 editWorkdir = false
-                viewModel.update(JSONObject().put("workDir", value))
+                viewModel.update(
+                    patch = JSONObject().put("workDir", value),
+                    optimistic = { it.copy(workDir = value) },
+                )
             },
         )
     }
@@ -626,15 +645,23 @@ private fun shapeLabel(shape: String?): String = when (shape) {
  * 选中的那档用主色，「完全权限」那档用危险色。
  */
 @Composable
-private fun PermissionRows(current: String?, onSelect: (String) -> Unit) {
+private fun PermissionRows(
+    current: String?,
+    options: List<BotPermissionOption>,
+    onSelect: (String) -> Unit,
+) {
     val language = settingsLanguage()
-    val permissions = listOf("read-only", "workspace-write", "danger-full-access")
+    val permissions = options.map { it.ref }.ifEmpty {
+        listOf("read-only", "workspace-write", "danger-full-access")
+    }
+    val labels = options.associate { it.ref to it.name }
+    val hints = options.associate { it.ref to it.hint }
     permissions.forEachIndexed { index, preset ->
         if (index > 0) SettingsRowDivider()
         val selected = preset == current
         SettingsRow(
-            title = SettingsCopy.permissionLabel(preset, language),
-            subtitle = SettingsCopy.permissionHint(preset, language),
+            title = labels[preset] ?: SettingsCopy.permissionLabel(preset, language),
+            subtitle = hints[preset] ?: SettingsCopy.permissionHint(preset, language),
             trailing = {
                 Box(
                     modifier = Modifier
@@ -676,6 +703,8 @@ fun BotSettingsSheet(
     var editInstructions by rememberSaveable { mutableStateOf(false) }
     var showMemory by rememberSaveable { mutableStateOf(false) }
     var showSchedules by rememberSaveable { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableStateOf(DETAILS_TAB) }
+    var sheetNotice by rememberSaveable { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // 面板占屏幕 86%：内容撑到这个高度，ModalBottomSheet 贴底显示，上面留出聊天。
     val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.86f
@@ -698,10 +727,12 @@ fun BotSettingsSheet(
                 .padding(bottom = Dshm.spacing.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Hero 区：按设计文档 §8.4，顶部信息包成一张卡。
+            // 身份卡：只放头像、名字、标签；分类栏和设置入口不挤在白卡里。
             SettingsSection {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Dshm.spacing.lg),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     BotAvatar(
@@ -718,34 +749,52 @@ fun BotSettingsSheet(
                         color = Dshm.colors.textPrimary,
                     )
                     info?.role?.takeIf { it.isNotBlank() }?.let { role ->
+                        Spacer(Modifier.height(Dshm.spacing.xxs))
                         Text(
                             text = role,
                             style = Dshm.typography.rowPreview,
                             color = Dshm.colors.textSecondary,
                         )
                     }
-                    Spacer(Modifier.height(Dshm.spacing.md))
-                    // 两个入口：详情 / 浏览器。做成行内动作，不是裸按钮。
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
-                    ) {
-                        SettingsRow(
-                            title = stringResource(R.string.bot_settings_details),
-                            icon = R.drawable.ic_lucide_info,
-                            modifier = Modifier.weight(1f),
-                            trailing = {},
-                            onClick = onDetails,
-                        )
-                        SettingsRow(
-                            title = stringResource(R.string.bot_settings_browser),
-                            icon = R.drawable.ic_lucide_globe,
-                            modifier = Modifier.weight(1f),
-                            trailing = {},
-                            onClick = onBrowser,
-                        )
-                    }
                 }
+            }
+
+            Spacer(Modifier.height(Dshm.spacing.md))
+            val tabLabels = listOf(
+                stringResource(R.string.bot_settings_details),
+                stringResource(R.string.bot_settings_browser),
+            )
+            SettingsSegmentedPill(
+                options = tabLabels,
+                selected = tabLabels[selectedTab],
+                onSelect = { label ->
+                    val next = tabLabels.indexOf(label)
+                    if (next == BROWSER_TAB) {
+                        sheetNotice = "浏览器功能当前版本未做"
+                    } else {
+                        selectedTab = next
+                        sheetNotice = null
+                    }
+                },
+            )
+            sheetNotice?.let { notice ->
+                Spacer(Modifier.height(Dshm.spacing.sm))
+                Text(
+                    text = notice,
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textTertiary,
+                )
+            }
+            Spacer(Modifier.height(Dshm.spacing.md))
+            SettingsSection(title = stringResource(R.string.bot_settings_page_title)) {
+                SettingsRow(
+                    title = stringResource(R.string.bot_settings_details),
+                    subtitle = stringResource(R.string.bot_settings_page_title),
+                    onClick = {
+                        onDismiss()
+                        onDetails()
+                    },
+                )
             }
 
             Spacer(Modifier.height(Dshm.spacing.xxl))
@@ -756,13 +805,20 @@ fun BotSettingsSheet(
                     subtitle = info?.model,
                     onClick = { showModels = true },
                 )
+                if (state.saving) {
+                    SettingsRow(
+                        title = stringResource(R.string.bot_settings_saving),
+                        enabled = false,
+                    )
+                }
             }
 
             Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_permission)) {
                 PermissionRows(
                     current = info?.permission,
-                    onSelect = { viewModel.setPermission(it) },
+                    options = state.permissions,
+                    onSelect = viewModel::setPermission,
                 )
             }
 
@@ -775,8 +831,9 @@ fun BotSettingsSheet(
                 )
             }
 
-            Spacer(Modifier.height(Dshm.spacing.xxl))
-            SettingsSection(title = stringResource(R.string.bot_settings_memory)) {
+            if (state.memoryEnabled) {
+                Spacer(Modifier.height(Dshm.spacing.xxl))
+                SettingsSection(title = stringResource(R.string.bot_settings_memory)) {
                 SettingsRow(
                     title = if (state.memory.isEmpty()) {
                         stringResource(R.string.bot_settings_memory_empty)
@@ -786,6 +843,7 @@ fun BotSettingsSheet(
                     value = stringResource(R.string.bot_settings_manage),
                     onClick = { showMemory = true },
                 )
+                }
             }
 
             Spacer(Modifier.height(Dshm.spacing.xxl))
@@ -830,7 +888,10 @@ fun BotSettingsSheet(
             onDismiss = { editFolder = false },
             onSave = { value ->
                 editFolder = false
-                viewModel.update(JSONObject().put("workDir", value))
+                viewModel.update(
+                    patch = JSONObject().put("workDir", value),
+                    optimistic = { it.copy(workDir = value) },
+                )
             },
         )
     }
@@ -843,7 +904,10 @@ fun BotSettingsSheet(
             onDismiss = { editInstructions = false },
             onSave = { value ->
                 editInstructions = false
-                viewModel.update(JSONObject().put("instructions", value))
+                viewModel.update(
+                    patch = JSONObject().put("instructions", value),
+                    optimistic = { it.copy(instructions = value) },
+                )
             },
         )
     }
@@ -949,7 +1013,10 @@ fun BotSettingsSheet(
                                 .fillMaxWidth()
                                 .clickable {
                                     showModels = false
-                                    viewModel.update(JSONObject().put("model", option.ref))
+                                    viewModel.update(
+                                        patch = JSONObject().put("model", option.ref),
+                                        optimistic = { it.copy(model = option.ref) },
+                                    )
                                 }
                                 .padding(vertical = Dshm.spacing.xs),
                             verticalAlignment = Alignment.CenterVertically,
@@ -973,3 +1040,6 @@ fun BotSettingsSheet(
         )
     }
 }
+
+private const val DETAILS_TAB = 0
+private const val BROWSER_TAB = 1
