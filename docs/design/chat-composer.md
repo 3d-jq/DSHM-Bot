@@ -30,6 +30,10 @@
   `spacing.composerImeGap` —— 两个间隙各自独立（键盘下贴得比静止态紧得多，合成一个值就两头不讨好）；
   用 `consumeWindowInsets(innerPadding) + imePadding()` 避免与 Scaffold 内边距重复，键盘弹出时紧贴键盘上方。
   数值一律以 `core/design/DshmSpacing.kt` 为准，本文不抄。
+- **底部渐变磨砂**：照对话顶栏那层 `Brush.verticalGradient` 的写法，在消息列表上叠一块
+  底部遮罩（上下透明、输入框一带最浓、物理底边也透明，不盖住沉浸式小白条）。
+  `Modifier.blur(spacing.composerBlurRadius)` 做均匀模糊（API 31+ 生效，低版本自动退化为纯渐变），
+  渐变 alpha 负责「越靠近输入框越淡出」的观感。不动 Compose BOM，不用 `BlurRadiusSpec`。
 - **悬浮式**：消息列表铺满整屏（只让位给系统 UI），输入框与自己的留白一起叠在列表上方；
   列表的 `contentPadding.bottom` 按「输入框实测高度 + 留白」避开这块，让内容能从输入框下方透过去。
   **不要把 `composerBottomInset` 加到内容区的 `padding(bottom=)` 上** —— 那会把列表一起抬高，

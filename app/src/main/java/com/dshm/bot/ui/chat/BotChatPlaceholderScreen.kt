@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.chat
 
+import android.os.Build
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -69,6 +70,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -572,6 +574,30 @@ private fun ChatMessages(
                 }
             }
         }
+        // 输入框下面的渐变磨砂：照对话顶栏那层 `Brush.verticalGradient`，
+        // 改成上下淡出、输入框一带最浓；物理底边保持透明，沉浸式小白条不被白底盖住。
+        // 均匀模糊用旧的 `Modifier.blur`（API 31+ 生效），不升级依赖、不用 BlurRadiusSpec。
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(bottomChromeHeight + Dshm.spacing.xxl)
+                .then(
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        Modifier.blur(Dshm.spacing.composerBlurRadius)
+                    } else {
+                        Modifier
+                    },
+                )
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.35f to Dshm.colors.background.copy(alpha = 0.72f),
+                        0.72f to Dshm.colors.background.copy(alpha = 0.82f),
+                        1f to Color.Transparent,
+                    ),
+                ),
+        )
         if (!isNearBottom) {
             Box(
                 modifier = Modifier
