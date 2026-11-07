@@ -1,0 +1,230 @@
+package com.dshm.bot.ui.chat
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.data.remote.DshRemoteApi
+import com.dshm.bot.data.remote.RemoteDshApi
+import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.runtime.RuntimeEndpoint
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+
+class RoomSettingsViewModel(
+    private val roomId: String,
+    private val endpoint: RuntimeEndpoint?,
+) : ViewModel() {
+
+    private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
+    private val _ui = MutableStateFlow(RoomSettingsUi(loading = client != null))
+    val ui: StateFlow<RoomSettingsUi> = _ui.asStateFlow()
+
+    init {
+        if (client == null) {
+            _ui.update { it.copy(loading = false, error = "本机引擎未运行") }
+        } else {
+            load()
+        }
+    }
+
+    fun load() {
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching { connection.bot("state") }
+                .onSuccess { state -> _ui.value = parseRoomSettings(state, roomId) }
+                .onFailure { failure ->
+                    _ui.update { it.copy(loading = false, error = failure.message ?: "读取群聊失败") }
+                }
+            loadMemory(connection)
+            loadUsage(connection)
+        }
+    }
+
+    private suspend fun loadMemory(connection: DshRemoteApi) {
+        val memory = runCatching {
+            connection.bot("memory-view", JSONObject().put("roomId", roomId))
+        }.getOrNull()?.optJSONArray("entries")?.let { array ->
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val text = item.optString("text")
+                    if (text.isEmpty()) continue
+                    add(
+                        BotMemoryEntry(
+                            scope = item.optString("scope", "group"),
+                            topic = item.optString("topic").takeIf { it.isNotEmpty() },
+                            text = text,
+                        ),
+                    )
+                }
+            }
+        }.orEmpty()
+        _ui.update { it.copy(memory = memory) }
+    }
+
+    private suspend fun loadUsage(connection: DshRemoteApi) {
+        val usage = runCatching {
+            connection.bot("usage", JSONObject().put("timeZone", java.util.TimeZone.getDefault().id))
+        }.getOrNull() ?: return
+        val owners = usage.optJSONArray("owners") ?: return
+        val rows = usage.optJSONArray("rows") ?: return
+        var ownerIndex = -1
+        for (index in 0 until owners.length()) {
+            val owner = owners.optJSONObject(index) ?: continue
+            if (owner.optString("kind") == "room" && owner.optString("id") == roomId) {
+                ownerIndex = index
+                break
+            }
+        }
+        if (ownerIndex < 0) return
+        var input = 0L
+        var cacheRead = 0L
+        var cacheWrite = 0L
+        var output = 0L
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONArray(index) ?: continue
+            if (row.optInt(1, -1) != ownerIndex) continue
+            input += row.optLong(4, 0L)
+            cacheRead += row.optLong(5, 0L)
+            cacheWrite += row.optLong(6, 0L)
+            output += row.optLong(7, 0L)
+        }
+        val tokens = input + cacheRead + cacheWrite + output
+        val hit = if (input + cacheRead > 0L) cacheRead.toFloat() / (input + cacheRead) else null
+        _ui.update { it.copy(usageTokens = tokens, cacheHit = hit) }
+    }
+
+    fun updateRoom(
+        patch: JSONObject,
+        optimistic: (RoomInfo) -> RoomInfo = { it },
+        onDone: (String?) -> Unit = {},
+    ) {
+        val connection = client ?: return
+        val previous = _ui.value.info
+        _ui.update { state ->
+            state.copy(
+                saving = true,
+                info = state.info?.let(optimistic),
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot(
+                    "update-room",
+                    JSONObject().put("id", roomId).also { body ->
+                        patch.keys().forEach { key -> body.put(key, patch.get(key)) }
+                    },
+                )
+            }.onSuccess {
+                _ui.update { it.copy(saving = false) }
+                load()
+                onDone(null)
+            }.onFailure { failure ->
+                _ui.update {
+                    it.copy(
+                        saving = false,
+                        info = previous,
+                        error = failure.message ?: "群设置保存失败",
+                    )
+                }
+                onDone(failure.message ?: "群设置保存失败")
+            }
+        }
+    }
+
+    fun setFlags(patch: JSONObject, optimistic: (RoomInfo) -> RoomInfo) {
+        val connection = client ?: return
+        val previous = _ui.value.info
+        _ui.update { state -> state.copy(saving = true, info = state.info?.let(optimistic)) }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot(
+                    "set-flags",
+                    JSONObject().put("id", roomId).also { body ->
+                        patch.keys().forEach { key -> body.put(key, patch.get(key)) }
+                    },
+                )
+            }.onSuccess {
+                _ui.update { it.copy(saving = false) }
+                load()
+            }.onFailure { failure ->
+                _ui.update {
+                    it.copy(
+                        saving = false,
+                        info = previous,
+                        error = failure.message ?: "群显示设置失败",
+                    )
+                }
+            }
+        }
+    }
+
+    fun forgetMemory(entry: BotMemoryEntry, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching {
+                connection.bot(
+                    "memory-forget",
+                    JSONObject()
+                        .put("roomId", roomId)
+                        .put("scope", entry.scope)
+                        .put("topic", entry.topic)
+                        .put("text", entry.text),
+                )
+            }.onSuccess {
+                loadMemory(connection)
+                onDone(null)
+            }.onFailure { failure -> onDone(failure.message ?: "删除群记忆失败") }
+        }
+    }
+
+    fun delete(onDone: (String?) -> Unit) {
+        val connection = client ?: return
+        _ui.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            runCatching { connection.bot("delete-room", JSONObject().put("id", roomId)) }
+                .onSuccess {
+                    _ui.update { it.copy(saving = false) }
+                    onDone(null)
+                }
+                .onFailure { failure ->
+                    _ui.update { it.copy(saving = false, error = failure.message ?: "删除群聊失败") }
+                    onDone(failure.message ?: "删除群聊失败")
+                }
+        }
+    }
+
+    companion object {
+        fun factory(roomId: String, endpoint: RuntimeEndpoint?): ViewModelProvider.Factory =
+            viewModelFactory { initializer { RoomSettingsViewModel(roomId, endpoint) } }
+
+        suspend fun createRoom(
+            endpoint: RuntimeEndpoint?,
+            name: String,
+            admin: String,
+            members: List<String>,
+        ): Result<String> {
+            val connection = endpoint ?: return Result.failure(IllegalStateException("本机引擎未运行"))
+            val api = RemoteDshApi(DshClients.of(connection))
+            return runCatching {
+                val body = JSONObject()
+                    .put("members", JSONArray().apply { (listOf(admin) + members).forEach { put(it) } })
+                    .put("admin", admin)
+                    .put("greet", true)
+                if (name.isNotBlank()) body.put("name", name.trim())
+                api.bot("create-room", body).optString("id")
+            }.also { result ->
+                if (result.isSuccess && result.getOrNull().isNullOrEmpty()) {
+                    return Result.failure(IllegalStateException("创建群聊没有返回 id"))
+                }
+            }
+        }
+    }
+}

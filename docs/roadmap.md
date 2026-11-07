@@ -247,7 +247,7 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 
 ### Bot 完整设置页接线审计（2026-11-07）
 
-> 当前阶段只做**单个 Bot**，不展开群聊设置页；群聊相关入口与接口不在本轮接线范围。
+> 单 Bot 完整设置页与群聊设置页已分流；此节只记录单 Bot 页面的接线审计。
 
 - 顶栏「设置」下面的 Bot 名字副标题已去掉，标题栏只保留「设置」。
 - **真实可用**：名称 / 角色 / 模型 / 工作目录 / 说明 / 形象走 `update-bot`；隐私 Bot 走 `set-flags`；
@@ -260,9 +260,33 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   失败只写进 ViewModel 或不提示；后续统一补 Snackbar/错误行。
 - **当前完整页缺项**：权限设置（底部面板已有）、浏览器标签页、运行统计、记忆新增/编辑、文件夹选择器。
   这些都不是可点按钮，不能靠假跳转补齐。
-- **范围外（暂不处理）**：群聊目前也复用 [BotDetailsScreen]，而 `BotDetailsViewModel` 只读 `state.bots`、
-  写 Bot 专属接口；等开始做群聊时，单独接 `update-room` / `delete-room` / `room-continue` 与群成员、
-  群权限、公告等。当前不把它算作单 Bot 设置页的 bug，也不用假群设置入口补齐。
+- **群聊已分流**：不再把 `roomId` 当 `botId` 写；群聊详情走独立 `RoomSettingsScreen`，
+  底部面板走独立 `RoomSettingsSheet`，单 Bot 继续走 `BotDetailsScreen` / `BotSettingsSheet`。
+
+## 群聊专项（2026-11-07，🔄 本轮启动）
+
+- ☑️ 新建群聊：从主页「＋ → 新建群聊」打开，选管理员 + 至少一位成员，支持自定义群名；
+  走 `create-room {members, admin, name?, greet:true}`。创建成功后打开群设置页。
+- ☑️ 群聊详情分流：`room-details:<roomId>` 走 `RoomSettingsScreen`，不再误用单 Bot 的
+  `BotDetailsViewModel`；群聊名字胶囊弹 `RoomSettingsSheet`，按 `GroupOverview` 显示群头像、
+  公告、管理员、回答方式、权限、成员头像/点击、群记忆与群用量。
+- ☑️ 群设置真实接线：`state.rooms[]` 读取；`update-room` 改名称 / 公告 / 回答方式 / 管理员 /
+  成员增删 / 权限 / 工作目录；`set-flags` 改置顶 / 隐藏；`delete-room` 删除；
+  `memory-view` / `memory-forget` 按 `roomId` 查看和删除群记忆。
+- ☑️ 群对话既有链路：`send` 用群 id 当 `sessionId`，历史走 `room-chat`，实时用 `room` feed 刷新，
+  审批按 `roomId` 认领；本轮未改这些路径，继续用 `state.work.rooms` 判断运行状态。
+- ☑️ 群头像：`RoomAvatar` 按 DS Bot 把成员头像堆叠到主页 / 对话顶栏 / 群面板 / 群设置页，
+  超过四个显示 `+N`。
+- ☑️ 成员卡片：群面板与完整设置页都带头像、角色/管理员标记；点击打开对应单 Bot 对话，
+  设置页还可设管理员 / 移出成员。
+- ☑️ 群用量：读 `usage` 的 `owners` / `rows`，按 `room:<roomId>` 汇总 token 与缓存命中率；
+  群面板和设置页都显示。
+- ☑️ 新建 Bot：主页「＋ → 新建 Bot」进入整屏 `NewBotScreen`，接真实 `create-bot`，
+  可选形象 / 颜色 / 模型 / 角色 / 开场消息，校验重名与非法名字；创建成功后打开 Bot 设置页。
+- ☑️ 模型选择：新建 Bot、Bot 底部面板、Bot 完整设置页统一用 `BotModelComboBox` 下拉选择，
+  不支持搜索输入；选中立即走 `update-bot` 或写进 `create-bot`。
+- ⬜ 群聊后续：`folder-list` / `folder-pick` 群目录选择器、`memory-add` / `memory-edit` 群记忆新增编辑、
+  `room-continue` / 群接力进度、浏览器标签页。
 
 ## 已知工程债（与修 bug 并行清）
 

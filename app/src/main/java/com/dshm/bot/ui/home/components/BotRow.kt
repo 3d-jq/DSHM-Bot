@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.ui.components.BotAvatar
+import com.dshm.bot.ui.chat.RoomAvatar
 import com.dshm.bot.ui.home.ChatRowUi
 
 /** 主界面列表行：头像、名字、时间、最后一句。点击进入 Bot 对话。 */
@@ -34,7 +35,16 @@ fun BotRow(
             .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BotAvatar(inkId = row.inkId, glyph = row.glyph, avatarImage = row.avatarImage, avatarShape = row.avatarShape)
+        if (row.isGroup) {
+            RoomAvatar(members = row.roomMembers)
+        } else {
+            BotAvatar(
+                inkId = row.inkId,
+                glyph = row.glyph,
+                avatarImage = row.avatarImage,
+                avatarShape = row.avatarShape,
+            )
+        }
         Spacer(Modifier.width(Dshm.spacing.md))
         // 文字列与头像中线对齐（行级 CenterVertically）；名字与预览之间留 4dp 间隙。
         Column(

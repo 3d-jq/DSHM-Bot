@@ -4,6 +4,7 @@ import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.BotInks
 import com.dshm.bot.domain.model.BotShapeDefaults
 import com.dshm.bot.domain.model.BotSummary
+import com.dshm.bot.ui.home.RoomMemberUi
 import org.json.JSONObject
 import java.time.Instant
 
@@ -20,6 +21,28 @@ object DsBotParser {
     fun parseState(state: JSONObject): List<BotSummary> {
         val out = mutableListOf<BotSummary>()
         val now = System.currentTimeMillis()
+        val botLooks = buildMap {
+            state.optJSONArray("bots")?.let { array ->
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val id = item.optString("id")
+                    if (id.isEmpty()) continue
+                    val avatar = item.optJSONObject("avatar")
+                    put(
+                        id,
+                        RoomMemberUi(
+                            id = id,
+                            name = item.optString("name").ifEmpty { id },
+                            inkId = colorOf(item.optString("color")),
+                            avatarImage = avatar?.anyOrNull("image") as? String,
+                            avatarShape = (avatar?.anyOrNull("shape") as? String)
+                                ?: BotShapeDefaults.shapeFor(id),
+                            role = item.optString("role").takeIf { it.isNotBlank() },
+                        ),
+                    )
+                }
+            }
+        }
 
         state.optJSONArray("bots")?.let { array ->
             for (index in 0 until array.length()) {
@@ -61,6 +84,12 @@ object DsBotParser {
                         glyph = AvatarGlyph.GROUP,
                         pinned = item.optBoolean("pinned", false),
                         isGroup = true,
+                        roomMembers = item.optJSONArray("members")?.let { members ->
+                            (0 until members.length()).mapNotNull { index ->
+                                botLooks[members.optString(index)]
+                            }
+                        }.orEmpty(),
+                        roomAdmin = item.optString("admin").takeIf { it.isNotEmpty() },
                     ),
                 )
             }

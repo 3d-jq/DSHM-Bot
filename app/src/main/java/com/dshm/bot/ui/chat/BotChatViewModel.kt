@@ -38,6 +38,7 @@ data class ChatEntry(
     val kind: ChatEntryKind,
     val text: String,
     val author: String? = null,
+    val botId: String? = null,
 )
 
 data class BotChatUiState(
@@ -687,6 +688,7 @@ class BotChatViewModel(
                         kind = ChatEntryKind.BOT,
                         text = it,
                         author = item.optString("name").ifEmpty { botName },
+                        botId = item.optString("botId").takeIf { value -> value.isNotEmpty() },
                     )
                 }
 

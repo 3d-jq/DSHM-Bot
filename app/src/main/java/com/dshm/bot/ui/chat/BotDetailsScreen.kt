@@ -77,7 +77,6 @@ fun BotDetailsScreen(
     val info = state.info
     var editName by rememberSaveable { mutableStateOf(false) }
     var editRole by rememberSaveable { mutableStateOf(false) }
-    var pickModel by rememberSaveable { mutableStateOf(false) }
     var pickShape by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var editWorkdir by rememberSaveable { mutableStateOf(false) }
@@ -158,11 +157,19 @@ fun BotDetailsScreen(
                     onClick = { editRole = true },
                 )
                 SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.bot_settings_model),
-                    value = modelLabel(info?.model, state.models) ?: stringResource(R.string.settings_value_default),
-                    onClick = { pickModel = true },
-                )
+                Column(Modifier.padding(Dshm.spacing.md)) {
+                    BotModelComboBox(
+                        models = state.models,
+                        selectedRef = info?.model,
+                        onSelect = { ref ->
+                            viewModel.update(
+                                patch = JSONObject().put("model", ref),
+                                optimistic = { it.copy(model = ref) },
+                            )
+                        },
+                        enabled = info != null && !state.saving,
+                    )
+                }
                 SettingsRowDivider()
                 SettingsRow(
                     title = stringResource(R.string.bot_settings_workdir),
@@ -340,48 +347,6 @@ fun BotDetailsScreen(
                     patch = JSONObject().put("role", value),
                     optimistic = { it.copy(role = value) },
                 )
-            },
-        )
-    }
-    if (pickModel) {
-        AlertDialog(
-            onDismissRequest = { pickModel = false },
-            containerColor = Dshm.colors.surface,
-            title = { Text(stringResource(R.string.bot_settings_model)) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    state.models.forEach { option ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    pickModel = false
-                                    viewModel.update(
-                                        patch = JSONObject().put("model", option.ref),
-                                        optimistic = { it.copy(model = option.ref) },
-                                    )
-                                }
-                                .padding(vertical = Dshm.spacing.xs),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(
-                                selected = option.ref == info?.model,
-                                onClick = null,
-                            )
-                            Text(
-                                text = option.name,
-                                style = Dshm.typography.rowTitle,
-                                color = Dshm.colors.textPrimary,
-                                modifier = Modifier.padding(start = Dshm.spacing.sm),
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { pickModel = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
             },
         )
     }
@@ -568,7 +533,7 @@ private fun NewScheduleDialog(
 }
 
 @Composable
-private fun TextEditDialog(
+internal fun TextEditDialog(
     title: String,
     initial: String,
     onDismiss: () -> Unit,
@@ -605,12 +570,7 @@ private fun TextEditDialog(
     )
 }
 
-private fun modelLabel(ref: String?, models: List<BotModelOption>): String? {
-    if (ref.isNullOrBlank()) return null
-    return models.firstOrNull { it.ref == ref }?.name ?: ref
-}
-
-private fun usageLabel(tokens: Long, cacheHit: Float?): String {
+internal fun usageLabel(tokens: Long, cacheHit: Float?): String {
     if (tokens <= 0L) return "—"
     val amount = when {
         tokens >= 1_000_000 -> String.format("%.1fM", tokens / 1_000_000.0)
@@ -697,7 +657,6 @@ fun BotSettingsSheet(
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val info = state.info
     val language = settingsLanguage()
-    var showModels by rememberSaveable { mutableStateOf(false) }
     var editFolder by rememberSaveable { mutableStateOf(false) }
     var editInstructions by rememberSaveable { mutableStateOf(false) }
     var showMemory by rememberSaveable { mutableStateOf(false) }
@@ -797,12 +756,19 @@ fun BotSettingsSheet(
 
             Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_model)) {
-                SettingsRow(
-                    title = modelLabel(info?.model, state.models)
-                        ?: stringResource(R.string.settings_value_default),
-                    subtitle = info?.model,
-                    onClick = { showModels = true },
-                )
+                Column(Modifier.padding(Dshm.spacing.md)) {
+                    BotModelComboBox(
+                        models = state.models,
+                        selectedRef = info?.model,
+                        onSelect = { ref ->
+                            viewModel.update(
+                                patch = JSONObject().put("model", ref),
+                                optimistic = { it.copy(model = ref) },
+                            )
+                        },
+                        enabled = info != null && !state.saving,
+                    )
+                }
                 if (state.saving) {
                     SettingsRow(
                         title = stringResource(R.string.bot_settings_saving),
@@ -998,45 +964,6 @@ fun BotSettingsSheet(
         )
     }
 
-    if (showModels) {
-        AlertDialog(
-            onDismissRequest = { showModels = false },
-            containerColor = Dshm.colors.surface,
-            title = { Text(stringResource(R.string.bot_settings_model)) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    state.models.forEach { option ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    showModels = false
-                                    viewModel.update(
-                                        patch = JSONObject().put("model", option.ref),
-                                        optimistic = { it.copy(model = option.ref) },
-                                    )
-                                }
-                                .padding(vertical = Dshm.spacing.xs),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = option.ref == info?.model, onClick = null)
-                            Text(
-                                text = option.name,
-                                style = Dshm.typography.rowTitle,
-                                color = Dshm.colors.textPrimary,
-                                modifier = Modifier.padding(start = Dshm.spacing.sm),
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showModels = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            },
-        )
-    }
 }
 
 private const val DETAILS_TAB = 0

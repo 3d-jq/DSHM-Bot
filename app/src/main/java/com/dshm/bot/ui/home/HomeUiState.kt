@@ -15,6 +15,19 @@ data class ChatRowUi(
     val unreadCount: Int,
     val avatarImage: String? = null,
     val avatarShape: String? = null,
+    /** 群聊成员头像信息（主页/群面板用）；单 Bot 为空。 */
+    val roomMembers: List<RoomMemberUi> = emptyList(),
+    /** 群管理员 id；单 Bot 为 null。 */
+    val roomAdmin: String? = null,
+)
+
+data class RoomMemberUi(
+    val id: String,
+    val name: String,
+    val inkId: String?,
+    val avatarImage: String?,
+    val avatarShape: String?,
+    val role: String? = null,
 )
 
 /** 主界面状态：单一数据源，UI 只渲染，不判断业务。 */

@@ -37,6 +37,11 @@ import com.dshm.bot.ui.account.AccountViewModel
 import com.dshm.bot.ui.chat.BotBrowserScreen
 import com.dshm.bot.ui.chat.BotChatScreen
 import com.dshm.bot.ui.chat.BotDetailsScreen
+import com.dshm.bot.ui.chat.NewGroupDialog
+import com.dshm.bot.ui.chat.NewBotScreen
+import com.dshm.bot.ui.chat.RoomMemberOption
+import com.dshm.bot.ui.chat.RoomSettingsScreen
+import com.dshm.bot.ui.chat.RoomSettingsViewModel
 import com.dshm.bot.ui.engine.DiagnosticsScreen
 import com.dshm.bot.ui.engine.EngineScreen
 import com.dshm.bot.ui.engine.EngineViewModel
@@ -86,10 +91,12 @@ private const val SCREEN_CHAT_FONT = "chat-font"
 private const val SCREEN_LANGUAGE = "language"
 private const val SCREEN_ACCOUNT = "account"
 private const val SCREEN_SETTINGS_PAGE = "settings-page"
+private const val SCREEN_NEW_BOT = "new-bot"
 private const val SCREEN_WEB = "web"
 private const val SCREEN_DIAGNOSTICS = "diagnostics"
 private const val CHAT_PREFIX = "chat:"
 private const val BOT_DETAILS_PREFIX = "bot-details:"
+private const val ROOM_DETAILS_PREFIX = "room-details:"
 private const val SCREEN_BOT_BROWSER = "bot-browser"
 
 /**
@@ -143,6 +150,8 @@ fun DshmBotApp(
     }
     var openBotId by rememberSaveable { mutableStateOf<String?>(null) }
     var botDetailsOpen by rememberSaveable { mutableStateOf(false) }
+    var newGroupOpen by rememberSaveable { mutableStateOf(false) }
+    var newBotOpen by rememberSaveable { mutableStateOf(false) }
     var botBrowserOpen by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -204,6 +213,7 @@ fun DshmBotApp(
 
     val screenKey = when {
         !onboardingDone -> SCREEN_ONBOARDING
+        newBotOpen -> SCREEN_NEW_BOT
         webMode && !settingsOpen && openBotId == null && !searchOpen -> SCREEN_WEB
         webOpen -> SCREEN_WEB
         // 诊断页是引擎页推出来的：它要先判，否则 engineOpen 会把诊断页挡住。
@@ -215,7 +225,10 @@ fun DshmBotApp(
         accountOpen -> SCREEN_ACCOUNT
         settingsStack.isNotEmpty() -> "$SCREEN_SETTINGS_PAGE:${settingsStack.last()}"
         botBrowserOpen -> SCREEN_BOT_BROWSER
-        botDetailsOpen && openBotId != null -> BOT_DETAILS_PREFIX + openBotId
+        botDetailsOpen && openBotId != null -> {
+            val openBot = uiState.rows.firstOrNull { it.id == openBotId }
+            if (openBot?.isGroup == true) ROOM_DETAILS_PREFIX + openBotId else BOT_DETAILS_PREFIX + openBotId
+        }
         openBotId != null -> CHAT_PREFIX + openBotId
         settingsOpen -> SCREEN_SETTINGS
         searchOpen -> SCREEN_SEARCH
@@ -235,10 +248,12 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || diagnosticsOpen || settingsStack.isNotEmpty() || webMode || webOpen || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || newBotOpen || newGroupOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || diagnosticsOpen || settingsStack.isNotEmpty() || webMode || webOpen || !onboardingDone) {
         navForward = false
         when {
             !onboardingDone -> Unit
+            newBotOpen -> newBotOpen = false
+            newGroupOpen -> newGroupOpen = false
             botBrowserOpen -> botBrowserOpen = false
             botDetailsOpen -> botDetailsOpen = false
             diagnosticsOpen -> {
@@ -317,6 +332,20 @@ fun DshmBotApp(
                 },
             )
 
+            key == SCREEN_NEW_BOT -> NewBotScreen(
+                endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                onBack = {
+                    navForward = false
+                    newBotOpen = false
+                },
+                onCreated = { botId ->
+                    navForward = true
+                    newBotOpen = false
+                    openBotId = botId
+                    botDetailsOpen = true
+                },
+            )
+
             key == SCREEN_BOT_BROWSER -> BotBrowserScreen(
                 endpoint = (engineState as? RuntimeState.Running)?.endpoint,
                 onBack = {
@@ -325,10 +354,62 @@ fun DshmBotApp(
                 },
             )
 
+            key.startsWith(ROOM_DETAILS_PREFIX) -> {
+                val roomId = key.removePrefix(ROOM_DETAILS_PREFIX)
+                val openRoom = uiState.rows.firstOrNull { it.id == roomId }
+                if (openRoom?.isGroup == true) {
+                    RoomSettingsScreen(
+                        row = openRoom,
+                        endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                        onBack = {
+                            navForward = false
+                            botDetailsOpen = false
+                        },
+                        onDeleted = {
+                            navForward = false
+                            botDetailsOpen = false
+                            openBotId = null
+                        },
+                        onOpenMember = { memberId ->
+                            navForward = true
+                            openBotId = memberId
+                            botDetailsOpen = false
+                        },
+                    )
+                } else {
+                    HomeScreen(
+                        uiState = uiState,
+                        onQueryChange = homeViewModel::setQuery,
+                        onOpenBot = {
+                            navForward = true
+                            openBotId = it
+                        },
+                        onCreateBot = {
+                            navForward = true
+                            newBotOpen = true
+                        },
+                        onCreateGroup = { newGroupOpen = true },
+                        onOpenSearch = {
+                            navForward = true
+                            searchOpen = true
+                        },
+                        onOpenSettings = {
+                            navForward = true
+                            settingsOpen = true
+                        },
+                        engineLabel = engineNotice,
+                        onEngineClick = {
+                            navForward = true
+                            engineOpen = true
+                        },
+                    )
+                }
+            }
+
             key.startsWith(BOT_DETAILS_PREFIX) -> {
                 val botId = key.removePrefix(BOT_DETAILS_PREFIX)
                 val openBot = uiState.rows.firstOrNull { it.id == botId }
-                if (openBot != null) {
+                if (openBot?.isGroup == false) {
                     BotDetailsScreen(
                         bot = openBot,
                         endpoint = (engineState as? RuntimeState.Running)?.endpoint,
@@ -350,8 +431,11 @@ fun DshmBotApp(
                             navForward = true
                             openBotId = it
                         },
-                        onCreateBot = {},
-                        onCreateGroup = {},
+                        onCreateBot = {
+                            navForward = true
+                            newBotOpen = true
+                        },
+                        onCreateGroup = { newGroupOpen = true },
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -388,6 +472,11 @@ fun DshmBotApp(
                             navForward = true
                             botBrowserOpen = true
                         },
+                        onOpenMember = { memberId ->
+                            navForward = true
+                            openBotId = memberId
+                            botDetailsOpen = false
+                        },
                         fontScale = settingsUiState.chatFontSize.scale(),
                         voiceMode = settingsUiState.voiceMode,
                     )
@@ -399,8 +488,11 @@ fun DshmBotApp(
                             navForward = true
                             openBotId = it
                         },
-                        onCreateBot = {},
-                        onCreateGroup = {},
+                        onCreateBot = {
+                            navForward = true
+                            newBotOpen = true
+                        },
+                        onCreateGroup = { newGroupOpen = true },
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -708,8 +800,11 @@ fun DshmBotApp(
                     navForward = true
                     openBotId = it
                 },
-                onCreateBot = {},
-                onCreateGroup = {},
+                onCreateBot = {
+                    navForward = true
+                    newBotOpen = true
+                },
+                onCreateGroup = { newGroupOpen = true },
                 onOpenSearch = {
                     navForward = true
                     searchOpen = true
@@ -726,6 +821,26 @@ fun DshmBotApp(
             )
         }
         }
+    }
+
+    if (newGroupOpen) {
+        val endpoint = (engineState as? RuntimeState.Running)?.endpoint
+        val botOptions = uiState.rows
+            .filterNot { it.isGroup }
+            .map { RoomMemberOption(it.id, it.name) }
+        NewGroupDialog(
+            bots = botOptions,
+            onDismiss = { newGroupOpen = false },
+            onCreate = { name, admin, members ->
+                RoomSettingsViewModel.createRoom(endpoint, name, admin, members)
+            },
+            onCreated = { roomId ->
+                newGroupOpen = false
+                navForward = true
+                openBotId = roomId
+                botDetailsOpen = true
+            },
+        )
     }
 
     }

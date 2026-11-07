@@ -92,6 +92,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.ui.components.BotAvatar
 import com.dshm.bot.ui.components.FloatingIconButton
@@ -113,6 +114,7 @@ fun BotChatScreen(
     onBack: () -> Unit,
     onDetails: () -> Unit = {},
     onOpenBrowser: () -> Unit = {},
+    onOpenMember: (String) -> Unit = {},
     fontScale: Float = 1f,
     voiceMode: VoiceMode = VoiceMode.AUTO,
     modifier: Modifier = Modifier,
@@ -151,13 +153,6 @@ fun BotChatScreen(
     val bottomChromeHeight = composerHeight + composerBottomPadding
     var chatError by remember { mutableStateOf<String?>(null) }
     var stopError by remember { mutableStateOf<String?>(null) }
-    val workingTransition = rememberInfiniteTransition(label = "bot-working")
-    val workingPulse by workingTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(tween(650), repeatMode = RepeatMode.Reverse),
-        label = "bot-working-pulse",
-    )
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -205,21 +200,26 @@ fun BotChatScreen(
                                 onClick = { quickSettings = true },
                             )
                         }
-                        BotAvatar(
-                            inkId = bot.inkId,
-                            glyph = bot.glyph,
-                            avatarImage = bot.avatarImage,
-                            avatarShape = bot.avatarShape,
-                            size = Dshm.spacing.avatar,
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .zIndex(1f)
-                                .graphicsLayer {
-                                    val scale = if (working) workingPulse else 1f
-                                    scaleX = scale
-                                    scaleY = scale
-                                },
-                        )
+                        if (bot.isGroup) {
+                            RoomAvatar(
+                                members = bot.roomMembers,
+                                size = Dshm.spacing.avatar,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .zIndex(1f),
+                            )
+                        } else {
+                            BotAvatar(
+                                inkId = bot.inkId,
+                                glyph = bot.glyph,
+                                avatarImage = bot.avatarImage,
+                                avatarShape = bot.avatarShape,
+                                size = Dshm.spacing.avatar,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .zIndex(1f),
+                            )
+                        }
                     }
                     FloatingIconButton(
                         icon = R.drawable.ic_lucide_square_user,
@@ -290,6 +290,7 @@ fun BotChatScreen(
                         bottomChromeHeight = bottomChromeHeight,
                         autoLoadEnabled = state.error == null,
                         onLoadEarlier = viewModel::loadEarlier,
+                        onOpenMember = onOpenMember,
                     )
                 }
             }
@@ -383,16 +384,29 @@ fun BotChatScreen(
         }
     }
     if (quickSettings) {
-        BotSettingsSheet(
-            bot = bot,
-            endpoint = endpoint,
-            onDismiss = { quickSettings = false },
-            onDetails = {
-                quickSettings = false
-                onDetails()
-            },
-            onBrowser = {},
-        )
+        if (bot.isGroup) {
+            RoomSettingsSheet(
+                row = bot,
+                endpoint = endpoint,
+                onDismiss = { quickSettings = false },
+                onDetails = {
+                    quickSettings = false
+                    onDetails()
+                },
+                onOpenMember = onOpenMember,
+            )
+        } else {
+            BotSettingsSheet(
+                bot = bot,
+                endpoint = endpoint,
+                onDismiss = { quickSettings = false },
+                onDetails = {
+                    quickSettings = false
+                    onDetails()
+                },
+                onBrowser = {},
+            )
+        }
     }
 }
 
@@ -454,6 +468,7 @@ private fun ChatMessages(
     bottomChromeHeight: Dp = 56.dp,
     /** 上次加载出错时不再自动触发（否则会一直重试）。 */
     autoLoadEnabled: Boolean = true,
+    onOpenMember: (String) -> Unit = {},
     onLoadEarlier: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
@@ -609,6 +624,11 @@ private fun ChatMessages(
                 val newer = entries.getOrNull(entries.size - index)
                 val turnsChanged = newer != null && newer.kind != entry.kind &&
                     (newer.kind == ChatEntryKind.USER || entry.kind == ChatEntryKind.USER)
+                // 群聊里同一 bot 连续的多条回复合成一组（对齐 DS Bot `stackReplies`）：
+                // 只有当视觉上的上一条不是同 bot 的 bot 消息时才显示头像+名字。
+                val sameBotContinuation = bot.isGroup && entry.kind == ChatEntryKind.BOT &&
+                    entry.botId != null && newer?.kind == ChatEntryKind.BOT && newer.botId == entry.botId
+                val showGroupAuthor = bot.isGroup && entry.kind == ChatEntryKind.BOT && !sameBotContinuation
                 Column(
                     modifier = Modifier.padding(
                         top = if (turnsChanged) Dshm.spacing.turnGap - Dshm.spacing.sm else Dshm.spacing.xs,
@@ -619,8 +639,13 @@ private fun ChatMessages(
                     ChatEntryKind.BOT -> BotBubble(
                         text = entry.text,
                         author = entry.author,
-                        showAuthor = bot.isGroup,
+                        showAuthor = showGroupAuthor,
+                        botId = entry.botId,
+                        members = bot.roomMembers,
+                        adminId = bot.roomAdmin,
+                        onOpenMember = onOpenMember,
                         fontScale = fontScale,
+                        isContinuation = sameBotContinuation,
                     )
                     ChatEntryKind.EVENT -> EventLine(entry.text)
                 }
@@ -747,17 +772,28 @@ private fun ChatActivityRow(
         horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BotAvatar(
-            inkId = bot.inkId,
-            glyph = bot.glyph,
-            avatarImage = bot.avatarImage,
-            avatarShape = bot.avatarShape,
-            size = Dshm.spacing.lg + Dshm.spacing.sm,
-            modifier = Modifier.graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            },
-        )
+        if (bot.isGroup) {
+            RoomAvatar(
+                members = bot.roomMembers,
+                size = Dshm.spacing.lg + Dshm.spacing.sm,
+                modifier = Modifier.graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+            )
+        } else {
+            BotAvatar(
+                inkId = bot.inkId,
+                glyph = bot.glyph,
+                avatarImage = bot.avatarImage,
+                avatarShape = bot.avatarShape,
+                size = Dshm.spacing.lg + Dshm.spacing.sm,
+                modifier = Modifier.graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+            )
+        }
         Text(
             text = label,
             style = Dshm.typography.rowPreview,
@@ -861,26 +897,74 @@ private fun BotBubble(
     author: String?,
     showAuthor: Boolean,
     fontScale: Float,
+    botId: String? = null,
+    members: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
+    adminId: String? = null,
+    onOpenMember: (String) -> Unit = {},
+    isContinuation: Boolean = false,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.Start,
-    ) {
-        if (showAuthor && !author.isNullOrBlank()) {
-            Text(
-                text = author,
-                style = Dshm.typography.rowTime.copy(fontSize = 12.sp),
-                color = Dshm.colors.textTertiary,
-                modifier = Modifier.padding(start = Dshm.spacing.xs, bottom = Dshm.spacing.xxs),
-            )
+    val member = members.firstOrNull { it.id == botId }
+    val name = member?.name ?: author
+    val isAdmin = botId != null && botId == adminId
+    val avatarSize = Dshm.spacing.lg + Dshm.spacing.sm
+    Row(modifier = Modifier.fillMaxWidth()) {
+        // 组头显示成员头像；同 bot 连续的消息用等宽占位，让气泡保持对齐。
+        if (showAuthor && !name.isNullOrBlank() && !isContinuation) {
+            if (member != null) {
+                BotAvatar(
+                    inkId = member.inkId,
+                    glyph = AvatarGlyph.BOT,
+                    avatarImage = member.avatarImage,
+                    avatarShape = member.avatarShape,
+                    size = avatarSize,
+                    modifier = Modifier
+                        .padding(top = Dshm.spacing.sm)
+                        .then(if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier),
+                )
+            } else {
+                Spacer(Modifier.width(avatarSize))
+            }
+        } else if (isContinuation) {
+            Spacer(Modifier.width(avatarSize))
         }
-        Column(
-            modifier = Modifier
-                .clip(RoundedCornerShape(Dshm.radius.lg))
-                .background(Dshm.colors.bubbleAssistant)
-                .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-        ) {
-            MarkdownText(markdown = text, fontScale = fontScale)
+        Spacer(Modifier.width(Dshm.spacing.sm))
+        Column(modifier = Modifier.weight(1f, fill = false)) {
+            if (showAuthor && !name.isNullOrBlank() && !isContinuation) {
+                Row(
+                    modifier = Modifier
+                        .padding(bottom = Dshm.spacing.xxs)
+                        .then(
+                            if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = name,
+                        style = Dshm.typography.rowTitle.copy(fontSize = 13.sp),
+                        color = Dshm.colors.textPrimary,
+                    )
+                    if (isAdmin) {
+                        Spacer(Modifier.width(Dshm.spacing.xs))
+                        Text(
+                            text = stringResource(R.string.room_settings_admin_badge),
+                            style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                            color = Dshm.colors.textSecondary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(Dshm.radius.xs))
+                                .background(Dshm.colors.surfaceMuted)
+                                .padding(horizontal = Dshm.spacing.xs, vertical = Dshm.spacing.xxs),
+                        )
+                    }
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(Dshm.radius.lg))
+                    .background(Dshm.colors.bubbleAssistant)
+                    .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+            ) {
+                MarkdownText(markdown = text, fontScale = fontScale)
+            }
         }
     }
 }

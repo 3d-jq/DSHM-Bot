@@ -1,6 +1,7 @@
 package com.dshm.bot.domain.model
 
 import java.time.Instant
+import com.dshm.bot.ui.home.RoomMemberUi
 
 /** 头像占位图形。真实 Bot 头像（DS Bot 的 3D 角色或用户照片）接入后由服务端下发。 */
 enum class AvatarGlyph {
@@ -33,4 +34,8 @@ data class BotSummary(
     val avatarImage: String? = null,
     /** DS Bot 角色形状（`whale` 等）。 */
     val avatarShape: String? = null,
+    /** 群聊成员头像信息；单 Bot 为空。 */
+    val roomMembers: List<RoomMemberUi> = emptyList(),
+    /** 群管理员 id；单 Bot 为空。 */
+    val roomAdmin: String? = null,
 )

@@ -128,6 +128,8 @@ class HomeViewModel(
                     unreadCount = bot.unreadCount,
                     avatarImage = bot.avatarImage,
                     avatarShape = bot.avatarShape,
+                    roomMembers = bot.roomMembers,
+                    roomAdmin = bot.roomAdmin,
                 )
             }
     }

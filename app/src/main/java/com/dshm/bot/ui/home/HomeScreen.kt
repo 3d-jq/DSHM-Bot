@@ -13,12 +13,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -27,7 +23,6 @@ import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.ui.home.components.BotRow
 import com.dshm.bot.ui.home.components.HomeTopBar
-import kotlinx.coroutines.launch
 
 /**
  * 主界面：Bot 与群聊列表。
@@ -46,18 +41,9 @@ fun HomeScreen(
     onEngineClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val comingSoon = stringResource(R.string.home_coming_soon)
-
-    fun showComingSoon() {
-        scope.launch { snackbarHostState.showSnackbar(comingSoon) }
-    }
-
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Dshm.colors.pageBackground,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -69,13 +55,11 @@ fun HomeScreen(
                 onSearch = onOpenSearch,
                 onCreateBot = {
                     onCreateBot()
-                    showComingSoon()
                 },
                 engineLabel = engineLabel,
                 onEngineClick = onEngineClick,
                 onCreateGroup = {
                     onCreateGroup()
-                    showComingSoon()
                 },
             )
             HomeContent(
