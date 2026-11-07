@@ -613,25 +613,34 @@ private fun ChatMessages(
                     BotBubble(
                         text = streaming,
                         author = null,
-                        showAuthor = false,
                         fontScale = fontScale,
                     )
                 }
             }
             items(entries.size, key = { index -> entries[entries.size - 1 - index].id }) { index ->
-                val entry = entries[entries.size - 1 - index]
-                // 倒序：上一条在列表里是「更新的那条」（index - 1）。
-                val newer = entries.getOrNull(entries.size - index)
+                val chrono = entries.size - 1 - index
+                val entry = entries[chrono]
+                // 视觉相邻：older 在上面，newer 在下面（chronological 顺序）。
+                val older = entries.getOrNull(chrono - 1)
+                val newer = entries.getOrNull(chrono + 1)
                 val turnsChanged = newer != null && newer.kind != entry.kind &&
                     (newer.kind == ChatEntryKind.USER || entry.kind == ChatEntryKind.USER)
                 // 群聊里同一 bot 连续的多条回复合成一组（对齐 DS Bot `stackReplies`）：
-                // 只有当视觉上的上一条不是同 bot 的 bot 消息时才显示头像+名字。
-                val sameBotContinuation = bot.isGroup && entry.kind == ChatEntryKind.BOT &&
-                    entry.botId != null && newer?.kind == ChatEntryKind.BOT && newer.botId == entry.botId
-                val showGroupAuthor = bot.isGroup && entry.kind == ChatEntryKind.BOT && !sameBotContinuation
+                // 名字只在组首（视觉最上一条），头像只贴组尾（视觉最下一条）的气泡左侧。
+                val isBotEntry = entry.kind == ChatEntryKind.BOT
+                val sameBotAsOlder = bot.isGroup && isBotEntry && entry.botId != null &&
+                    older?.kind == ChatEntryKind.BOT && older.botId == entry.botId
+                val sameBotAsNewer = bot.isGroup && isBotEntry && entry.botId != null &&
+                    newer?.kind == ChatEntryKind.BOT && newer.botId == entry.botId
+                val groupStart = bot.isGroup && isBotEntry && !sameBotAsOlder
+                val groupEnd = bot.isGroup && isBotEntry && !sameBotAsNewer
                 Column(
                     modifier = Modifier.padding(
-                        top = if (turnsChanged) Dshm.spacing.turnGap - Dshm.spacing.sm else Dshm.spacing.xs,
+                        top = if (groupStart || turnsChanged) {
+                            Dshm.spacing.turnGap - Dshm.spacing.sm
+                        } else {
+                            Dshm.spacing.xs
+                        },
                     ),
                 ) {
                 when (entry.kind) {
@@ -639,13 +648,14 @@ private fun ChatMessages(
                     ChatEntryKind.BOT -> BotBubble(
                         text = entry.text,
                         author = entry.author,
-                        showAuthor = showGroupAuthor,
+                        fontScale = fontScale,
+                        isGroup = bot.isGroup,
+                        showName = groupStart,
+                        showAvatar = groupEnd,
                         botId = entry.botId,
                         members = bot.roomMembers,
                         adminId = bot.roomAdmin,
                         onOpenMember = onOpenMember,
-                        fontScale = fontScale,
-                        isContinuation = sameBotContinuation,
                     )
                     ChatEntryKind.EVENT -> EventLine(entry.text)
                 }
@@ -890,81 +900,101 @@ private fun UserBubble(text: String, fontScale: Float) {
     }
 }
 
-/** Bot 消息气泡，左对齐；群聊里显示发言 Bot 的名字。 */
+/**
+ * Bot 消息气泡，对齐 DS Bot `GroupMessage`：
+ * - 群聊名字只在组首顶部显示，左缩进到气泡列（`bt-group-name`）；
+ * - 每条气泡左侧预留头像位（`bt-msg-line` 的 30px）；
+ * - 头像只贴组尾那条气泡的左侧，并与气泡底部对齐（`lead` + `align-items:flex-end`）。
+ * 单 Bot 对话无名字无头像，保持原样。
+ */
 @Composable
 private fun BotBubble(
     text: String,
     author: String?,
-    showAuthor: Boolean,
     fontScale: Float,
+    isGroup: Boolean = false,
+    showName: Boolean = false,
+    showAvatar: Boolean = false,
     botId: String? = null,
     members: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
     adminId: String? = null,
     onOpenMember: (String) -> Unit = {},
-    isContinuation: Boolean = false,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
     val isAdmin = botId != null && botId == adminId
-    val avatarSize = Dshm.spacing.lg + Dshm.spacing.sm
-    Row(modifier = Modifier.fillMaxWidth()) {
-        // 组头显示成员头像；同 bot 连续的消息用等宽占位，让气泡保持对齐。
-        if (showAuthor && !name.isNullOrBlank() && !isContinuation) {
-            if (member != null) {
-                BotAvatar(
-                    inkId = member.inkId,
-                    glyph = AvatarGlyph.BOT,
-                    avatarImage = member.avatarImage,
-                    avatarShape = member.avatarShape,
-                    size = avatarSize,
-                    modifier = Modifier
-                        .padding(top = Dshm.spacing.sm)
-                        .then(if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier),
-                )
-            } else {
-                Spacer(Modifier.width(avatarSize))
-            }
-        } else if (isContinuation) {
-            Spacer(Modifier.width(avatarSize))
+    val avatarSize = Dshm.spacing.lg + Dshm.spacing.xs
+    val gap = Dshm.spacing.sm
+    val bubbleLeft = avatarSize + gap
+    val nameStart = bubbleLeft + Dshm.spacing.md
+
+    val bubble: @Composable () -> Unit = {
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(Dshm.radius.lg))
+                .background(Dshm.colors.bubbleAssistant)
+                .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+        ) {
+            MarkdownText(markdown = text, fontScale = fontScale)
         }
-        Spacer(Modifier.width(Dshm.spacing.sm))
-        Column(modifier = Modifier.weight(1f, fill = false)) {
-            if (showAuthor && !name.isNullOrBlank() && !isContinuation) {
-                Row(
-                    modifier = Modifier
-                        .padding(bottom = Dshm.spacing.xxs)
-                        .then(
-                            if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier,
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+    }
+
+    if (!isGroup) {
+        Column(modifier = Modifier.fillMaxWidth()) { bubble() }
+        return
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (showName && !name.isNullOrBlank()) {
+            Row(
+                modifier = Modifier
+                    .padding(start = nameStart, bottom = Dshm.spacing.xxs)
+                    .then(
+                        if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = name,
+                    style = Dshm.typography.rowTitle.copy(fontSize = 13.sp),
+                    color = Dshm.colors.textPrimary,
+                )
+                if (isAdmin) {
+                    Spacer(Modifier.width(Dshm.spacing.xs))
                     Text(
-                        text = name,
-                        style = Dshm.typography.rowTitle.copy(fontSize = 13.sp),
-                        color = Dshm.colors.textPrimary,
+                        text = stringResource(R.string.room_settings_admin_badge),
+                        style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                        color = Dshm.colors.textSecondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(Dshm.radius.xs))
+                            .background(Dshm.colors.surfaceMuted)
+                            .padding(horizontal = Dshm.spacing.xs, vertical = Dshm.spacing.xxs),
                     )
-                    if (isAdmin) {
-                        Spacer(Modifier.width(Dshm.spacing.xs))
-                        Text(
-                            text = stringResource(R.string.room_settings_admin_badge),
-                            style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
-                            color = Dshm.colors.textSecondary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(Dshm.radius.xs))
-                                .background(Dshm.colors.surfaceMuted)
-                                .padding(horizontal = Dshm.spacing.xs, vertical = Dshm.spacing.xxs),
-                        )
-                    }
                 }
             }
-            Column(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(Dshm.radius.lg))
-                    .background(Dshm.colors.bubbleAssistant)
-                    .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Box(
+                modifier = Modifier.size(avatarSize),
+                contentAlignment = Alignment.BottomStart,
             ) {
-                MarkdownText(markdown = text, fontScale = fontScale)
+                if (showAvatar && member != null) {
+                    BotAvatar(
+                        inkId = member.inkId,
+                        glyph = AvatarGlyph.BOT,
+                        avatarImage = member.avatarImage,
+                        avatarShape = member.avatarShape,
+                        size = avatarSize,
+                        modifier = Modifier
+                            .then(if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier),
+                    )
+                }
             }
+            Spacer(Modifier.width(gap))
+            Column(modifier = Modifier.weight(1f, fill = false)) { bubble() }
         }
     }
 }
