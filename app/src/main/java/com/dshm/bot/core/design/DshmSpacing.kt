@@ -70,8 +70,8 @@ data class DshmSpacing(
      * 输入法的高度本身由外层的 `imePadding()` 顶开，这里只加一点自己的间隙。
      */
     val composerImeGap: Dp = 4.dp,
-    /** 输入框下方渐变磨砂层的均匀模糊半径（`Modifier.blur`，API 31+ 生效）。 */
-    val composerBlurRadius: Dp = 16.dp,
+    /** 输入框下方渐变磨砂层的均匀模糊半径（API 31+ 生效）。 */
+    val composerBlurRadius: Dp = 28.dp,
     /**
      * 最后一条气泡与输入框之间的可见间隙。
      *
