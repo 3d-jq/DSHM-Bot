@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -130,6 +129,7 @@ fun BotChatScreen(
     var answeringApproval by remember { mutableStateOf(false) }
     // 发送了几次 —— 每发一次就重新钉到底（照 DeepSearch 的 SEND-PATH）。
     var sendCount by remember { mutableIntStateOf(0) }
+    var lastSendAt by remember { mutableStateOf(0L) }
     // 输入框的实际高度 —— 列表要留出这么多，消息才不会被输入框压住
     // （照 DeepSearch 的 bottomChromeHeight + bottomReserve）。
     var composerHeight by remember { mutableStateOf(56.dp) }
@@ -275,11 +275,16 @@ fun BotChatScreen(
                         topPadding = innerPadding.calculateTopPadding(),
                         // 最后一条消息避开输入框（输入框浮在列表上面）：
                         // 输入框高度 + 一点留白。
-                        bottomPadding = bottomChromeHeight + Dshm.spacing.composerClearance,
+                        bottomPadding = chatListBottomPadding(
+                            composerHeight = composerHeight,
+                            composerBottomPadding = composerBottomPadding,
+                            composerClearance = Dshm.spacing.composerClearance,
+                        ),
                         working = working,
                         hasEarlier = state.hasEarlier,
                         loadingEarlier = state.loadingEarlier,
                         sendCount = sendCount,
+                        lastSendAt = lastSendAt,
                         bottomChromeHeight = bottomChromeHeight,
                         autoLoadEnabled = state.error == null,
                         onLoadEarlier = viewModel::loadEarlier,
@@ -350,6 +355,7 @@ fun BotChatScreen(
                         viewModel.send(draft)
                         draft = ""
                         sendCount += 1
+                        lastSendAt = System.currentTimeMillis()
                     }
                 },
                 placeholder = stringResource(R.string.composer_placeholder, bot.name),
@@ -404,6 +410,9 @@ private const val EARLIER_TRIGGER_PX = 400
  */
 private const val EARLIER_TRIGGER_ITEMS = 3
 
+/** 发送后这段时间内强制跟随最新消息，跨过用户气泡→思考→流式气泡的切换。 */
+private const val STREAM_FOLLOW_GRACE_MS = 2_000L
+
 /**
  * 往前翻页时的顶部转圈。
  *
@@ -439,6 +448,8 @@ private fun ChatMessages(
     loadingEarlier: Boolean = false,
     /** 发送了几次 —— 每发一次就重新钉到底。 */
     sendCount: Int = 0,
+    /** 最近一次发送时间：发送后的短暂宽限内强制跟随，不让新气泡藏在输入框下。 */
+    lastSendAt: Long = 0L,
     /** 输入框 + 它下面留白的实测高度 —— 列表要留出这么多才不会被盖住。 */
     bottomChromeHeight: Dp = 56.dp,
     /** 上次加载出错时不再自动触发（否则会一直重试）。 */
@@ -447,7 +458,7 @@ private fun ChatMessages(
 ) {
     val listState = rememberLazyListState()
     val typing = working && streaming.isEmpty()
-    val count = entries.size + (if (streaming.isNotEmpty()) 1 else 0) + (if (typing) 1 else 0)
+    val streamingNow = streaming.isNotEmpty()
 
     // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
     // 显示在底部。Compose 的 reverseLayout 原生就会把底部锚住 ——
@@ -461,12 +472,27 @@ private fun ChatMessages(
     //
     // 「在底部」的判定：`firstVisibleItemIndex == 0` 且滚动偏移在 32dp 内。
     val scope = rememberCoroutineScope()
+    val draggedByUser by listState.interactionSource.collectIsDraggedAsState()
+    var userDragged by remember { mutableStateOf(false) }
     val nearBottomThresholdPx = with(LocalDensity.current) { 32.dp.toPx() }.toInt()
     val isNearBottom by remember(listState, nearBottomThresholdPx) {
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 &&
                 listState.firstVisibleItemScrollOffset <= nearBottomThresholdPx
         }
+    }
+    // 只有手指真正拖过列表才算「用户离开底部」。流式气泡自己长高会让
+    // firstVisibleItemIndex / isNearBottom 漂移，那个不是滚动意图；
+    // 用 isScrollInProgress 判断会把自动跟随自己关掉，流式就跟丢了。
+    LaunchedEffect(draggedByUser, isNearBottom) {
+        if (draggedByUser && !isNearBottom) userDragged = true
+        if (!draggedByUser && isNearBottom) userDragged = false
+    }
+    LaunchedEffect(streamingNow) {
+        if (streamingNow) userDragged = false
+    }
+    LaunchedEffect(sendCount) {
+        if (sendCount > 0) userDragged = false
     }
 
     // 滑到接近顶部就自动往前翻一页。
@@ -488,9 +514,9 @@ private fun ChatMessages(
         }
     }
 
-    // 发送后立刻滚到底两次（照 DeepSearch 的 SEND-PATH）：
+    // 发送后立刻滚到底（照 DeepSearch 的 SEND-PATH）：
     // 第一次钉在回显之前，等 100ms 让用户消息到达，再钉一次。
-    LaunchedEffect(sendCount) {
+    LaunchedEffect(sendCount, lastSendAt) {
         if (sendCount == 0) return@LaunchedEffect
         listState.scrollToItem(0)
         delay(100)
@@ -498,14 +524,14 @@ private fun ChatMessages(
     }
 
     // 流式输出时跟着到底（照 DeepSearch 的 T256 流水线）：
-    // snapshotFlow 发元组 → conflate 丢掉中间值 → sample 限频到约 6.5Hz。
+    // snapshotFlow 发元组 → conflate 丢掉中间值 → sample 限频到约 8Hz。
     // 不用「每个 token 都重启一次滚动动画」—— 那会把 UI 线程压垮。
-    LaunchedEffect(listState) {
-        snapshotFlow { streaming.length to isNearBottom }
+    LaunchedEffect(listState, bottomChromeHeight) {
+        snapshotFlow { streaming.length to bottomChromeHeight }
             .conflate()
-            .sample(150L)
-            .collect { (_, nearBottom) ->
-                if (!nearBottom) return@collect
+            .sample(120L)
+            .collect { (length, _) ->
+                if (length == 0 || userDragged || draggedByUser) return@collect
                 if (listState.isScrollInProgress) return@collect
                 listState.scrollToItem(0)
             }
@@ -523,11 +549,16 @@ private fun ChatMessages(
         if (entries.isEmpty()) return@LaunchedEffect
         val isFirst = !pinnedOnce
         pinnedOnce = true
-        if (!isFirst && !isNearBottom) return@LaunchedEffect
+        val sendGrace = lastSendAt > 0L &&
+            System.currentTimeMillis() - lastSendAt <= STREAM_FOLLOW_GRACE_MS
+        if (!isFirst && userDragged) return@LaunchedEffect
+        if (!isFirst && !sendGrace && !isNearBottom) return@LaunchedEffect
         listState.scrollToItem(0)
         // 等一帧再钉一次 —— 抓住同一格子的异步自增高。
         withFrameNanos { }
-        if (isNearBottom || isFirst) listState.scrollToItem(0)
+        if (isNearBottom || isFirst || sendGrace) {
+            listState.scrollToItem(0)
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -535,16 +566,23 @@ private fun ChatMessages(
             state = listState,
             reverseLayout = true,
             modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = true,
             contentPadding = PaddingValues(
                 start = Dshm.spacing.lg,
                 end = Dshm.spacing.lg,
                 top = topPadding + Dshm.spacing.md,
-                bottom = bottomPadding + Dshm.spacing.md,
+                bottom = Dshm.spacing.none,
             ),
             // 气泡间距：同一个人的连续气泡 8dp；换人说话（用户→大模型）多留一点，
             // 让「谁在说话」一眼能分出来。
             verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         ) {
+            // reverseLayout 下最先声明的 item 画在视觉最底部。这个 spacer 就是
+            // 「最新气泡 → 输入框」之间的真实可滚动留白：scrollToItem(0) 会把它
+            // 钉在物理底边，最新气泡自然停在输入框上沿。
+            item(key = "composer-clearance") {
+                Spacer(Modifier.height(bottomPadding))
+            }
             // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
             if (typing) {
                 item(key = "typing") { ThinkingRow(bot) }
@@ -628,7 +666,7 @@ private fun ChatMessages(
                     .clickable {
                         scope.launch {
                             // 倒序列表：index 0 就是底部（最新）。
-                            listState.animateScrollToItem(0)
+                            listState.scrollToItem(0)
                         }
                     },
                 contentAlignment = Alignment.Center,
