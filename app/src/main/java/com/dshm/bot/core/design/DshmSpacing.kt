@@ -63,13 +63,13 @@ data class DshmSpacing(
      *
      * 系统栏本身由 `navigationBarsPadding()` 处理，这里只加一点自己的间隙。
      */
-    val composerBottomInset: Dp = 8.dp,
+    val composerBottomInset: Dp = 16.dp,
     /**
      * 输入框离**输入法**的额外留白。
      *
      * 输入法的高度本身由外层的 `imePadding()` 顶开，这里只加一点自己的间隙。
      */
-    val composerImeGap: Dp = 0.dp,
+    val composerImeGap: Dp = 4.dp,
     /**
      * 最后一条气泡与输入框之间的可见间隙。
      *

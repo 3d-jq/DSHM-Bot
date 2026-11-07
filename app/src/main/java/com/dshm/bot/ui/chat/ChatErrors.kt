@@ -20,3 +20,10 @@ fun describeChatError(error: Throwable): String = when (error) {
     }
     else -> error.message ?: "操作失败"
 }
+
+/**
+ * 私聊的应答通道（`$events`）还没连上时给的一句说明。
+ *
+ * 卡片在这种状态下按钮本来就是灰的；真走到这里说明缓存过期了（应答那一瞬间断了）。
+ */
+internal fun approvalNotReady(): String = "还没连上引擎，暂时答不了"

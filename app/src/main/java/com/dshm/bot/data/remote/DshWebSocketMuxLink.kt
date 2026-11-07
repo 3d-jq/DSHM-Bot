@@ -1,6 +1,5 @@
 package com.dshm.bot.data.remote
 
-import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -59,7 +58,7 @@ internal class DshWebSocketMuxLink private constructor(
     private fun lose(reason: String) {
         if (lost) return
         lost = true
-        Log.i(TAG, "mux link lost: $reason")
+        DshMuxLog.log("link lost: $reason")
         onLost?.invoke(reason)
     }
 

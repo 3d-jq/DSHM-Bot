@@ -9,12 +9,30 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 
 /**
  * mux 状态机（照 dsh-Go `packages/dsh_client/src/mux.dart`）。
  */
 class DshMuxTest {
+
+    private val defaultSink = DshMuxLog.sink
+
+    /**
+     * 状态机里带 logcat 埋点：`android.util.Log` 在 JVM 单测里没被 mock，
+     * 直接调用会让整批用例挂掉。`DshMuxLog` 抽出 sink 就是为了这里能换掉。
+     */
+    @Before
+    fun muteLogs() {
+        DshMuxLog.sink = { }
+    }
+
+    @After
+    fun restoreLogs() {
+        DshMuxLog.sink = defaultSink
+    }
 
     /** 让后台协程跑一会儿。 */
     private suspend fun settle() {

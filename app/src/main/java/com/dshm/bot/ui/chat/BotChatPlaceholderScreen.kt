@@ -19,20 +19,15 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -88,7 +83,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -141,13 +135,18 @@ fun BotChatScreen(
     // 输入法高度与系统导航栏高度分开取 —— 两个间隙要能各自调。
     val imeInset = with(density) { WindowInsets.Companion.ime.getBottom(this).toDp() }
     val systemBarInset = with(density) { WindowInsets.Companion.navigationBars.getBottom(this).toDp() }
-    // 输入框到系统底部的距离：输入法在场就用输入法的高度（它已含导航栏），
-    // 否则用系统导航栏的高度。再加一点自己的间隙。
-    val composerBottomInset = if (imeInset > systemBarInset) {
-        imeInset + Dshm.spacing.composerImeGap
+    // 沉浸式小白条：没有输入法时内容区**铺到物理底边**，消息一直画到小白条下面，
+    // 由输入框自己让开导航条（照 DeepSearch NanoMuseHome.kt 510 的
+    // consumeWindowInsets + ChatScreen.kt 2725 的 imePadding）。
+    // 只给内容区加 bottom padding 会把它裁在系统栏上沿，下面露出一条白底。
+    val composerBottomPadding = if (imeInset > systemBarInset) {
+        // 输入法在场：内容区已被 imePadding() 顶到输入法上沿，这里只加贴键间隙。
+        Dshm.spacing.composerImeGap
     } else {
         systemBarInset + Dshm.spacing.composerBottomInset
     }
+    // 输入框 + 它下面的留白 = 列表要避开的整块高度（DeepSearch 的 bottomChromeHeight）。
+    val bottomChromeHeight = composerHeight + composerBottomPadding
     var chatError by remember { mutableStateOf<String?>(null) }
     val workingTransition = rememberInfiniteTransition(label = "bot-working")
     val workingPulse by workingTransition.animateFloat(
@@ -160,8 +159,7 @@ fun BotChatScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Dshm.colors.background,
-        // 底部 inset 我们自己算（见下面的 composerBottomInset）——
-        // Scaffold 默认会消费导航栏，再叠 imePadding() 就会多出一段间隙。
+        // 系统栏 inset 全部自己消化，内容铺满整屏；只有输入法顶开内容区。
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Column(
@@ -237,9 +235,9 @@ fun BotChatScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                // 底部让位：输入法在场就用输入法的高度（它含导航栏），
-                // 否则用系统导航栏的高度。只算一次，别叠加。
-                .padding(bottom = composerBottomInset),
+                // 无输入法时不留任何底部 padding —— 消息列表一直画到物理底边，
+                // 小白条浮在内容上；输入框自己用 composerBottomPadding 让开它。
+                .imePadding(),
         ) {
             Box(
                 modifier = Modifier
@@ -275,12 +273,12 @@ fun BotChatScreen(
                         topPadding = innerPadding.calculateTopPadding(),
                         // 最后一条消息避开输入框（输入框浮在列表上面）：
                         // 输入框高度 + 一点留白。
-                        bottomPadding = composerHeight + Dshm.spacing.composerClearance,
+                        bottomPadding = bottomChromeHeight + Dshm.spacing.composerClearance,
                         working = working,
                         hasEarlier = state.hasEarlier,
                         loadingEarlier = state.loadingEarlier,
                         sendCount = sendCount,
-                        composerHeight = composerHeight,
+                        bottomChromeHeight = bottomChromeHeight,
                         autoLoadEnabled = state.error == null,
                         onLoadEarlier = viewModel::loadEarlier,
                     )
@@ -290,17 +288,10 @@ fun BotChatScreen(
             //
             // 位置：贴在输入框**正上方**（输入框是浮在消息列表上的）。
             // 之前没对齐，卡片跑到了屏幕顶部被顶栏盖住。
-            state.approvals.forEach { approval ->
-                ApprovalCard(
-                    approval = approval,
-                    busy = answeringApproval,
-                    onAnswer = { allow ->
-                        answeringApproval = true
-                        viewModel.answerApproval(approval, allow) { error ->
-                            answeringApproval = false
-                            if (error != null) chatError = error
-                        }
-                    },
+            // 多条请求要竖着排：每张卡各自 align(BottomCenter) 会完全叠在一起，
+            // 群聊里两个成员同时等确认时就只看得到最上面那一张。
+            if (state.approvals.isNotEmpty()) {
+                Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(
@@ -309,9 +300,26 @@ fun BotChatScreen(
                             // 紧贴输入框的上沿 —— 输入框底边已经在 Box 底边了
                             // （外层的 padding(bottom) 扣掉了输入法/系统栏），
                             // 这里只要让开输入框自己的高度。
-                            bottom = composerHeight + Dshm.spacing.xs,
+                            bottom = bottomChromeHeight + Dshm.spacing.xs,
                         ),
-                )
+                    verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
+                ) {
+                    state.approvals.forEach { approval ->
+                        ApprovalCard(
+                            approval = approval,
+                            busy = answeringApproval,
+                            engineLink = state.engineLink,
+                            onAnswer = { allow ->
+                                answeringApproval = true
+                                viewModel.answerApproval(approval, allow) { error ->
+                                    answeringApproval = false
+                                    if (error != null) chatError = error
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
             }
             if (state.error != null && state.entries.isNotEmpty()) {
                 Text(
@@ -340,8 +348,13 @@ fun BotChatScreen(
                 sendEnabled = ComposerRules.canSend(draft) && !state.sending,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .onSizeChanged { size -> composerHeight = with(density) { size.height.toDp() } }
-                    .padding(horizontal = Dshm.spacing.lg),
+                    .padding(
+                        start = Dshm.spacing.lg,
+                        end = Dshm.spacing.lg,
+                        bottom = composerBottomPadding,
+                    )
+                    // 放在 padding 内层，测到的才是输入框自身高度（不含下面那段留白）。
+                    .onSizeChanged { size -> composerHeight = with(density) { size.height.toDp() } },
             )
         }
     }
@@ -410,8 +423,8 @@ private fun ChatMessages(
     loadingEarlier: Boolean = false,
     /** 发送了几次 —— 每发一次就重新钉到底。 */
     sendCount: Int = 0,
-    /** 输入框的实测高度 —— 列表要留出这么多，最后一条消息才不会被盖住。 */
-    composerHeight: Dp = 56.dp,
+    /** 输入框 + 它下面留白的实测高度 —— 列表要留出这么多才不会被盖住。 */
+    bottomChromeHeight: Dp = 56.dp,
     /** 上次加载出错时不再自动触发（否则会一直重试）。 */
     autoLoadEnabled: Boolean = true,
     onLoadEarlier: () -> Unit = {},
@@ -565,7 +578,7 @@ private fun ChatMessages(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     // 贴在输入框上沿（输入框是浮在列表上的，位置要按它的实测高度算）。
-                    .padding(bottom = composerHeight + Dshm.spacing.composerClearance)
+                    .padding(bottom = bottomChromeHeight + Dshm.spacing.composerClearance)
                     .size(Dshm.spacing.iconButton)
                     .shadow(
                         elevation = Dshm.spacing.floatingElevation,

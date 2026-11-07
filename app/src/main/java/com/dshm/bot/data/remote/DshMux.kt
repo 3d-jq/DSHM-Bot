@@ -115,6 +115,7 @@ class DshMux(
 
     /** 启动连接（幂等）。 */
     fun start() {
+        DshMuxLog.log("start()")
         scope.launch {
             // 注意：不要在 lock 里 launch —— runLoop 也要拿这把锁，会死锁。
             val shouldStart = lock.withLock {
@@ -189,8 +190,10 @@ class DshMux(
     private suspend fun runLoop() {
         while (!closed) {
             val newLink = try {
+                DshMuxLog.log("connecting...")
                 connect()
             } catch (error: Throwable) {
+                DshMuxLog.log("connect failed: ${error.message}")
                 if (closed) return
                 scheduleRetry("连接失败：${error.message}")
                 return
@@ -279,7 +282,9 @@ class DshMux(
             onLinkLost(source, reason)
             return
         }
-        val event = DshMuxFrame.hostEventOf(frame) ?: return
+        val event = DshMuxFrame.hostEventOf(frame)
+        DshMuxLog.log("host event $event")
+        if (event == null) return
         if (generation == null) {
             if (event !is DshHostEvent.Ready) {
                 onLinkLost(source, "\$events 没有先发 ready")
@@ -295,6 +300,7 @@ class DshMux(
             )
             generation = newGeneration
             _state.value = DshMuxState.CONNECTED
+            DshMuxLog.log("ready clientId=${event.clientId} gen=${newGeneration.number}")
             scope.launch { _generations.emit(newGeneration) }
             // 重开上一代的逻辑流。
             streams.values.toList().forEach { sendOpen(source, it) }
@@ -315,6 +321,7 @@ class DshMux(
     }
 
     private fun onLinkLost(source: DshMuxLink, reason: String) {
+        DshMuxLog.log("link lost: $reason")
         if (source !== link) return
         link = null
         eventsStreamId = null
@@ -331,6 +338,7 @@ class DshMux(
     }
 
     private fun scheduleRetry(reason: String) {
+        DshMuxLog.log("retry: $reason")
         if (closed) return
         retryJob?.cancel()
         _state.value = DshMuxState.RECONNECTING

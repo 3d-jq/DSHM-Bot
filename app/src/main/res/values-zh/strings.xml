@@ -24,9 +24,14 @@
     <string name="chat_retry">重试</string>
     <string name="chat_send_failed">消息发送失败：%1$s</string>
     <string name="approval_waiting">等你确认</string>
+    <string name="engine_link_connecting">正在连接引擎…</string>
+    <string name="engine_link_reconnecting">正在重连…</string>
+    <string name="engine_link_blocked">引擎连接被阻止</string>
     <string name="approval_reject">拒绝</string>
     <string name="approval_allow_once">允许一次</string>
     <string name="approval_in_dsh">这个请求要去 DSH 里回应</string>
+    <string name="approval_wait_engine">还没连上引擎，暂时答不了</string>
+    <string name="question_waiting">等你回答</string>
     <string name="chat_load_earlier">加载更早的消息</string>
     <string name="chat_engine_off_title">本机引擎未运行</string>
     <string name="chat_engine_off_hint">请先在 设置 → 本机引擎 中启动，再回来对话。</string>

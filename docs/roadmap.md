@@ -68,7 +68,8 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - ☑️ 模型选择、引擎参数设置（`ModelProvidersScreen` / `ProviderSettings` / `EngineSettingsForm`）
 - ☑️ 本机 PRoot 引擎：下载安装 rootfs、启动 `dsh web`、日志、guest 初始化（`data/runtime/`、`runtime/`）——原计划 M3，提前完成
 - ⬜ 停止生成、历史分页（当前一次拉全量）
-- ⬜ 审批 / 提问卡片原生渲染
+- ☑️ 审批卡片原生渲染 + 应答接线（见「审批显示专项」）
+- ⬜ 提问卡片：已显示问题本身，但还不能作答（选项 UI + `userQuestions/*`）
 - ⬜ 远程主机（局域网 / SSH / Noise Relay）
 - ⬜ 契约测试：MockWebServer 覆盖正常 / 断线 / 超大消息 / 取消
 
@@ -133,8 +134,8 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - 测试：`SessionPresentationTest`(6)、`DsBotHelloTest`(4)、`DshSessionApprovalContractTest`(4)。
 - 验证：**24 测试类 / 126 用例全绿**，compile / lint / assemble 全通过。
 
-**第 1 批剩余**：`session/follow` 的 WebSocket mux 流（含实际订阅与断线重同步）、
-消息行的 Compose 渲染组件、审批 / 提问卡片的交互接线。
+**第 1 批剩余**：消息行的 Compose 渲染组件、提问卡片的作答接线
+（`session/follow` 的 mux 流与审批卡片的应答接线已在「审批显示专项」完成）。
 
 ## 设置页按 dsh-Go 重做（2026-11-05，☑️ 本轮）
 
@@ -160,6 +161,48 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - 基准样板是**设置页**，其余页面照它对齐；所有数值都取自 `core/design/` 的真实令牌。
 - 配套的验收方式：`adb screencap` 看排版 + `adb uiautomator dump` 用坐标差量间距。
 
+## 审批显示专项（2026-11-07，☑️）
+
+现象：私聊里同一次审批会冒出两张卡（一张能点、一张写着「去 DSH 里答」的死路），
+而别的 Bot 的审批会串进当前对话 —— 点「允许一次」放行的是错误 Bot 的命令。
+
+根因（读 `DS-Bot/ds-bot/src/host/approvals.js` 定位，不是界面问题）：
+
+- DS Bot 已经在 `approval/request` 里把 DSH 的 `agentId` 关联成 `botId` / `roomId`，
+  并写进 `state.work.approvals`；官方客户端**只渲染这一份**（`client/member-status.js`）。
+- 私聊：DS Bot 直接 `next()` 交给 DSH 自己应答，条目的 `answerable` 恒为 `false`
+  —— 移动端没有 DSH 卡片，App 就是那张卡片，应答必须回 `$events/result`。
+- 群聊：成员会话是隐藏的，DS Bot 自己 hold 住，应答只能走 `approval-answer`；
+  这时若再回 `$events/result` 就是两个入口抢同一次请求。
+- 原实现把两个来源各画一张卡，且 `mergeApprovals()` 末尾的过滤是恒真式（去重没生效）；
+  `belongsToThisChat()` 一度被改成恒 `true`（且没有调用点）。
+
+落地：
+
+- `ui/chat/ApprovalMerge.kt`：把合并规则抽成纯函数 `mergeChatApprovals()` ——
+  显示身份只认 DS Bot 的条目，事件流只补应答要的 `eventId`；
+  按 `sessionId` 认领（DS Bot 条目给的 sessionId == 事件流的 agentId），
+  `load()` 还没带回 sessionId 时靠条目自带的 sessionId 认领，不会一直灰着。
+- `ChatApproval`：`answerable: Boolean` → `action`（`ANSWER` / `WAIT_ENGINE` /
+  `ANSWER_ELSEWHERE`）+ `kind`（审批 / 提问）+ `eventId`，界面不再自己猜布尔组合。
+- `ApprovalCard`：`WAIT_ENGINE` 时按钮置灰并在卡下说明卡在哪（`approvalWaitReason`），
+  取代顶栏胶囊下面那个只在瞬态说话的悬浮提示；连接状态直接从 `engineLink` 推导。
+- `BotChatViewModel`：mux 的 state / hostEvents 收进同一个 launch；
+  事件只写缓存（`Ready` 清空、`cancel` 删除、上限 32 防漏 cancel），卡片一律重算；
+  应答按 `source` 严格分流，群聊绝不发 `$events/result`。
+- 多条请求改在输入框上方竖排（每张卡各自 `align(BottomCenter)` 会完全重叠）。
+- `DshMuxTest` 补上 `DshMuxLog.sink` 的换入换出：mux 加了 logcat 埋点后，
+  JVM 里 `android.util.Log` 未 mock 会让 8 个用例挂掉。
+
+验证：**45 测试类 / 283 用例全绿**（新增 `ApprovalMergeTest` 13 条，覆盖双卡片回归、
+跨 Bot 串号、群聊不抢应答、sessionId 未知时的认领、提问不静默丢弃）；
+`compileDebugKotlin` / `lintDebug` / `assembleDebug` 均通过。
+
+**必须真机验证的一条**：群聊里 App 若同时收到 DS Bot 条目和事件流请求，
+现在只走 `approval-answer`；`$events` 的投递与 cancel 时序在真机上是否如
+dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 cancel），
+需要连引擎跑一轮确认。
+
 ## 已知工程债（与修 bug 并行清）
 
 - 测试覆盖：`data/runtime`、`data/remote`、`ui/settings` 相对 UI 偏薄，补 JVM 测试与契约测试
@@ -167,3 +210,11 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
   属 SDK 安装问题，用 SDK Manager 重装该版本 NDK 或补齐 `source.properties`，不要在构建脚本里屏蔽告警
 - `dshm.lintWarningsAsErrors` 目前为 `false`：跑一次 `:app:lintDebug`，清完存量 warning 后置 `true`
 - 文档与令牌数值的漂移（已改为只引用令牌名，不抄数字）
+- `BotChatViewModel` 仍然自己 `RemoteDshApi(DshClients.of(endpoint))`，依赖不能注入：
+  审批的合并规则已经抽成纯函数 `ApprovalMerge` 覆盖到了 JVM 单测，
+  但「事件流 → 缓存 → 卡片」的接线部分还是要靠插桩测；和 `EngineSettingsViewModel`
+  是同一个问题，一起做可注入工厂。
+- 提问卡片只能显示不能作答：选项 UI + `userQuestions/answer` / `attachWait` 未接
+  （dsh-Go `session_api.dart` 的 `answerQuestion` / `claimQuestionWait`）。
+- 用 `java -cp` 手跑单测时**必须先 `cd app`**：`AppIconResourcesTest` /
+  `LucideIconResourcesTest` 按相对路径找 `src/main/res`，在仓库根目录跑会假报缺资源。

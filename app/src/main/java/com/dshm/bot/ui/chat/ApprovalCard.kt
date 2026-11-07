@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.chat
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
@@ -22,19 +23,26 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.remote.DshMuxState
 import com.dshm.bot.domain.model.ChatApproval
 
 /**
  * 审批卡片：Bot 要跑命令/调工具时，DSH 那边会等一个审批。
  *
  * 规格照 DS Bot 的 `client/member-status.js` 的 `ApprovalCard`：
- * 工具名 → 详情文本 → 原因 → 错误码 → 「拒绝 / 允许一次」两个动作。
- * `answerable` 为 false 时不能在这里答（要回 DSH 自己的卡片点）。
+ * 工具名 → 详情文本 → 原因 → 错误码 → 动作。
+ *
+ * 动作分三种（由 [ChatApproval.Action] 决定，界面不再自己猜）：
+ * - [ChatApproval.Action.ANSWER]：「拒绝 / 允许一次」可点；
+ * - [ChatApproval.Action.WAIT_ENGINE]：归我们答，但事件流还没连上 ——
+ *   按钮灰着，下面一句话说清卡在哪（比再画一张「去 DSH 里答」的死路卡片诚实）；
+ * - [ChatApproval.Action.ANSWER_ELSEWHERE]：应答入口不在这儿，说明去哪儿答。
  */
 @Composable
 fun ApprovalCard(
     approval: ChatApproval,
     busy: Boolean,
+    engineLink: DshMuxState,
     onAnswer: (allow: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -48,7 +56,13 @@ fun ApprovalCard(
             .padding(Dshm.spacing.md),
     ) {
         Text(
-            text = stringResource(R.string.approval_waiting),
+            text = stringResource(
+                if (approval.kind == ChatApproval.Kind.QUESTION) {
+                    R.string.question_waiting
+                } else {
+                    R.string.approval_waiting
+                },
+            ),
             style = Dshm.typography.rowTime,
             color = Dshm.colors.warning,
         )
@@ -91,13 +105,21 @@ fun ApprovalCard(
             )
         }
         Spacer(Modifier.height(Dshm.spacing.sm))
-        if (approval.answerable) {
+        val elsewhere = approval.action == ChatApproval.Action.ANSWER_ELSEWHERE
+        if (elsewhere) {
+            Text(
+                text = stringResource(R.string.approval_in_dsh),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textTertiary,
+            )
+        } else {
+            val clickable = approval.action == ChatApproval.Action.ANSWER && !busy
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { onAnswer(false) }, enabled = !busy) {
+                TextButton(onClick = { onAnswer(false) }, enabled = clickable) {
                     Text(
                         text = stringResource(R.string.approval_reject),
                         style = Dshm.typography.sheetAction,
@@ -105,7 +127,7 @@ fun ApprovalCard(
                     )
                 }
                 Spacer(Modifier.width(Dshm.spacing.sm))
-                TextButton(onClick = { onAnswer(true) }, enabled = !busy) {
+                TextButton(onClick = { onAnswer(true) }, enabled = clickable) {
                     Text(
                         text = stringResource(R.string.approval_allow_once),
                         style = Dshm.typography.sheetAction,
@@ -113,12 +135,28 @@ fun ApprovalCard(
                     )
                 }
             }
-        } else {
-            Text(
-                text = stringResource(R.string.approval_in_dsh),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textTertiary,
-            )
+            if (approval.action == ChatApproval.Action.WAIT_ENGINE) {
+                Spacer(Modifier.height(Dshm.spacing.xs))
+                Text(
+                    text = stringResource(approvalWaitReason(engineLink)),
+                    style = Dshm.typography.rowTime,
+                    color = Dshm.colors.textTertiary,
+                )
+            }
         }
     }
+}
+
+/**
+ * 「为什么现在点不了」按事件流状态选一句文案。
+ *
+ * 已连上却仍答不了 = 还没拿到这条请求的 eventId（引擎刚投递 / 缓存过期），
+ * 和没连上一样只能等，所以都落到兜底那句。
+ */
+@StringRes
+internal fun approvalWaitReason(engineLink: DshMuxState): Int = when (engineLink) {
+    DshMuxState.CONNECTING -> R.string.engine_link_connecting
+    DshMuxState.RECONNECTING -> R.string.engine_link_reconnecting
+    DshMuxState.UNAUTHORIZED -> R.string.engine_link_blocked
+    else -> R.string.approval_wait_engine
 }

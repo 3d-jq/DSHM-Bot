@@ -200,6 +200,8 @@
 | Material3 `Scaffold(bottomBar=)` 是**非空**参数 | 传可空参数编译不过 | `bottomBar = { bottomBar?.invoke() }` |
 | `ModalBottomSheet` 默认半屏可上拉 | 候选多时底部按钮被半屏挡住 | `skipPartiallyExpanded = true` + 内容区 `height(屏高×0.7)` |
 | 用 `confirmValueChange = { false }` 锁面板高度 | **列表的滑动被面板手势吃掉，轻轻一滑就关闭** | 不要锁状态，用固定高度的内容区定死；原生把手保留 |
+| `Box` 里每张卡片各自 `align(BottomCenter)` | 多条审批**完全叠在一起**，只看得见最上面一张 | 外层给一个 `Column` 定位 + `Arrangement.spacedBy`，卡片本身 `fillMaxWidth()` |
+| 悬浮输入框把留白加在内容区 `padding(bottom=)` | 输入框下面多出一条**纯白底**，消息滚到下面被裁断 | 内容区只让位给系统 inset；留白垫在输入框自己身上，列表 `contentPadding.bottom` 按输入框实测高度避开 |
 
 ---
 
@@ -273,6 +275,7 @@ SettingsPage(
 - 顶栏：返回 `iconButton`(44) + 名称胶囊（头像 `avatar`(44) + `rowTitle`）+ 右侧操作。
 - 消息列表：`bubbleAssistant` / 用户气泡渐变，圆角 `lg`(20)，左右边距 `spacing.lg`(16)。
 - 输入条：圆角 `composer`(28)，发送键 `composerKey`(40)，投影 `composerElevation`(12)，底部 `composerBottomInset`(8)。
+- 输入条：圆角 `composer`(28)，发送键 `composerKey`(40)，投影 `composerElevation`(12)，离导航栏 `composerBottomInset`(16)、离输入法 `composerImeGap`(2)。
 
 ---
 

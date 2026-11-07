@@ -26,8 +26,19 @@
 ## 行为约束
 
 - 只允许非空白文本发送（`ComposerRules.canSend`）。
-- 输入框与键盘/系统栏之间留 `spacing.composerBottomInset = 8dp`；用
-  `consumeWindowInsets(innerPadding) + imePadding()` 避免与 Scaffold 内边距重复，键盘弹出时紧贴键盘上方。
+- 输入框与**系统导航栏**之间留 `spacing.composerBottomInset`，与**输入法**之间留
+  `spacing.composerImeGap` —— 两个间隙各自独立（键盘下贴得比静止态紧得多，合成一个值就两头不讨好）；
+  用 `consumeWindowInsets(innerPadding) + imePadding()` 避免与 Scaffold 内边距重复，键盘弹出时紧贴键盘上方。
+  数值一律以 `core/design/DshmSpacing.kt` 为准，本文不抄。
+- **悬浮式**：消息列表铺满整屏（只让位给系统 UI），输入框与自己的留白一起叠在列表上方；
+  列表的 `contentPadding.bottom` 按「输入框实测高度 + 留白」避开这块，让内容能从输入框下方透过去。
+  **不要把 `composerBottomInset` 加到内容区的 `padding(bottom=)` 上** —— 那会把列表一起抬高，
+  底下露出 Scaffold 的白底，消息滑到下面就被裁断。
+- **沉浸式小白条**：无输入法时内容区**不设底部 padding**，消息一直画到物理底边、
+  小白条浮在内容上（照 DeepSearch `ChatScreen.kt:2725` + `NanoMuseHome.kt:510` 的
+  `imePadding()` / `consumeWindowInsets`）；只有键盘弹出才由 `imePadding()` 顶开内容区。
+  系统栏本身用 `SystemBarStyle.auto(TRANSPARENT, TRANSPARENT)` 压掉浅色主题的自动 scrim。
+  输入框自己按「导航条高度 + `composerBottomInset`」让开小白条，不会压住手势区。
 - 对话页顶栏按「头像 + 胶囊」的真实高度留位，消息列表从胶囊下方开始，不会压到胶囊。
 
 ## 测试

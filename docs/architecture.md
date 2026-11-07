@@ -44,6 +44,7 @@ core/design/  设计令牌：颜色、间距、圆角、字体、动效、主题
 | 会话流 | `DshClient.feed()` | `GET /api/bot/feed` 的 SSE，事件 `hello` / `revision` / `live` / `message` / `stream` / `room` |
 | Bot 团队 | `DsBotRepository` + `DsBotParser` + `BotCache` | `state` 快照 + `feed` 增量触发重取；冷启动先发本地缓存，界面不空转 |
 | 引擎设置 | `DshEngineSettingsRepository` + `EngineSettingsModels.kt` | `settings/describe` 拿 schema/value/base/user/secrets，`settings/mutate` 带 `expectedRevision` 提交；另有插件、权限预设、凭据、语音 |
+| 审批 / 提问 | `DshMuxHub` + `ApprovalMerge.kt` | 显示身份只认 DS Bot 的 `state.work.approvals`（`agentId` 已由插件关联成 `botId`/`roomId`）；`$events` 的 `approval/request` 只补应答要的 `eventId`。群聊走 `approval-answer`，私聊走 `$events/result`，两条路不混用 |
 | 本机引擎 | `data/runtime/` + `runtime/` | manifest 校验 → 下载/解压 rootfs → `ProotCommand` 拼 argv → `dsh web` 输出解析出 `endpoint + token` |
 | 远程连接 | ⬜ 未做 | dsh-Go `packages/dsh_remote`（Noise IK + Relay）后续按需移植 |
 
@@ -77,12 +78,18 @@ PRoot 内的 dsh web ──HTTP/SSE──> DshClient ──> DsBotRepository ─
 | 设置协议 | `EngineSettingsModelsTest`、`SpeechCatalogTest`、`MarkdownParserTest`、`ComposerRulesTest` |
 | 运行时 | `ProotCommandTest`、`RuntimeManifestTest`、`TextMaskingTest`、`DsBotParserTest` |
 | 状态 | `HomeViewModelTest`（排序、搜索、空态、错误、未读） |
+| 审批合并 | `ApprovalMergeTest`（双卡片回归、跨 Bot 串号、群聊不抢应答、sessionId 未知时的认领、提问不静默丢弃） |
 | 设计令牌 | `DesignTokensTest`（对比度、尺寸关系、宠物挂件边距） |
 | 资源 | `AppIconResourcesTest`、`LucideIconResourcesTest`、`tools/test_generate_app_icons.py` |
 | UI | `HomeScreenTest`、`SettingsScreenTest`、`ChatComposerTest`、`DshmBotAppNavigationTest`（插桩） |
 
 约定：改动必须配套测试，覆盖正常 / 边界 / 异常 / 回归；`testDebugUnitTest` 与 `lintDebug` 全绿才提交。
 缺口：MockWebServer 契约测试（正常 / 断线 / 超大消息 / 取消）尚未建立，`data/runtime` 与 `ui/settings` 覆盖仍偏薄。
+
+`BotChatViewModel` / `EngineSettingsViewModel` 自己在构造里 `DshClients.of(endpoint)` 造依赖，
+Repository 换不掉：纯规则已抽成 `ApprovalMerge` 等函数覆盖 JVM 单测，接线部分仍需插桩测。
+用 `build/dump-test-cp.gradle` 导 classpath 手跑单测时要先 `cd app`，
+否则 `AppIconResourcesTest` / `LucideIconResourcesTest` 会因相对路径假报缺资源。
 
 ## 构建与签名
 
