@@ -71,7 +71,7 @@ data class DshmSpacing(
      */
     val composerImeGap: Dp = 4.dp,
     /** 输入框下方渐变遮罩的高斯模糊半径（`Modifier.blur`，API 31+ 生效）。 */
-    val composerBlurRadius: Dp = 32.dp,
+    val composerBlurRadius: Dp = 40.dp,
     /**
      * 最后一条气泡与输入框之间的可见间隙。
      *
