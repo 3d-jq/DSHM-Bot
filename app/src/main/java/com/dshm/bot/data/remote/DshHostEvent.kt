@@ -18,7 +18,23 @@ sealed interface DshHostEvent {
         val agentId: String,
         val request: JSONObject,
         val raw: JSONObject,
-    ) : DshHostEvent
+    ) : DshHostEvent {
+        /** 是审批请求时解析出来的内容（否则 null）。 */
+        val approval: DshApprovalRequest?
+            get() = if (event == APPROVAL_REQUEST) {
+                DshApprovalRequest.fromWaterfall(eventId, agentId, request)
+            } else {
+                null
+            }
+
+        /** 是提问请求时解析出来的内容（否则 null）。 */
+        val question: DshQuestionRequest?
+            get() = if (event == USER_QUESTIONS_REQUEST) {
+                DshQuestionRequest.fromWaterfall(eventId, agentId, request)
+            } else {
+                null
+            }
+    }
     data class Cancelled(val eventId: String, val raw: JSONObject) : DshHostEvent
     data class Unknown(val type: String, val raw: JSONObject) : DshHostEvent
 

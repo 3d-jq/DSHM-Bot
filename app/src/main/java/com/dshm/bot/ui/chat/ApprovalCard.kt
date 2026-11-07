@@ -22,7 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
-import com.dshm.bot.data.remote.BotApproval
+import com.dshm.bot.domain.model.ChatApproval
 
 /**
  * 审批卡片：Bot 要跑命令/调工具时，DSH 那边会等一个审批。
@@ -33,7 +33,7 @@ import com.dshm.bot.data.remote.BotApproval
  */
 @Composable
 fun ApprovalCard(
-    approval: BotApproval,
+    approval: ChatApproval,
     busy: Boolean,
     onAnswer: (allow: Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -62,12 +62,14 @@ fun ApprovalCard(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        approval.detailText?.let { detail ->
+        approval.detail?.let { detail ->
             Spacer(Modifier.height(Dshm.spacing.xs))
             Text(
                 text = detail,
                 style = Dshm.typography.rowPreview.copy(fontFamily = FontFamily.Monospace),
                 color = Dshm.colors.textPrimary,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (approval.reason.isNotEmpty()) {
@@ -76,9 +78,11 @@ fun ApprovalCard(
                 text = approval.reason,
                 style = Dshm.typography.rowPreview,
                 color = Dshm.colors.textSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        approval.detailCode?.let { code ->
+        approval.code?.let { code ->
             Spacer(Modifier.height(Dshm.spacing.xs))
             Text(
                 text = code,

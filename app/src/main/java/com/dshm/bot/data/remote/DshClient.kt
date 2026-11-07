@@ -79,6 +79,20 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
         }
     }
 
+    /** 引擎地址（给 WebSocket 等需要自己拼 URL 的通道用）。 */
+    val baseUrl: String get() = endpoint.baseUrl
+
+    /**
+     * 建立一条 `/api/remote.mux` 链路。
+     *
+     * mux 是 WebSocket —— 承载 `$events` 主机事件流（审批 / 提问 / 会话状态），
+     * 是 DSH 客户端的地基。没有它，DSH 发出的审批请求没人能应答。
+     */
+    internal suspend fun openMuxLink(): DshMuxLink = withContext(Dispatchers.IO) {
+        val auth = cookie ?: login()
+        DshWebSocketMuxLink.connect(endpoint.baseUrl, auth)
+    }
+
     /**
      * 调 `/api/bot`：body 是 `{endpoint, payload}`，响应是 `{ok, value|error}`。
      * 与 dsh_client 的 DsBot API 一致。

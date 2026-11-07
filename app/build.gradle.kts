@@ -116,6 +116,7 @@ dependencies {
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.foundation)
+    implementation(libs.okhttp)
     implementation(libs.compose.animation)
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)

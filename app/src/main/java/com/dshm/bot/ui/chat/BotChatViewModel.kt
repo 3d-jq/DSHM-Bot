@@ -5,13 +5,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.dshm.bot.data.remote.BotApproval
 import com.dshm.bot.data.remote.BotFeedEvent
+import com.dshm.bot.domain.model.ChatApproval
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.parseChatPage
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.remote.ChatCursor
 import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.DshMuxHub
+import com.dshm.bot.data.remote.DshHostEvent
 import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.RemoteSpeechRepository
 import com.dshm.bot.data.remote.SpeechRepository
@@ -53,7 +55,7 @@ data class BotChatUiState(
     /** 正在流式输出的回复；非空时在列表末尾显示一个临时气泡。 */
     val streaming: String = "",
     /** 这个 Bot（或它所在的群）正在等的审批。 */
-    val approvals: List<BotApproval> = emptyList(),
+    val approvals: List<ChatApproval> = emptyList(),
     /** 还有更早的历史（游标非空）。 */
     val hasEarlier: Boolean = false,
     /** 正在往前翻一页。 */
@@ -107,8 +109,82 @@ class BotChatViewModel(
             feedJob = viewModelScope.launch {
                 client.feed().collect { event -> handleFeed(event) }
             }
+            // 主机事件流（`$events`）：审批 / 提问 / 会话状态。
+            // 这是 DSH 客户端的地基 —— 没有它，Bot 私聊里发的审批没人能应答。
+            endpoint?.let { runtime ->
+                viewModelScope.launch {
+                    val mux = DshMuxHub.start(runtime)
+                    mux.hostEvents.collect { event -> handleHostEvent(event) }
+                }
+            }
         }
     }
+
+    /**
+     * 处理主机事件（`$events`）。
+     *
+     * 审批请求（`approval/request`）是这里最重要的：Bot 要跑命令时会等一个确认。
+     * 在桌面端是 DSH 自己的卡片；在移动端没有那张卡片 —— 由我们应答，
+     * 否则这一轮会永远卡住。
+     */
+    private fun handleHostEvent(event: DshHostEvent) {
+        when (event) {
+            is DshHostEvent.Waterfall -> {
+                val approval = event.approval ?: return
+                // 只认这个 Bot（或它所在的群）的请求。
+                if (!belongsToThisChat(approval.sessionId)) return
+                _uiState.update { state ->
+                    val next = ChatApproval(
+                        key = "host:${approval.eventId}",
+                        tool = approval.toolName,
+                        reason = approval.describe("zh"),
+                        detail = approval.reason,
+                        answerable = true,
+                        source = ChatApproval.Source.DSH_HOST,
+                    )
+                    if (state.approvals.any { it.key == next.key }) {
+                        state
+                    } else {
+                        state.copy(approvals = state.approvals + next)
+                    }
+                }
+            }
+
+            is DshHostEvent.Cancelled -> {
+                _uiState.update { state ->
+                    state.copy(
+                        approvals = state.approvals.filterNot { it.key == "host:${event.eventId}" },
+                    )
+                }
+            }
+
+            else -> Unit
+        }
+    }
+
+    /**
+     * 合并两个来源的审批：DS Bot 的群聊审批 + DSH 主机事件流里的审批。
+     *
+     * 主机事件流是权威的（它实时），DS Bot 的 state 是快照（会覆盖掉同 key 的旧值）。
+     */
+    private fun mergeApprovals(botApprovals: List<ChatApproval>): List<ChatApproval> {
+        val hostKeys = _uiState.value.approvals
+            .filter { it.source == ChatApproval.Source.DSH_HOST }
+            .map { it.key }
+            .toSet()
+        return (botApprovals + _uiState.value.approvals.filter { it.source == ChatApproval.Source.DSH_HOST })
+            .distinctBy { it.key }
+            .filter { it.key !in hostKeys || it.source == ChatApproval.Source.DSH_HOST }
+    }
+
+    /**
+     * 这个会话是不是当前 Bot（或群）的。
+     *
+     * Bot 私聊的 sessionId 就是 Bot id；群聊里成员的 session 是隐藏的，
+     * 群 id 才是标识 —— 所以两种都用 [botId] 对照。
+     */
+    private fun belongsToThisChat(sessionId: String): Boolean =
+        sessionId.isEmpty() || sessionId == botId || !isGroup
 
     /**
      * 新 Bot 在建好时可能还没有可用模型（创建那一刻模型目录为空），之后 DSH 会拿
@@ -409,15 +485,25 @@ class BotChatViewModel(
                 }
             }
             // 审批：DSH 弹的审批卡片，DS Bot 这边也要能看到并应答。
-            val approvals = parseBotApprovals(state).filter { entry ->
+            val botApprovals = parseBotApprovals(state).filter { entry ->
                 if (isGroup) entry.roomId == botId else entry.botId == botId
+            }.map { entry ->
+                ChatApproval(
+                    key = "bot:${entry.id}",
+                    tool = entry.tool,
+                    reason = entry.reason,
+                    detail = entry.detailText,
+                    code = entry.detailCode,
+                    answerable = entry.answerable,
+                    source = ChatApproval.Source.DS_BOT,
+                )
             }
             _uiState.update {
                 it.copy(
                     botStatus = role.takeIf { name -> name.isNotEmpty() }
                         ?: if (isMain) "主 Bot" else "空闲",
                     botIsMain = isMain,
-                    approvals = approvals,
+                    approvals = mergeApprovals(botApprovals),
                 )
             }
         }
@@ -428,16 +514,54 @@ class BotChatViewModel(
      *
      * 应答后立刻重读状态 —— 审批卡片是 DSH 那边等的，答完就没了。
      */
-    fun answerApproval(id: String, allow: Boolean, onDone: (String?) -> Unit = {}) {
+    fun answerApproval(approval: ChatApproval, allow: Boolean, onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
         viewModelScope.launch {
-            val error = runCatching {
-                connection.bot(
-                    "approval-answer",
-                    JSONObject().put("id", id).put("choice", if (allow) "allow" else "reject"),
-                )
-            }.exceptionOrNull()?.let { describeChatError(it) }
-            if (error == null) refreshBotStatus()
+            val error = when (approval.source) {
+                // DSH 主机事件：回 `$events/result`，带上当前代的 clientId。
+                ChatApproval.Source.DSH_HOST -> {
+                    val runtime = endpoint
+                    val mux = runtime?.let { DshMuxHub.of(it) }
+                    val clientId = mux?.generation?.clientId
+                    if (clientId == null) {
+                        "还没连上引擎，暂时回不了"
+                    } else {
+                        val eventId = approval.key.removePrefix("host:")
+                        runCatching {
+                            connection.rpc(
+                                "\$events/result",
+                                JSONObject()
+                                    .put("clientId", clientId)
+                                    .put("eventId", eventId)
+                                    .put(
+                                        "outcome",
+                                        JSONObject()
+                                            .put("kind", "result")
+                                            .put("value", if (allow) "allowed-once" else "rejected"),
+                                    ),
+                            )
+                        }.exceptionOrNull()?.let { describeChatError(it) }
+                    }
+                }
+
+                // DS Bot 的群聊审批：走 `approval-answer`。
+                ChatApproval.Source.DS_BOT -> {
+                    val id = approval.key.removePrefix("bot:")
+                    runCatching {
+                        connection.bot(
+                            "approval-answer",
+                            JSONObject().put("id", id).put("choice", if (allow) "allow" else "reject"),
+                        )
+                    }.exceptionOrNull()?.let { describeChatError(it) }
+                }
+            }
+            if (error == null) {
+                // 应答完就撤掉卡片。
+                _uiState.update { state ->
+                    state.copy(approvals = state.approvals.filterNot { it.key == approval.key })
+                }
+                refreshBotStatus()
+            }
             onDone(error)
         }
     }
@@ -492,7 +616,9 @@ class BotChatViewModel(
             isGroup: Boolean,
             endpoint: RuntimeEndpoint?,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer { BotChatViewModel(botId, botName, isGroup, endpoint) }
+            initializer {
+                BotChatViewModel(botId, botName, isGroup, endpoint)
+            }
         }
     }
 }

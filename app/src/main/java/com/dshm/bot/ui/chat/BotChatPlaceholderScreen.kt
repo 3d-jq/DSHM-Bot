@@ -287,21 +287,30 @@ fun BotChatScreen(
                 }
             }
             // 审批卡片：Bot 要跑命令时，DSH 那边等着一个确认。
+            //
+            // 位置：贴在输入框**正上方**（输入框是浮在消息列表上的）。
+            // 之前没对齐，卡片跑到了屏幕顶部被顶栏盖住。
             state.approvals.forEach { approval ->
                 ApprovalCard(
                     approval = approval,
                     busy = answeringApproval,
                     onAnswer = { allow ->
                         answeringApproval = true
-                        viewModel.answerApproval(approval.id, allow) { error ->
+                        viewModel.answerApproval(approval, allow) { error ->
                             answeringApproval = false
                             if (error != null) chatError = error
                         }
                     },
-                    modifier = Modifier.padding(
-                        horizontal = Dshm.spacing.lg,
-                        vertical = Dshm.spacing.xs,
-                    ),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(
+                            start = Dshm.spacing.lg,
+                            end = Dshm.spacing.lg,
+                            // 紧贴输入框的上沿 —— 输入框底边已经在 Box 底边了
+                            // （外层的 padding(bottom) 扣掉了输入法/系统栏），
+                            // 这里只要让开输入框自己的高度。
+                            bottom = composerHeight + Dshm.spacing.xs,
+                        ),
                 )
             }
             if (state.error != null && state.entries.isNotEmpty()) {
