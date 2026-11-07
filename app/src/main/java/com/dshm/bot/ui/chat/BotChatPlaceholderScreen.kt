@@ -309,7 +309,6 @@ fun BotChatScreen(
                         ApprovalCard(
                             approval = approval,
                             busy = answeringApproval,
-                            engineLink = state.engineLink,
                             onAnswer = { allow ->
                                 answeringApproval = true
                                 viewModel.answerApproval(approval, allow) { error ->

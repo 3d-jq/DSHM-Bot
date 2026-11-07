@@ -3,8 +3,8 @@ package com.dshm.bot.domain.model
 /**
  * 一条待确认的请求（Bot 要跑命令 / 要问用户）。
  *
- * 显示身份只有一个来源：**DS Bot 的 `state.work.approvals`**（官方客户端也是只看这一份）。
- * DSH 主机事件流（`$events` 的 `approval/request`）只贡献一样东西 —— 应答要用的 [eventId]。
+ * 显示和应答都走 DS Bot：`state.work.approvals` 给卡片，`approval-answer` 回执。
+ * 不依赖 DSH 主机事件流（`$events`），所以权限卡片不会被连接状态挡住。
  */
 data class ChatApproval(
     /** 本地唯一 id —— 用来定位要应答哪一条，也是列表的稳定 key。 */
@@ -18,13 +18,11 @@ data class ChatApproval(
     /** 错误码。 */
     val code: String? = null,
     /** 这张卡现在能让用户做什么。 */
-    val action: Action = Action.WAIT_ENGINE,
+    val action: Action = Action.ANSWER_ELSEWHERE,
     /** 请求的种类：审批 / Bot 反问用户。 */
     val kind: Kind = Kind.APPROVAL,
-    /** 内部来源标记 —— 应答时要知道走哪条路。 */
-    val source: Source = Source.DSH_HOST,
-    /** 主机事件 id：私聊回 `$events/result` 时必须带上；没拿到就是 null。 */
-    val eventId: String? = null,
+    /** 内部来源标记 —— 保留给提问卡片等还不能本地应答的类型。 */
+    val source: Source = Source.DS_BOT,
 ) {
     /** 请求种类。 */
     enum class Kind {
@@ -40,16 +38,13 @@ data class ChatApproval(
         /** 有应答入口：显示「拒绝 / 允许一次」。 */
         ANSWER,
 
-        /** 归我们答，但还没拿到 eventId（事件流没连上）：按钮置灰 + 说明原因。 */
-        WAIT_ENGINE,
-
         /** 应答入口不在我们手上：说明去哪儿答。 */
         ANSWER_ELSEWHERE,
     }
 
     /** 应答走哪条路。 */
     enum class Source {
-        /** DSH 主机事件：`$events/result`，带 [eventId]。 */
+        /** DSH 主机事件：暂未在移动端提供应答入口。 */
         DSH_HOST,
 
         /** DS Bot：`approval-answer {id, choice}`。 */

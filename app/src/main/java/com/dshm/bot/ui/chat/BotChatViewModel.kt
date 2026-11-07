@@ -14,8 +14,6 @@ import com.dshm.bot.data.remote.ChatCursor
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.DshMuxHub
 import com.dshm.bot.data.remote.DshHostEvent
-import com.dshm.bot.data.remote.DshMuxState
-import com.dshm.bot.data.remote.DshApprovalRequest
 import com.dshm.bot.data.remote.DshQuestionRequest
 import com.dshm.bot.data.remote.BotApproval
 import com.dshm.bot.data.remote.parseBotApprovals
@@ -61,8 +59,6 @@ data class BotChatUiState(
     val streaming: String = "",
     /** 这个 Bot（或它所在的群）正在等的审批 / 提问。 */
     val approvals: List<ChatApproval> = emptyList(),
-    /** 引擎事件流（mux）的连接状态：卡片上的灰按钮要靠它解释。 */
-    val engineLink: DshMuxState = DshMuxState.IDLE,
     /** 还有更早的历史（游标非空）。 */
     val hasEarlier: Boolean = false,
     /** 正在往前翻一页。 */
@@ -99,8 +95,6 @@ class BotChatViewModel(
     private var sessionId: String? = null
     /** 最近一次 `state.work.approvals` 里属于本对话的条目 —— 卡片的显示身份。 */
     private var botApprovals: List<BotApproval> = emptyList()
-    /** 引擎在等我们应答的审批（eventId → 请求）。它只补应答要的 eventId。 */
-    private val hostApprovals = LinkedHashMap<String, DshApprovalRequest>()
     /** 引擎在等用户回应的提问（eventId → 请求）。 */
     private val hostQuestions = LinkedHashMap<String, DshQuestionRequest>()
     /** 更早历史的游标；null 表示没有更早的了。 */
@@ -124,13 +118,10 @@ class BotChatViewModel(
             feedJob = viewModelScope.launch {
                 client.feed().collect { event -> handleFeed(event) }
             }
-            // 主机事件流（`$events`）：审批 / 提问 / 会话状态。
-            // 这是 DSH 客户端的地基 —— 没有它，Bot 私聊里发的审批没人能应答。
+            // 主机事件流（`$events`）只用来显示 Bot 反问用户；审批已归 DS Bot。
             endpoint?.let { runtime ->
                 viewModelScope.launch {
                     val mux = DshMuxHub.start(runtime)
-                    // 连接状态也要进界面：灰按钮得说清是「还没连上」还是「重连中」。
-                    launch { mux.state.collect { state -> onMuxState(state) } }
                     mux.hostEvents.collect { event -> handleHostEvent(event) }
                 }
             }
@@ -141,23 +132,18 @@ class BotChatViewModel(
      * 处理主机事件（`$events`）。
      *
      * 这里只维护「引擎在等什么」的缓存，卡片一律由 [recomputeApprovals] 重算：
-     * 显示身份归 DS Bot 的 state，事件流只补应答要的 eventId。
+     * 显示身份归 DS Bot 的 state，事件流只补 Bot 反问用户。
      */
     private fun handleHostEvent(event: DshHostEvent) {
         when (event) {
             // 新一代连接：没答完的请求会带着同样的 eventId 重新投递，
             // 所以先清掉旧的缓存，别攒下别人已经答完的幽灵卡片。
             is DshHostEvent.Ready -> {
-                hostApprovals.clear()
                 hostQuestions.clear()
                 recomputeApprovals()
             }
 
             is DshHostEvent.Waterfall -> {
-                event.approval?.let { request ->
-                    hostApprovals[request.eventId] = request
-                    trimOldest(hostApprovals)
-                }
                 event.question?.let { request ->
                     hostQuestions[request.eventId] = request
                     trimOldest(hostQuestions)
@@ -167,7 +153,6 @@ class BotChatViewModel(
 
             // 任何一端答完（或请求被撤回）都会收到 cancel。
             is DshHostEvent.Cancelled -> {
-                hostApprovals.remove(event.eventId)
                 hostQuestions.remove(event.eventId)
                 recomputeApprovals()
             }
@@ -178,27 +163,17 @@ class BotChatViewModel(
 
     /**
      * 用缓存重算卡片。事件流和 state 谁先到都不影响结果：
-     * 私聊的应答权只认 eventId，群聊只认 DS Bot 的 `answerable`。
+     * 审批只认 DS Bot 的 `answerable`，事件流只补提问。
      */
     private fun recomputeApprovals() {
         val merged = mergeChatApprovals(
             botEntries = botApprovals,
-            hostApprovals = hostApprovals.values.toList(),
             hostQuestions = hostQuestions.values.toList(),
             isGroup = isGroup,
             botId = botId,
             sessionId = sessionId,
-            // 事件流没连上 = `$events/result` 发不出去，私聊卡片要变灰（群聊不受影响）。
-            hostAnswerable = _uiState.value.engineLink == DshMuxState.CONNECTED,
         )
         _uiState.update { if (it.approvals == merged) it else it.copy(approvals = merged) }
-    }
-
-    /** 连接状态变化：界面用它说明「为什么现在点不了」。 */
-    private fun onMuxState(state: DshMuxState) {
-        _uiState.update { it.copy(engineLink = state) }
-        // 连上 / 断开都要重算：断了按钮该灰，连上按钮该亮（generation 已就绪才能发回执）。
-        recomputeApprovals()
     }
 
     /** 缓存要有上限：漏掉一次 cancel 不该让卡片永远挂着。 */
@@ -525,7 +500,7 @@ class BotChatViewModel(
                     _uiState.update { it.copy(memoryNotice = false) }
                 }
             }
-            // 审批：DS Bot 的 state 是卡片身份；引擎事件流只补应答要的 eventId。
+            // 审批：DS Bot 的 state 就是卡片身份；引擎事件流只补提问。
             botApprovals = parseBotApprovals(state).filter { entry ->
                 if (isGroup) entry.roomId == botId else entry.botId == botId
             }
@@ -540,60 +515,20 @@ class BotChatViewModel(
         }
     }
 
-    /**
-     * 应答一条审批：允许一次 / 拒绝。
-     *
-     * 两条路不能混：群聊走 DS Bot 的 `approval-answer`（会话是隐藏的，DS Bot 自己
-     * hold 着请求）；私聊走 `$events/result`（DS Bot 已经 `next()` 交给 DSH，
-     * 移动端没有 DSH 卡片，我们就是那张卡片）。
-     */
+    /** 应答一条审批：允许一次 / 拒绝。统一走 DS Bot 的 `approval-answer`。 */
     fun answerApproval(approval: ChatApproval, allow: Boolean, onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
         viewModelScope.launch {
-            val error = when (approval.source) {
-                ChatApproval.Source.DSH_HOST -> {
-                    val eventId = approval.eventId
-                    val runtime = endpoint
-                    val mux = runtime?.let { DshMuxHub.of(it) }
-                    val clientId = mux?.generation?.clientId
-                    if (eventId == null || clientId == null) {
-                        // 按钮在这种状态下本来是灰的；真点到了说明缓存过期了。
-                        approvalNotReady()
-                    } else {
-                        runCatching {
-                            connection.rpc(
-                                "\$events/result",
-                                JSONObject()
-                                    .put("clientId", clientId)
-                                    .put("eventId", eventId)
-                                    .put(
-                                        "outcome",
-                                        JSONObject()
-                                            .put("kind", "result")
-                                            .put("value", if (allow) "allowed-once" else "rejected"),
-                                    ),
-                            )
-                        }.exceptionOrNull()?.let { describeChatError(it) }
-                    }
-                }
-
-                ChatApproval.Source.DS_BOT -> {
-                    val id = approval.key.removePrefix("bot:")
-                    runCatching {
-                        connection.bot(
-                            "approval-answer",
-                            JSONObject().put("id", id).put("choice", if (allow) "allow" else "reject"),
-                        )
-                    }.exceptionOrNull()?.let { describeChatError(it) }
-                }
-            }
+            val id = approval.key.removePrefix("bot:")
+            val error = runCatching {
+                connection.bot(
+                    "approval-answer",
+                    JSONObject().put("id", id).put("choice", if (allow) "allow" else "reject"),
+                )
+            }.exceptionOrNull()?.let { describeChatError(it) }
             if (error == null) {
-                // 应答完先本地撤卡：引擎那边随后会发 cancel，但界面不该等它。
-                approval.eventId?.let { hostApprovals.remove(it); hostQuestions.remove(it) }
-                if (approval.source == ChatApproval.Source.DS_BOT) {
-                    val id = approval.key.removePrefix("bot:")
-                    botApprovals = botApprovals.filterNot { entry -> entry.id == id }
-                }
+                // 应答完先本地撤卡：引擎随后刷新 state，但界面不该等它。
+                botApprovals = botApprovals.filterNot { entry -> entry.id == id }
                 recomputeApprovals()
                 refreshBotStatus()
             }
@@ -646,7 +581,7 @@ class BotChatViewModel(
     }
 
     companion object {
-        /** 事件流缓存的上限：同时等应答的一般就一个对话，多出来的一定是漏掉的 cancel。 */
+        /** 事件流缓存的上限：同时等应答的提问一般就一个对话，多出来的一定是漏掉的 cancel。 */
         private const val HOST_PENDING_CAP = 32
 
         fun factory(

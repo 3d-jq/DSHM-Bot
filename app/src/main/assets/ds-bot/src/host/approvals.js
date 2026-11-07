@@ -1,7 +1,7 @@
-// Approvals. A member's group Session is hidden, so DSH's approval card never shows
-// there and the turn would wait forever: DS Bot answers those requests itself, from
-// the group chat. A Bot's own chat keeps DSH's card; its requests are only noted, so
-// the team view can say who is waiting.
+// Approvals. DS Bot is the answerer for every Session it owns: the mobile client
+// and the team view both answer through `approval-answer`, without DSH's own
+// card or the `$events` waterfall. A group Session only needs the turn yielded
+// so the group chat does not keep waiting for a reply that is already settled.
 import { randomUUID } from 'node:crypto'
 
 const OUTCOMES = { allow: 'allowed-once', reject: 'rejected' }
@@ -35,8 +35,7 @@ export function install(rt) {
       pending.delete(id)
       rt.noteApproval?.(sessionId, undefined)
     }
-    if (owner === undefined) return Promise.resolve(next()).finally(settled)
-    rt.yieldRoomTurn?.(sessionId)
+    owner !== undefined && rt.yieldRoomTurn?.(sessionId)
     return new Promise((resolve) => {
       entry.answer = (outcome) => {
         if (!pending.has(id)) return
@@ -59,7 +58,7 @@ export function install(rt) {
     entry.answer(outcome)
   }
 
-  // A group Session that leaves its group has no card left to answer from.
+  // A Session that leaves its team has no card left to answer from.
   const cancelApprovals = (sessionId) => {
     for (const entry of pending.values()) {
       if (entry.sessionId === sessionId) entry.answer?.('cancelled')
