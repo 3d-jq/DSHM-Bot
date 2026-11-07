@@ -149,6 +149,7 @@ fun BotChatScreen(
     // 输入框 + 它下面的留白 = 列表要避开的整块高度（DeepSearch 的 bottomChromeHeight）。
     val bottomChromeHeight = composerHeight + composerBottomPadding
     var chatError by remember { mutableStateOf<String?>(null) }
+    var stopError by remember { mutableStateOf<String?>(null) }
     val workingTransition = rememberInfiniteTransition(label = "bot-working")
     val workingPulse by workingTransition.animateFloat(
         initialValue = 0.95f,
@@ -331,6 +332,16 @@ fun BotChatScreen(
                         .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.xs),
                 )
             }
+            stopError?.let { error ->
+                Text(
+                    text = error,
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.danger,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.xs),
+                )
+            }
             ChatComposer(
                 value = draft,
                 onValueChange = { draft = it },
@@ -346,6 +357,11 @@ fun BotChatScreen(
                 voiceMode = voiceMode,
                 speech = viewModel.speechRepository,
                 sendEnabled = ComposerRules.canSend(draft) && !state.sending,
+                running = state.running,
+                onStop = {
+                    stopError = null
+                    viewModel.stopRunning { error -> stopError = error }
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(

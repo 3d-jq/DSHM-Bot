@@ -95,7 +95,7 @@ export function install(rt) {
   })
   // What a host that only reads the team may still answer.
   // Updates change the dsh profile, not the team, so a reading host may run them too.
-  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'thinking', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary'])
+  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'stop', 'thinking', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary'])
 
   function setPrefs(body) {
     if (body.theme !== undefined) {
@@ -431,6 +431,33 @@ export function install(rt) {
             content: [{ type: 'text', text }],
           }, AbortSignal.timeout(30_000))
           return ok(true)
+        }
+        case 'stop': {
+          const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+          if (sessionId === '') return fail('Nothing to stop', 'bot/invalid')
+          await rt.load()
+          const room = rt.roomOf(sessionId)
+          const bot = rt.botOf(sessionId)
+          const targets = new Set()
+          if (room !== undefined) {
+            targets.add(room.id)
+            for (const memberSessionId of Object.values(room.sessions ?? {})) {
+              if (typeof memberSessionId === 'string') targets.add(memberSessionId)
+            }
+          } else if (bot !== undefined) {
+            targets.add(rt.chatOf(bot.id))
+          } else {
+            targets.add(sessionId)
+          }
+          let stopped = false
+          for (const target of targets) {
+            if (rt.live.get(target)?.turn === undefined) continue
+            const agent = await rt.resolveAgent(target).catch(() => undefined)
+            if (agent === undefined) continue
+            agent.cancel({ kind: 'user' })
+            stopped = true
+          }
+          return ok(stopped)
         }
         // Side chats in the Bot's panel: each question is an aside on a fresh
         // snapshot of this Bot's private chat; the earlier finished pairs of

@@ -273,6 +273,7 @@
     <string name="composer_voice">Voice input</string>
     <string name="composer_voice_cancel">Cancel dictation</string>
     <string name="composer_voice_stop">Stop dictation</string>
+    <string name="composer_stop">Stop reply</string>
     <string name="composer_voice_listening">Listening…</string>
     <string name="composer_voice_transcribing">Transcribing…</string>
     <string name="chat_thinking">Thinking it through…</string>

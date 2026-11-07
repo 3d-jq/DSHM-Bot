@@ -273,6 +273,7 @@
     <string name="composer_voice">语音输入</string>
     <string name="composer_voice_cancel">取消听写</string>
     <string name="composer_voice_stop">停止听写</string>
+    <string name="composer_stop">停止回复</string>
     <string name="composer_voice_listening">正在听…</string>
     <string name="composer_voice_transcribing">正在转写…</string>
     <string name="chat_thinking">理一下思路…</string>

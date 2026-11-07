@@ -18,7 +18,7 @@ export const API_VERSION = 1
 export const API_MIN = 1
 export const CAPABILITIES = [
   'state', 'state-avatar-refs', 'avatar', 'chat', 'room-chat', 'send', 'feed', 'feed-room', 'notices',
-  'questions', 'views', 'approvals', 'stop-member-work', 'memory', 'memory-edit', 'usage-summary', 'rpc',
+  'questions', 'views', 'approvals', 'stop-member-work', 'stop', 'memory', 'memory-edit', 'usage-summary', 'rpc',
 ]
 export const NOTICE_KINDS = ['message', 'group', 'done', 'question', 'view', 'approval']
 

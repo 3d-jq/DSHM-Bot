@@ -89,6 +89,8 @@ fun ChatComposer(
     textScale: Float = 1f,
     voiceMode: VoiceMode = VoiceMode.AUTO,
     speech: SpeechRepository? = null,
+    running: Boolean = false,
+    onStop: () -> Unit = {},
 ) {
     val colors = Dshm.colors
     val spacing = Dshm.spacing
@@ -380,6 +382,7 @@ fun ChatComposer(
         when {
             listening -> StopKey(onStop = { stopDictation() })
             transcribing -> TranscribingKey()
+            running && value.isBlank() -> StopRunKey(onStop = onStop)
             value.isBlank() && voiceAvailable -> ComposerKey(
                 icon = R.drawable.ic_lucide_mic,
                 contentDescription = stringResource(R.string.composer_voice),
@@ -493,6 +496,26 @@ private fun StopKey(onStop: () -> Unit) {
         Icon(
             painter = painterResource(R.drawable.ic_lucide_square),
             contentDescription = stringResource(R.string.composer_voice_stop),
+            tint = Dshm.colors.onAccent,
+            modifier = Modifier.size(Dshm.spacing.xxl * 0.5f),
+        )
+    }
+}
+
+/** 对话执行中的停止键：主色实心 + 方块，照 DeepSearch 的三态发送键。 */
+@Composable
+private fun StopRunKey(onStop: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(Dshm.spacing.composerKey)
+            .clip(CircleShape)
+            .background(Dshm.colors.accent)
+            .clickable(onClick = onStop),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_lucide_square),
+            contentDescription = stringResource(R.string.composer_stop),
             tint = Dshm.colors.onAccent,
             modifier = Modifier.size(Dshm.spacing.xxl * 0.5f),
         )
