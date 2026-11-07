@@ -30,11 +30,11 @@
   `spacing.composerImeGap` —— 两个间隙各自独立（键盘下贴得比静止态紧得多，合成一个值就两头不讨好）；
   用 `consumeWindowInsets(innerPadding) + imePadding()` 避免与 Scaffold 内边距重复，键盘弹出时紧贴键盘上方。
   数值一律以 `core/design/DshmSpacing.kt` 为准，本文不抄。
-- **底部渐变磨砂**：照对话顶栏那层 `Brush.verticalGradient` 做 alpha 遮罩，遮的是
-  **消息内容的均匀模糊副本**（`BlurEffect` / 等价于 `Modifier.blur`，API 31+ 生效）。
-  顶部透明、越往下越浓、一直盖到物理底边 —— 小白条压在模糊内容上，不会留一截空白，
-  也不会用一层死白把消息裁掉。低版本退化为顶栏同款纯渐变。
-  规则在 `ComposerGradientBlur.kt`，半径取 `spacing.composerBlurRadius`。不动 Compose BOM，不用 `BlurRadiusSpec`。
+- **底部渐变磨砂**：照对话顶栏那层 `Brush.verticalGradient`，给底部遮罩本身加
+  `Modifier.blur(spacing.composerBlurRadius)`（底层是 Android 高斯模糊 `RenderEffect`，
+  API 31+ 生效）+ `BlurredEdgeTreatment.Unbounded` 保证一直盖到物理底边。
+  **不录消息层、不用 `GraphicsLayer` / `BlendMode` / 背景采样**，避免液态玻璃那套
+  逐帧录制造成闪烁；低版本 `blur` 自动退化为纯渐变。不动 Compose BOM，不用 `BlurRadiusSpec`。
 - **悬浮式**：消息列表铺满整屏（只让位给系统 UI），输入框与自己的留白一起叠在列表上方；
   列表的 `contentPadding.bottom` 按「输入框实测高度 + 留白」避开这块，让内容能从输入框下方透过去。
   **不要把 `composerBottomInset` 加到内容区的 `padding(bottom=)` 上** —— 那会把列表一起抬高，

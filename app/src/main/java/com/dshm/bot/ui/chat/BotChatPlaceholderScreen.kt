@@ -69,6 +69,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -240,12 +242,7 @@ fun BotChatScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .composerGradientBlur(
-                        height = bottomChromeHeight + Dshm.spacing.xxl,
-                        radius = Dshm.spacing.composerBlurRadius,
-                        background = Dshm.colors.background,
-                    ),
+                    .fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 when {
@@ -577,6 +574,27 @@ private fun ChatMessages(
                 }
             }
         }
+        // 普通高斯模糊 + 渐变遮罩（B 方案）：`Modifier.blur` 底层就是 Android
+        // RenderEffect 的高斯模糊，只作用在这层渐变上；不录消息层、不做 DstIn /
+        // 混合采样，也就不会把液态玻璃那套带进来导致渲染一闪一闪。
+        // 渐变一直盖到物理底边，小白条下面同样有覆盖。
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(bottomChromeHeight + Dshm.spacing.xxl)
+                .blur(
+                    radius = Dshm.spacing.composerBlurRadius,
+                    edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                )
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.28f to Dshm.colors.background.copy(alpha = 0.78f),
+                        1f to Dshm.colors.background.copy(alpha = 0.94f),
+                    ),
+                ),
+        )
         if (!isNearBottom) {
             Box(
                 modifier = Modifier
