@@ -87,7 +87,6 @@ fun BotDetailsScreen(
 
     SettingsPage(
         title = stringResource(R.string.bot_settings_page_title),
-        subtitle = info?.name ?: bot.name,
         onBack = onBack,
     ) {
         if (state.error != null) {
@@ -789,7 +788,6 @@ fun BotSettingsSheet(
             SettingsSection(title = stringResource(R.string.bot_settings_page_title)) {
                 SettingsRow(
                     title = stringResource(R.string.bot_settings_details),
-                    subtitle = stringResource(R.string.bot_settings_page_title),
                     onClick = {
                         onDismiss()
                         onDetails()

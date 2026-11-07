@@ -234,6 +234,36 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - 以后做浏览器要按 DS Bot `DetailsDrawer` / `BotPanel` 的「Bot 专属浏览器标签页」口径，
   不是把当前 `WebHostScreen` 的 general DSH Web 当浏览器入口。
 
+### 底部面板待做清单（⬜ 暂不处理）
+
+- ⬜ **浏览器标签页**：做 Bot 专属标签页状态（打开/关闭/切换、当前页、恢复上次标签），按 DS Bot
+  `DetailsDrawer` 的 `browser` tab 与 `browsers.tabs` 口径；不要复用现在整页 DSH Web 的 `onOpenBrowser`。
+- ⬜ **记忆新增 / 编辑**：接 `memory-add` / `memory-edit`，补新增、修改、scope/topic 选择和失败提示；
+  现在只有 `memory-view` 查看与 `memory-forget` 删除。
+- ⬜ **文件夹选择器**：接 `folder-list` / `folder-pick`，用目录列表选工作文件夹；
+  现在是手填 `workDir` 文本，走 `update-bot` 时由 DS Bot 校验。
+- ⬜ **运行统计**：接 `run-stats`，在面板顶部或详情卡显示本轮耗时/模型用量摘要；
+  现在只有 `usage-summary` 的当天总量。
+
+### Bot 完整设置页接线审计（2026-11-07）
+
+> 当前阶段只做**单个 Bot**，不展开群聊设置页；群聊相关入口与接口不在本轮接线范围。
+
+- 顶栏「设置」下面的 Bot 名字副标题已去掉，标题栏只保留「设置」。
+- **真实可用**：名称 / 角色 / 模型 / 工作目录 / 说明 / 形象走 `update-bot`；隐私 Bot 走 `set-flags`；
+  设为主 Bot 走 `set-main`；复制走 `duplicate-bot`；删除走 `delete-bot`；用量走 `usage-summary`；
+  记忆查看/删除走 `memory-view` / `memory-forget`；定时任务列表/新建/删除走
+  `schedules` / `schedule-create` / `schedule-delete`。模型等字段现在点选即乐观回显。
+- **半成品**：工作目录是手填文本，没有 `folder-list` / `folder-pick` 选择器；记忆只能查看和删除，
+  不能 `memory-add` / `memory-edit`；用量只有当天 token 摘要，没有 `run-stats`。
+- **失败反馈缺失**：`setHidden` / `setMain` / `duplicate` / 定时任务 / 记忆删除的 `onDone(error)` 在详情页大多没接，
+  失败只写进 ViewModel 或不提示；后续统一补 Snackbar/错误行。
+- **当前完整页缺项**：权限设置（底部面板已有）、浏览器标签页、运行统计、记忆新增/编辑、文件夹选择器。
+  这些都不是可点按钮，不能靠假跳转补齐。
+- **范围外（暂不处理）**：群聊目前也复用 [BotDetailsScreen]，而 `BotDetailsViewModel` 只读 `state.bots`、
+  写 Bot 专属接口；等开始做群聊时，单独接 `update-room` / `delete-room` / `room-continue` 与群成员、
+  群权限、公告等。当前不把它算作单 Bot 设置页的 bug，也不用假群设置入口补齐。
+
 ## 已知工程债（与修 bug 并行清）
 
 - 测试覆盖：`data/runtime`、`data/remote`、`ui/settings` 相对 UI 偏薄，补 JVM 测试与契约测试
