@@ -89,7 +89,7 @@ fun ChatComposer(
     textScale: Float = 1f,
     voiceMode: VoiceMode = VoiceMode.AUTO,
     speech: SpeechRepository? = null,
-    running: Boolean = false,
+    stopVisible: Boolean = false,
     onStop: () -> Unit = {},
 ) {
     val colors = Dshm.colors
@@ -379,16 +379,24 @@ fun ChatComposer(
         }
         Spacer(Modifier.width(spacing.sm))
 
-        when {
-            listening -> StopKey(onStop = { stopDictation() })
-            transcribing -> TranscribingKey()
-            running && value.isBlank() -> StopRunKey(onStop = onStop)
-            value.isBlank() && voiceAvailable -> ComposerKey(
+        when (
+            composerTrailingAction(
+                listening = listening,
+                transcribing = transcribing,
+                stopVisible = stopVisible,
+                draft = value,
+                voiceAvailable = voiceAvailable,
+            )
+        ) {
+            ComposerTrailingAction.STOP_DICTATION -> StopKey(onStop = { stopDictation() })
+            ComposerTrailingAction.TRANSCRIBING -> TranscribingKey()
+            ComposerTrailingAction.STOP_RUN -> StopRunKey(onStop = onStop)
+            ComposerTrailingAction.VOICE -> ComposerKey(
                 icon = R.drawable.ic_lucide_mic,
                 contentDescription = stringResource(R.string.composer_voice),
                 onClick = { startDictation() },
             )
-            else -> SendKey(enabled = sendEnabled, onSend = onSend)
+            ComposerTrailingAction.SEND -> SendKey(enabled = sendEnabled, onSend = onSend)
         }
     }
 }

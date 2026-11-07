@@ -48,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -270,6 +271,8 @@ fun BotChatScreen(
                     else -> ChatMessages(
                         entries = state.entries,
                         streaming = state.streaming,
+                        activity = state.activity,
+                        lastSendAt = lastSendAt,
                         bot = bot,
                         fontScale = fontScale,
                         topPadding = innerPadding.calculateTopPadding(),
@@ -284,7 +287,6 @@ fun BotChatScreen(
                         hasEarlier = state.hasEarlier,
                         loadingEarlier = state.loadingEarlier,
                         sendCount = sendCount,
-                        lastSendAt = lastSendAt,
                         bottomChromeHeight = bottomChromeHeight,
                         autoLoadEnabled = state.error == null,
                         onLoadEarlier = viewModel::loadEarlier,
@@ -363,7 +365,7 @@ fun BotChatScreen(
                 voiceMode = voiceMode,
                 speech = viewModel.speechRepository,
                 sendEnabled = ComposerRules.canSend(draft) && !state.sending,
-                running = state.running,
+                stopVisible = state.stopVisible,
                 onStop = {
                     stopError = null
                     viewModel.stopRunning { error -> stopError = error }
@@ -439,6 +441,7 @@ private fun LoadingEarlierRow() {
 private fun ChatMessages(
     entries: List<ChatEntry>,
     streaming: String,
+    activity: ChatActivity?,
     bot: ChatRowUi,
     fontScale: Float,
     topPadding: Dp,
@@ -457,7 +460,7 @@ private fun ChatMessages(
     onLoadEarlier: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
-    val typing = working && streaming.isEmpty()
+    val typing = activity != null
     val streamingNow = streaming.isNotEmpty()
 
     // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
@@ -585,7 +588,13 @@ private fun ChatMessages(
             }
             // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
             if (typing) {
-                item(key = "typing") { ThinkingRow(bot) }
+                item(key = "typing") {
+                    ChatActivityRow(
+                        bot = bot,
+                        activity = requireNotNull(activity),
+                        fallbackStartedAtMs = lastSendAt,
+                    )
+                }
             }
             if (streaming.isNotEmpty()) {
                 item(key = "streaming") {
@@ -684,21 +693,56 @@ private fun ChatMessages(
     }
 }
 
-/** 模型思考/排队：一个会呼吸的小头像 + 「理一下思路…」+ 已等待秒数（对齐 DS Bot）。 */
+/**
+ * DS Bot 的活动状态行：头像 + 当前状态文案 + 本回合已用时间。
+ *
+ * 对齐 `ActivityIndicator`：文案至少展示 800ms，计时从回合开始而不是组件挂载开始；
+ * 行本身跟着 `running` 走，流式文字开始后也不提前撤掉。
+ */
 @Composable
-private fun ThinkingRow(bot: ChatRowUi) {
-    var seconds by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1_000)
-            seconds += 1
+private fun ChatActivityRow(
+    bot: ChatRowUi,
+    activity: ChatActivity,
+    fallbackStartedAtMs: Long,
+) {
+    var shown by remember { mutableStateOf(activity) }
+    var shownAt by remember { mutableStateOf(0L) }
+    var phraseIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(activity) {
+        val now = System.currentTimeMillis()
+        val holdLeft = shownAt + CHAT_ACTIVITY_PHRASE_HOLD_MS - now
+        if (holdLeft > 0) delay(holdLeft)
+        shown = activity
+        shownAt = System.currentTimeMillis()
+        if (activity.label == null) phraseIndex += 1
+    }
+    SideEffect {
+        if (shownAt == 0L) {
+            shown = activity
+            shownAt = System.currentTimeMillis()
         }
     }
+    val startedAt = shown.startedAtMs?.takeIf { it > 0L } ?: fallbackStartedAtMs
+    var elapsedMs by remember { mutableStateOf(0L) }
+    LaunchedEffect(startedAt) {
+        while (true) {
+            elapsedMs = if (startedAt > 0L) {
+                (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+    val label = chatActivityLabel(shown, phraseIndex)
     val transition = rememberInfiniteTransition(label = "thinking")
     val scale by transition.animateFloat(
-        initialValue = 0.94f,
-        targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(tween(620), repeatMode = RepeatMode.Reverse),
+        initialValue = if (shown.kind == ChatActivityKind.ALERT) 1f else 0.94f,
+        targetValue = if (shown.kind == ChatActivityKind.ALERT) 1f else 1.06f,
+        animationSpec = infiniteRepeatable(
+            tween(if (shown.kind == ChatActivityKind.ALERT) 1_200 else 620),
+            repeatMode = RepeatMode.Reverse,
+        ),
         label = "thinking-scale",
     )
     Row(
@@ -718,12 +762,15 @@ private fun ThinkingRow(bot: ChatRowUi) {
             },
         )
         Text(
-            text = stringResource(R.string.chat_thinking),
+            text = label,
             style = Dshm.typography.rowPreview,
             color = Dshm.colors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
         )
         Text(
-            text = "· ${seconds}s",
+            text = "· ${chatActivityElapsed(elapsedMs)}",
             style = Dshm.typography.rowTime,
             color = Dshm.colors.textTertiary,
         )

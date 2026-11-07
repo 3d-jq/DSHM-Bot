@@ -53,12 +53,16 @@ data class BotChatUiState(
     /** 引擎报告的活动：更新记忆 / 思考 / 等待确认。 */
     val botStatus: String? = null,
     val botIsMain: Boolean = false,
+    /** DS Bot 活动状态行：当前工具/思考文案、头像状态、回合起始时间。 */
+    val activity: ChatActivity? = null,
     /** DS Bot 的短暂「更新记忆」提示（3.2 秒后收回）。 */
     val memoryNotice: Boolean = false,
     /** 正在流式输出的回复；非空时在列表末尾显示一个临时气泡。 */
     val streaming: String = "",
     /** Bot 正在跑一回合：输入框空时显示停止键。 */
     val running: Boolean = false,
+    /** 停止键的稳定显示状态：只随回合开始/稳定结束切换，不跟瞬时 work 抖动。 */
+    val stopVisible: Boolean = false,
     /** 这个 Bot（或它所在的群）正在等的审批 / 提问。 */
     val approvals: List<ChatApproval> = emptyList(),
     /** 还有更早的历史（游标非空）。 */
@@ -104,6 +108,7 @@ class BotChatViewModel(
     private var feedJob: Job? = null
     private var reloadJob: Job? = null
     private var statusJob: Job? = null
+    private var runningWatchJob: Job? = null
     private var memoryNoticeJob: Job? = null
     private var streamingAttempt: String? = null
     private var streamingText = ""
@@ -285,7 +290,15 @@ class BotChatViewModel(
                 )
             }.onSuccess {
                 runStartedAt = System.nanoTime()
-                _uiState.update { it.copy(sending = false, waitingForReply = true, running = true) }
+                _uiState.update {
+                    it.copy(
+                        sending = false,
+                        waitingForReply = true,
+                        running = true,
+                        stopVisible = true,
+                    )
+                }
+                watchForRunEnd()
             }.onFailure { failure ->
                 runFinishedAt = System.nanoTime()
                 localUserEntries.remove(requestId)
@@ -418,15 +431,15 @@ class BotChatViewModel(
                 val entry = parseItem(item, scope, "feed:${System.nanoTime()}") ?: return
                 if (!seen.add(entry.id)) return
                 // 最终消息已经进列表，立即撤掉流式临时气泡，避免同一段回复出现两遍。
+                // 但一条 bot 文字 / 一个 stream 段不等于整回合结束：DS Bot 还能继续
+                // 调工具、换目录、等待审批。running/activity 只信 state.work。
                 if (entry.kind == ChatEntryKind.BOT) {
-                    runFinishedAt = System.nanoTime()
                     clearStreaming()
                 }
                 _uiState.update { state ->
                     state.copy(
                         entries = state.entries + entry,
                         waitingForReply = if (entry.kind == ChatEntryKind.USER) state.waitingForReply else false,
-                        running = if (entry.kind == ChatEntryKind.BOT) false else state.running,
                     )
                 }
             }
@@ -438,18 +451,30 @@ class BotChatViewModel(
                         streamingAttempt = data.optString("attemptId").ifEmpty { "stream" }
                         streamingText = ""
                         runStartedAt = System.nanoTime()
-                        _uiState.update { it.copy(streaming = "", running = true, waitingForReply = false) }
+                        _uiState.update {
+                            it.copy(
+                                streaming = "",
+                                running = true,
+                                stopVisible = true,
+                                waitingForReply = false,
+                                activity = it.activity?.copy() ?: ChatActivity(
+                                    kind = ChatActivityKind.THINKING,
+                                    label = null,
+                                    startedAtMs = System.currentTimeMillis(),
+                                ),
+                            )
+                        }
                     }
 
                     "end" -> {
                         val attempt = data.optString("attemptId")
                         viewModelScope.launch {
                             // 最终 message 通常先到并已清掉流式气泡；这里只兜底。
+                            // stream/end 只代表这一段文字写完，不代表整回合结束。
                             delay(200)
                             if (streamingAttempt == attempt) {
                                 clearStreaming()
-                                runFinishedAt = System.nanoTime()
-                                _uiState.update { it.copy(waitingForReply = false, running = false) }
+                                refreshBotStatus()
                             }
                         }
                     }
@@ -459,7 +484,18 @@ class BotChatViewModel(
                         if (chunk.isNotEmpty()) {
                             streamingText += chunk
                             runStartedAt = System.nanoTime()
-                            _uiState.update { it.copy(streaming = streamingText, running = true) }
+                            _uiState.update {
+                                it.copy(
+                                    streaming = streamingText,
+                                    running = true,
+                                    stopVisible = true,
+                                    activity = it.activity ?: ChatActivity(
+                                        kind = ChatActivityKind.THINKING,
+                                        label = null,
+                                        startedAtMs = System.currentTimeMillis(),
+                                    ),
+                                )
+                            }
                         }
                     }
                 }
@@ -511,11 +547,17 @@ class BotChatViewModel(
             } else {
                 work?.optJSONObject("bots")?.has(botId) == true
             }
-            val running = when {
-                runFinishedAt > runStartedAt && System.nanoTime() - runFinishedAt < STOP_GRACE_NS -> false
-                runStartedAt > runFinishedAt -> true
-                else -> stateRunning
-            }
+            val running = stateRunning || (
+                runStartedAt > runFinishedAt &&
+                    System.nanoTime() - runStartedAt < RUNNING_OPTIMISTIC_NS
+                )
+            val activity = parseChatActivity(
+                state = state,
+                botId = botId,
+                sessionId = sessionId,
+                isGroup = isGroup,
+                running = running,
+            )
             val news = state.optJSONObject("memoryNews")?.optJSONObject(botId)
             val newsAt = news?.optLong("at", 0L) ?: 0L
             val recentNews = newsAt > 0L && System.currentTimeMillis() - newsAt < 5 * 60_000L
@@ -537,6 +579,8 @@ class BotChatViewModel(
                         ?: if (isMain) "主 Bot" else "空闲",
                     botIsMain = isMain,
                     running = running,
+                    stopVisible = running,
+                    activity = activity,
                 )
             }
             recomputeApprovals()
@@ -569,13 +613,51 @@ class BotChatViewModel(
         val connection = client ?: return
         runFinishedAt = System.nanoTime()
         clearStreaming()
-        _uiState.update { it.copy(running = false, waitingForReply = false) }
+        runningWatchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                running = false,
+                waitingForReply = false,
+                activity = null,
+                stopVisible = false,
+            )
+        }
         viewModelScope.launch {
             val error = runCatching {
                 connection.bot("stop", JSONObject().put("sessionId", botId))
             }.exceptionOrNull()?.let { describeChatError(it) }
             refreshBotStatus()
             onDone(error)
+        }
+    }
+
+    /**
+     * 一轮工作可能跨过多段文字 / 工具调用 / 文件夹切换。feed 没有「整回合结束」
+     * 事件，所以发送后按 DS Bot 自己的 `work` 轻量轮询：它空了才收状态行。
+     */
+    private fun watchForRunEnd() {
+        val connection = client ?: return
+        runningWatchJob?.cancel()
+        runningWatchJob = viewModelScope.launch {
+            var idlePolls = 0
+            while (idlePolls < 2) {
+                delay(1_000)
+                val state = runCatching { connection.bot("state") }.getOrNull() ?: continue
+                val work = state.optJSONObject("work")
+                val running = if (isGroup) {
+                    (work?.optJSONObject("rooms")?.optJSONArray(botId)?.length() ?: 0) > 0
+                } else {
+                    work?.optJSONObject("bots")?.has(botId) == true
+                }
+                if (running) {
+                    idlePolls = 0
+                    refreshBotStatus()
+                } else {
+                    idlePolls += 1
+                }
+            }
+            runFinishedAt = System.nanoTime()
+            _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
         }
     }
 
@@ -627,6 +709,8 @@ class BotChatViewModel(
         /** 事件流缓存的上限：同时等应答的提问一般就一个对话，多出来的一定是漏掉的 cancel。 */
         private const val HOST_PENDING_CAP = 32
         private const val STOP_GRACE_NS = 2_000_000_000L
+        /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
+        private const val RUNNING_OPTIMISTIC_NS = 30_000_000_000L
 
         fun factory(
             botId: String,
