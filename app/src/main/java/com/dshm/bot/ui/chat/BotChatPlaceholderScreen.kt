@@ -135,16 +135,15 @@ fun BotChatScreen(
     // 输入法高度与系统导航栏高度分开取 —— 两个间隙要能各自调。
     val imeInset = with(density) { WindowInsets.Companion.ime.getBottom(this).toDp() }
     val systemBarInset = with(density) { WindowInsets.Companion.navigationBars.getBottom(this).toDp() }
-    // 沉浸式小白条：没有输入法时内容区**铺到物理底边**，消息一直画到小白条下面，
-    // 由输入框自己让开导航条（照 DeepSearch NanoMuseHome.kt 510 的
-    // consumeWindowInsets + ChatScreen.kt 2725 的 imePadding）。
+    // 沉浸式小白条：内容区铺到物理底边（照 DeepSearch NanoMuseHome.kt 510 +
+    // ChatScreen.kt 2725 的 imePadding），输入框自己让开导航条。
     // 只给内容区加 bottom padding 会把它裁在系统栏上沿，下面露出一条白底。
-    val composerBottomPadding = if (imeInset > systemBarInset) {
-        // 输入法在场：内容区已被 imePadding() 顶到输入法上沿，这里只加贴键间隙。
-        Dshm.spacing.composerImeGap
-    } else {
-        systemBarInset + Dshm.spacing.composerBottomInset
-    }
+    val composerBottomPadding = composerBottomPadding(
+        imeInset = imeInset,
+        navigationBars = systemBarInset,
+        composerImeGap = Dshm.spacing.composerImeGap,
+        composerBottomInset = Dshm.spacing.composerBottomInset,
+    )
     // 输入框 + 它下面的留白 = 列表要避开的整块高度（DeepSearch 的 bottomChromeHeight）。
     val bottomChromeHeight = composerHeight + composerBottomPadding
     var chatError by remember { mutableStateOf<String?>(null) }

@@ -39,6 +39,13 @@
   `imePadding()` / `consumeWindowInsets`）；只有键盘弹出才由 `imePadding()` 顶开内容区。
   系统栏本身用 `SystemBarStyle.auto(TRANSPARENT, TRANSPARENT)` 压掉浅色主题的自动 scrim。
   输入框自己按「导航条高度 + `composerBottomInset`」让开小白条，不会压住手势区。
+- **IME 回落不抖**：输入框离物理底边取 `maxOf(imeInset + composerImeGap, 静止位)`，
+  静止位 = `navigationBars + composerBottomInset`。键盘高时贴着键盘走，回落到静止位
+  就钉住，之后 IME 再收也不动（主流 App 的「一下子固定住」手感）。
+  **不能用 `if (imeInset > navigationBars)` 在两种 padding 之间二选一** —— 分支翻转那一帧
+  padding 从 `composerImeGap` 跳到 `navigationBars + composerBottomInset`，输入框在下落途中
+  被凭空抬起约 28dp，于是抖一下。规则在 `ComposerBottomInset.kt`，
+  `ComposerBottomInsetTest` 逐帧守着连续、单调与钉住点。
 - 对话页顶栏按「头像 + 胶囊」的真实高度留位，消息列表从胶囊下方开始，不会压到胶囊。
 
 ## 测试
