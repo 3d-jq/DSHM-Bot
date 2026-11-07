@@ -15,6 +15,7 @@ import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.remote.DshSessionRepository
 import com.dshm.bot.data.remote.DshMuxHub
+import com.dshm.bot.data.remote.DshMux
 import com.dshm.bot.data.remote.DshHostEvent
 import com.dshm.bot.data.remote.DshQuestionRequest
 import com.dshm.bot.data.remote.DshQuestionAnswer
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import org.json.JSONArray
 import java.util.UUID
 
 /** 对话里的一行：用户消息、Bot 消息、或系统事件。 */
@@ -52,6 +54,8 @@ data class ChatEntry(
     /** 群聊/单聊事件类型（done/stopped/working/...）。 */
     val eventKind: String? = null,
     val eventCode: String? = null,
+    /** 会话事件 seq；用于把 tool call 事件合并回时间线。 */
+    val seq: Long? = null,
 )
 
 /** 待发送的本地附件。 */
@@ -60,6 +64,14 @@ data class ChatAttachmentDraft(
     val bytes: ByteArray,
     val isImage: Boolean,
 )
+
+private val FOLLOW_TOOLS = setOf(
+    "message_bot", "stop_bot", "create_bot", "update_bot",
+    "create_group", "update_group", "delete_group", "post_to_group",
+    "read_group_chat", "remember", "forget",
+)
+private val GROUP_NAME = Regex("""(?:Created group|Updated group|Nothing changed in group) "([^"]+)"""")
+private val POST_NAME = Regex("""Posted in "([^"]+)"""")
 
 data class BotChatUiState(
     val loading: Boolean = true,
@@ -127,6 +139,18 @@ class BotChatViewModel(
     private val hostQuestions = LinkedHashMap<String, DshQuestionRequest>()
     /** 当前 mux 连接的 clientId；反问作答要带回它。 */
     private var hostClientId: String? = null
+    private var mux: DshMux? = null
+    private var followStreamId: String? = null
+    private var followSessionId: String? = null
+    private val toolEvents = LinkedHashMap<Long, ChatEntry>()
+    private val pendingTools = LinkedHashMap<String, PendingTool>()
+
+    private data class PendingTool(
+        val name: String,
+        val args: JSONObject,
+        val callId: String,
+        val time: Long,
+    )
     /** 更早历史的游标；null 表示没有更早的了。 */
     private var cursor: ChatCursor? = null
     private var feedJob: Job? = null
@@ -154,10 +178,147 @@ class BotChatViewModel(
             // 主机事件流（`$events`）只用来显示 Bot 反问用户；审批已归 DS Bot。
             endpoint?.let { runtime ->
                 viewModelScope.launch {
-                    val mux = DshMuxHub.start(runtime)
-                    mux.hostEvents.collect { event -> handleHostEvent(event) }
+                    val hub = DshMuxHub.start(runtime)
+                    mux = hub
+                    sessionId?.let { ensureFollow(it) }
+                    hub.hostEvents.collect { event -> handleHostEvent(event) }
                 }
             }
+        }
+    }
+
+    /** 单聊订阅会话事件，把 DS Bot 网页端画在消息流里的 tool/call 事件补回来。 */
+    private fun ensureFollow(session: String) {
+        if (isGroup) return
+        if (followSessionId == session && followStreamId != null) return
+        followStreamId?.let { mux?.closeStream(it) }
+        followSessionId = session
+        toolEvents.clear()
+        pendingTools.clear()
+        val args = JSONObject()
+            .put("address", JSONObject().put("kind", "session").put("sessionId", session))
+            .put("maxMessages", 50)
+        followStreamId = mux?.openStream(
+            endpoint = "session/follow",
+            args = args,
+            onFrame = { frame -> handleFollowFrame(frame) },
+            onEnd = { followStreamId = null },
+        )
+    }
+
+    private fun handleFollowFrame(frame: JSONObject) {
+        when (frame.optString("type")) {
+            "snapshot" -> {
+                toolEvents.clear()
+                pendingTools.clear()
+                frame.optJSONArray("records")?.let { records ->
+                    for (index in 0 until records.length()) {
+                        val record = records.optJSONObject(index) ?: continue
+                        if (record.optString("type") == "event") {
+                            handleSessionEvent(record.optJSONObject("event"))
+                        }
+                    }
+                }
+                mergeToolEvents()
+            }
+            "event" -> {
+                handleSessionEvent(frame.optJSONObject("event"))
+                mergeToolEvents()
+            }
+        }
+    }
+
+    private fun handleSessionEvent(event: JSONObject?) {
+        event ?: return
+        val type = event.optString("type")
+        val data = event.optJSONObject("data") ?: return
+        val seq = event.optLong("seq", -1L).takeIf { it >= 0L } ?: return
+        val time = event.optLong("time", 0L)
+        when (type) {
+            "tool/call" -> {
+                val name = data.optString("name")
+                if (name !in FOLLOW_TOOLS) return
+                val callId = data.optString("callId").ifEmpty {
+                    data.optJSONObject("message")?.optString("toolCallId").orEmpty()
+                }
+                if (callId.isEmpty()) return
+                pendingTools[callId] = PendingTool(name, toolArguments(data), callId, time)
+            }
+            "tool/result" -> {
+                val message = data.optJSONObject("message")
+                val callId = message?.optString("toolCallId").orEmpty().ifEmpty {
+                    data.optString("toolCallId").ifEmpty { data.optString("callId") }
+                }
+                val pending = pendingTools.remove(callId) ?: return
+                val isError = data.optBoolean("isError") ||
+                    message?.optBoolean("isError") == true ||
+                    data.optBoolean("error")
+                val resultText = textContent(message?.opt("content"))
+                val label = followToolLabel(pending, resultText, isError) ?: return
+                toolEvents[seq] = ChatEntry(
+                    id = "tool:$seq",
+                    kind = ChatEntryKind.EVENT,
+                    text = label,
+                    seq = seq,
+                    timeMs = time,
+                )
+            }
+        }
+    }
+
+    private fun toolArguments(data: JSONObject): JSONObject {
+        data.optJSONObject("arguments")?.let { return it }
+        val raw = data.optString("arguments")
+        return runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
+    }
+
+    private fun textContent(value: Any?): String {
+        val array = value as? JSONArray ?: return (value as? String).orEmpty()
+        return buildString {
+            for (index in 0 until array.length()) {
+                val block = array.optJSONObject(index) ?: continue
+                if (block.optString("type") == "text") append(block.optString("text"))
+            }
+        }.trim()
+    }
+
+    private fun followToolLabel(pending: PendingTool, result: String, isError: Boolean): String? {
+        val args = pending.args
+        val target = sequenceOf(
+            args.optString("to"),
+            args.optString("bot"),
+            args.optString("name"),
+            args.optString("group"),
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
+        return when (pending.name) {
+            "message_bot" -> if (isError) "没能发消息给 $target" else "消息发给 $target"
+            "stop_bot" -> if (isError) "没能叫停 $target" else "叫停了 $target"
+            "create_bot" -> if (isError) "创建 Bot 失败" else "创建了 $target"
+            "update_bot" -> if (isError) "更新 Bot 失败" else "更新了 $target"
+            "create_group" -> {
+                val name = GROUP_NAME.find(result)?.groupValues?.getOrNull(1) ?: target
+                if (isError) "创建群聊失败" else "创建了群聊${if (name.isBlank()) "" else "：$name"}"
+            }
+            "update_group" -> if (isError) "更新群聊失败" else "更新了群聊"
+            "delete_group" -> if (isError) "删除群聊失败" else "删除了群聊"
+            "post_to_group" -> {
+                val name = POST_NAME.find(result)?.groupValues?.getOrNull(1) ?: target
+                if (isError) "群发言失败" else "在${if (name.isBlank()) "群里" else " $name "}发言"
+            }
+            "read_group_chat" -> if (target.isBlank()) "查看了群聊" else "查看了 $target"
+            "remember", "forget" -> "更新了记忆"
+            else -> null
+        }
+    }
+
+    private fun mergeToolEvents() {
+        if (toolEvents.isEmpty()) return
+        _uiState.update { state ->
+            val base = state.entries.filterNot { it.id.startsWith("tool:") }
+            val merged = (base + toolEvents.values).sortedWith(
+                compareBy<ChatEntry> { it.seq ?: Long.MAX_VALUE },
+            )
+            state.copy(entries = merged)
         }
     }
 
@@ -366,7 +527,10 @@ class BotChatViewModel(
                     payload = JSONObject().put(if (isGroup) "roomId" else "botId", botId),
                 )
             }.onSuccess { value ->
-                value.optString("sessionId").takeIf { it.isNotEmpty() }?.let { sessionId = it }
+                value.optString("sessionId").takeIf { it.isNotEmpty() }?.let {
+                    sessionId = it
+                    ensureFollow(it)
+                }
                 val items = value.optJSONArray("items")
                 val scope = sessionId ?: botId
                 val entries = buildList {
@@ -395,6 +559,7 @@ class BotChatViewModel(
                 }
                 clearStreaming()
                 loadedOnce = true
+                mergeToolEvents()
                 // 刚学到这个 Bot 当前用的 DSH 会话 id：事件流里的请求靠它认领。
                 recomputeApprovals()
             }.onFailure { failure ->
@@ -746,6 +911,7 @@ class BotChatViewModel(
         val rpcId = item.optString("rpcId").takeIf { it.isNotEmpty() }
         val time = item.optLong("time", -1L).takeIf { it > 0L }
         val duration = item.optLong("duration", -1L).takeIf { it > 0L }
+        val seqValue = item.optLong("seq", -1L).takeIf { it >= 0L }
         return when (item.optString("kind")) {
             "user" -> text.takeIf { it.isNotBlank() }
                 ?.let {
@@ -754,6 +920,7 @@ class BotChatViewModel(
                         kind = ChatEntryKind.USER,
                         text = it,
                         timeMs = time,
+                        seq = seqValue,
                     )
                 }
 
@@ -767,11 +934,12 @@ class BotChatViewModel(
                         botId = item.optString("botId").takeIf { value -> value.isNotEmpty() },
                         timeMs = time,
                         durationMs = duration,
+                        seq = seqValue,
                     )
                 }
 
             "answer" -> text.takeIf { it.isNotBlank() }
-                ?.let { ChatEntry(id, ChatEntryKind.BOT, it, botName, timeMs = time) }
+                ?.let { ChatEntry(id, ChatEntryKind.BOT, it, botName, timeMs = time, seq = seqValue) }
 
             "event" -> {
                 val eventKind = item.optString("event").ifEmpty { item.optString("role") }
@@ -785,6 +953,7 @@ class BotChatViewModel(
                     timeMs = time,
                     eventKind = eventKind.takeIf { it.isNotEmpty() },
                     eventCode = item.optString("code").takeIf { it.isNotEmpty() },
+                    seq = seqValue,
                 )
             }
 
@@ -795,6 +964,7 @@ class BotChatViewModel(
     override fun onCleared() {
         feedJob?.cancel()
         reloadJob?.cancel()
+        followStreamId?.let { mux?.closeStream(it) }
     }
 
     companion object {
