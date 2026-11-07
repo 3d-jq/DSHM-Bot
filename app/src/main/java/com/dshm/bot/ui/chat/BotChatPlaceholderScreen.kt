@@ -1,5 +1,13 @@
 package com.dshm.bot.ui.chat
 
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -22,6 +30,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
@@ -35,6 +44,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,6 +55,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -71,13 +82,16 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -89,6 +103,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.content.FileProvider
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -101,6 +116,9 @@ import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Bot 对话页：原生 Compose 界面，数据来自本机 DSH 的 DS Bot 插件。
@@ -125,6 +143,70 @@ fun BotChatScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var draft by rememberSaveable(bot.id) { mutableStateOf("") }
+    var pendingAttachments by remember { mutableStateOf<List<ChatAttachmentDraft>>(emptyList()) }
+    val attachContext = LocalContext.current
+    val attachScope = rememberCoroutineScope()
+    var cameraFile by remember { mutableStateOf<File?>(null) }
+
+    fun displayName(uri: Uri): String {
+        val fromResolver = runCatching {
+            attachContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull()
+        return fromResolver?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+            ?: "file"
+    }
+
+    fun addAttachment(uri: Uri, isImage: Boolean) {
+        attachScope.launch {
+            val draftAttachment = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = attachContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes == null || bytes.isEmpty()) null else ChatAttachmentDraft(displayName(uri), bytes, isImage)
+                }.getOrNull()
+            }
+            if (draftAttachment == null) {
+                Toast.makeText(attachContext, "读取附件失败", Toast.LENGTH_SHORT).show()
+            } else {
+                pendingAttachments = (pendingAttachments + draftAttachment).take(10)
+            }
+        }
+    }
+
+    fun addAttachment(file: File, isImage: Boolean) {
+        attachScope.launch {
+            val draftAttachment = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = file.readBytes()
+                    if (bytes.isEmpty()) null else ChatAttachmentDraft(file.name, bytes, isImage)
+                }.getOrNull()
+            }
+            if (draftAttachment == null) {
+                Toast.makeText(attachContext, "读取附件失败", Toast.LENGTH_SHORT).show()
+            } else {
+                pendingAttachments = (pendingAttachments + draftAttachment).take(10)
+            }
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        uris.forEach { uri -> addAttachment(uri, isImage = false) }
+    }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        uris.forEach { uri -> addAttachment(uri, isImage = true) }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) cameraFile?.let { addAttachment(it, isImage = true) }
+        cameraFile = null
+    }
+    fun takePhoto() {
+        val dir = File(attachContext.cacheDir, "camera").apply { mkdirs() }
+        val file = File(dir, "photo-${System.currentTimeMillis()}.jpg")
+        cameraFile = file
+        val uri = FileProvider.getUriForFile(attachContext, attachContext.packageName + ".fileprovider", file)
+        cameraLauncher.launch(uri)
+    }
     var quickSettings by remember { mutableStateOf(false) }
     val quickSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val working = state.sending || state.waitingForReply || state.streaming.isNotEmpty()
@@ -325,6 +407,13 @@ fun BotChatScreen(
                                     if (error != null) chatError = error
                                 }
                             },
+                            onAnswerQuestion = { selected ->
+                                answeringApproval = true
+                                viewModel.answerQuestion(approval, selected) { error ->
+                                    answeringApproval = false
+                                    if (error != null) chatError = error
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -354,9 +443,10 @@ fun BotChatScreen(
                 value = draft,
                 onValueChange = { draft = it },
                 onSend = {
-                    if (ComposerRules.canSend(draft) && !state.sending) {
-                        viewModel.send(draft)
+                    if ((ComposerRules.canSend(draft) || pendingAttachments.isNotEmpty()) && !state.sending) {
+                        viewModel.send(draft, pendingAttachments)
                         draft = ""
+                        pendingAttachments = emptyList()
                         sendCount += 1
                         lastSendAt = System.currentTimeMillis()
                     }
@@ -365,7 +455,15 @@ fun BotChatScreen(
                 textScale = fontScale,
                 voiceMode = voiceMode,
                 speech = viewModel.speechRepository,
-                sendEnabled = ComposerRules.canSend(draft) && !state.sending,
+                onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                onPickImage = { imagePicker.launch("image/*") },
+                onTakePhoto = { takePhoto() },
+                mentionCandidates = if (bot.isGroup) bot.roomMembers.map { it.name } else emptyList(),
+                attachments = pendingAttachments,
+                onRemoveAttachment = { index ->
+                    pendingAttachments = pendingAttachments.filterIndexed { i, _ -> i != index }
+                },
+                sendEnabled = (ComposerRules.canSend(draft) || pendingAttachments.isNotEmpty()) && !state.sending,
                 stopVisible = state.stopVisible,
                 onStop = {
                     stopError = null
@@ -474,6 +572,16 @@ private fun ChatMessages(
     val listState = rememberLazyListState()
     val typing = activity != null
     val streamingNow = streaming.isNotEmpty()
+    // 打开对话时已经存在的消息视为已读；之后新到的消息前显示「新消息」分隔。
+    var seenAtOpen by remember { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(entries) {
+        if (seenAtOpen == null && entries.isNotEmpty()) {
+            seenAtOpen = entries.map { it.id }.toSet()
+        }
+    }
+    val oldestNewId = seenAtOpen?.let { seen ->
+        entries.firstOrNull { it.id !in seen }?.id
+    }
 
     // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
     // 显示在底部。Compose 的 reverseLayout 原生就会把底部锚住 ——
@@ -630,10 +738,7 @@ private fun ChatMessages(
                 val isBotEntry = entry.kind == ChatEntryKind.BOT
                 val sameBotAsOlder = bot.isGroup && isBotEntry && entry.botId != null &&
                     older?.kind == ChatEntryKind.BOT && older.botId == entry.botId
-                val sameBotAsNewer = bot.isGroup && isBotEntry && entry.botId != null &&
-                    newer?.kind == ChatEntryKind.BOT && newer.botId == entry.botId
                 val groupStart = bot.isGroup && isBotEntry && !sameBotAsOlder
-                val groupEnd = bot.isGroup && isBotEntry && !sameBotAsNewer
                 Column(
                     modifier = Modifier.padding(
                         top = if (groupStart || turnsChanged) {
@@ -643,21 +748,36 @@ private fun ChatMessages(
                         },
                     ),
                 ) {
+                if (entry.id == oldestNewId) {
+                    NewMessagesDivider()
+                }
                 when (entry.kind) {
-                    ChatEntryKind.USER -> UserBubble(entry.text, fontScale)
+                    ChatEntryKind.USER -> UserBubble(
+                        text = entry.text,
+                        fontScale = fontScale,
+                        attachments = entry.attachments,
+                        timeMs = null,
+                    )
                     ChatEntryKind.BOT -> BotBubble(
                         text = entry.text,
                         author = entry.author,
                         fontScale = fontScale,
                         isGroup = bot.isGroup,
                         showName = groupStart,
-                        showAvatar = groupEnd,
                         botId = entry.botId,
                         members = bot.roomMembers,
                         adminId = bot.roomAdmin,
                         onOpenMember = onOpenMember,
+                        timeMs = null,
+                        durationMs = null,
                     )
-                    ChatEntryKind.EVENT -> EventLine(entry.text)
+                    ChatEntryKind.EVENT -> EventLine(
+                        text = entry.text,
+                        kind = entry.eventKind,
+                        name = entry.author,
+                        code = entry.eventCode,
+                        timeMs = null,
+                    )
                 }
                 }
             }
@@ -876,19 +996,23 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
 
 /** 用户消息气泡，右对齐。 */
 @Composable
-private fun UserBubble(text: String, fontScale: Float) {
-    Row(
+private fun UserBubble(
+    text: String,
+    fontScale: Float,
+    attachments: List<String> = emptyList(),
+    timeMs: Long? = null,
+) {
+    val context = LocalContext.current
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
+        horizontalAlignment = Alignment.End,
     ) {
-        Text(
-            text = text,
-            style = Dshm.typography.composerText.copy(
-                fontSize = Dshm.typography.composerText.fontSize * fontScale,
-                lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
-            ),
-            color = Dshm.colors.onAccent,
+        Column(
+            horizontalAlignment = Alignment.End,
             modifier = Modifier
+                .pointerInput(text) {
+                    detectTapGestures(onLongPress = { copyMessage(context, text) })
+                }
                 .background(
                     Brush.linearGradient(
                         listOf(Dshm.colors.bubbleUserStart, Dshm.colors.bubbleUserEnd),
@@ -896,16 +1020,42 @@ private fun UserBubble(text: String, fontScale: Float) {
                     RoundedCornerShape(Dshm.radius.lg),
                 )
                 .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-        )
+        ) {
+            if (text.isNotBlank()) {
+                Text(
+                    text = text,
+                    style = Dshm.typography.composerText.copy(
+                        fontSize = Dshm.typography.composerText.fontSize * fontScale,
+                        lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
+                    ),
+                    color = Dshm.colors.onAccent,
+                )
+            }
+            attachments.forEach { name ->
+                Text(
+                    text = "📎 $name",
+                    style = Dshm.typography.rowTime,
+                    color = Dshm.colors.onAccent.copy(alpha = 0.85f),
+                    modifier = Modifier.padding(top = Dshm.spacing.xxs),
+                )
+            }
+        }
+        timeMs?.let { t ->
+            Text(
+                text = clockLabel(t),
+                style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                color = Dshm.colors.textTertiary,
+                modifier = Modifier.padding(top = Dshm.spacing.xxs, end = Dshm.spacing.xs),
+            )
+        }
     }
 }
 
 /**
- * Bot 消息气泡，对齐 DS Bot `GroupMessage`：
- * - 群聊名字只在组首顶部显示，左缩进到气泡列（`bt-group-name`）；
- * - 每条气泡左侧预留头像位（`bt-msg-line` 的 30px）；
- * - 头像只贴组尾那条气泡的左侧，并与气泡底部对齐（`lead` + `align-items:flex-end`）。
- * 单 Bot 对话无名字无头像，保持原样。
+ * Bot 消息气泡：
+ * - 群聊：头像与名字同一行（水平对齐），气泡在下方顶格左对齐（与头像左边缘垂直对齐）；
+ *   同一 bot 连续消息只在组首显示一次头像+名字。
+ * - 单 Bot：无头像、无名字，只显示气泡。
  */
 @Composable
 private fun BotBubble(
@@ -914,28 +1064,68 @@ private fun BotBubble(
     fontScale: Float,
     isGroup: Boolean = false,
     showName: Boolean = false,
-    showAvatar: Boolean = false,
     botId: String? = null,
     members: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
     adminId: String? = null,
     onOpenMember: (String) -> Unit = {},
+    timeMs: Long? = null,
+    durationMs: Long? = null,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
     val isAdmin = botId != null && botId == adminId
     val avatarSize = Dshm.spacing.lg + Dshm.spacing.xs
-    val gap = Dshm.spacing.sm
-    val bubbleLeft = avatarSize + gap
-    val nameStart = bubbleLeft + Dshm.spacing.md
+    val context = LocalContext.current
+    var expanded by remember(text) { mutableStateOf(false) }
+    val collapsible = text.length > 600
 
     val bubble: @Composable () -> Unit = {
-        Column(
-            modifier = Modifier
-                .clip(RoundedCornerShape(Dshm.radius.lg))
-                .background(Dshm.colors.bubbleAssistant)
-                .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-        ) {
-            MarkdownText(markdown = text, fontScale = fontScale)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .pointerInput(text) {
+                        detectTapGestures(onLongPress = { copyMessage(context, text) })
+                    }
+                    .clip(RoundedCornerShape(Dshm.radius.lg))
+                    .background(Dshm.colors.bubbleAssistant),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .then(
+                            if (collapsible && !expanded) {
+                                Modifier.heightIn(max = 280.dp).clipToBounds()
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+                ) {
+                    MarkdownText(markdown = text, fontScale = fontScale)
+                }
+                if (collapsible) {
+                    androidx.compose.material3.HorizontalDivider(color = Dshm.colors.divider)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = !expanded }
+                            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (expanded) {
+                                stringResource(R.string.chat_collapse)
+                            } else {
+                                stringResource(
+                                    R.string.chat_show_all,
+                                    String.format(java.util.Locale.getDefault(), "%,d", text.length),
+                                )
+                            },
+                            style = Dshm.typography.rowTime,
+                            color = Dshm.colors.textTertiary,
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -948,12 +1138,22 @@ private fun BotBubble(
         if (showName && !name.isNullOrBlank()) {
             Row(
                 modifier = Modifier
-                    .padding(start = nameStart, bottom = Dshm.spacing.xxs)
+                    .padding(bottom = Dshm.spacing.xxs)
                     .then(
                         if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (member != null) {
+                    BotAvatar(
+                        inkId = member.inkId,
+                        glyph = AvatarGlyph.BOT,
+                        avatarImage = member.avatarImage,
+                        avatarShape = member.avatarShape,
+                        size = avatarSize,
+                    )
+                    Spacer(Modifier.width(Dshm.spacing.sm))
+                }
                 Text(
                     text = name,
                     style = Dshm.typography.rowTitle.copy(fontSize = 13.sp),
@@ -971,46 +1171,127 @@ private fun BotBubble(
                             .padding(horizontal = Dshm.spacing.xs, vertical = Dshm.spacing.xxs),
                     )
                 }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box(
-                modifier = Modifier.size(avatarSize),
-                contentAlignment = Alignment.BottomStart,
-            ) {
-                if (showAvatar && member != null) {
-                    BotAvatar(
-                        inkId = member.inkId,
-                        glyph = AvatarGlyph.BOT,
-                        avatarImage = member.avatarImage,
-                        avatarShape = member.avatarShape,
-                        size = avatarSize,
-                        modifier = Modifier
-                            .then(if (botId != null) Modifier.clickable { onOpenMember(botId) } else Modifier),
+                timeMs?.let { t ->
+                    Spacer(Modifier.width(Dshm.spacing.xs))
+                    Text(
+                        text = clockLabel(t),
+                        style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                        color = Dshm.colors.textTertiary,
+                    )
+                }
+                durationMs?.let { d ->
+                    Spacer(Modifier.width(Dshm.spacing.xs))
+                    Text(
+                        text = "· ${chatActivityElapsed(d)}",
+                        style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                        color = Dshm.colors.textTertiary,
                     )
                 }
             }
-            Spacer(Modifier.width(gap))
-            Column(modifier = Modifier.weight(1f, fill = false)) { bubble() }
+        }
+        bubble()
+    }
+}
+
+/** 系统事件（完成、停止、失败等）显示为一行居中小字，对齐 DS Bot `bt-event`。 */
+@Composable
+private fun EventLine(
+    text: String,
+    kind: String? = null,
+    name: String? = null,
+    code: String? = null,
+    timeMs: Long? = null,
+) {
+    val label = eventLineLabel(kind, name, text, code)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = Dshm.spacing.xs),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = Dshm.typography.rowTime,
+            color = Dshm.colors.textTertiary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        timeMs?.let { t ->
+            Spacer(Modifier.width(Dshm.spacing.xs))
+            Text(
+                text = clockLabel(t),
+                style = Dshm.typography.rowTime,
+                color = Dshm.colors.textTertiary,
+            )
         }
     }
 }
 
-/** 系统事件（完成、停止等）显示为一行居中小字。 */
+/** DS Bot `bt-event` 文案：按 event kind 映射，落回原文。 */
+private fun eventLineLabel(kind: String?, name: String?, fallback: String, code: String?): String {
+    val who = name?.let { it } ?: ""
+    val prefix = when (kind) {
+        "request" -> "消息来自 $who"
+        "reply" -> "回复来自 $who"
+        "report" -> "来自群聊的回复"
+        "post", "post_to_group" -> if (who.isNotBlank()) "$who 在群里发言" else "在群里发言"
+        "create_group" -> if (fallback.isNotBlank()) "创建群聊：$fallback" else "创建了群聊"
+        "resume" -> "重启后接着做之前的工作"
+        "retry" -> "已要求重试写成文本的工具调用"
+        "secret" -> "密钥请求"
+        "done" -> "$who 做完了"
+        "stopped" -> "你停下了 $who 的工作"
+        "working" -> "$who 开始做了"
+        "approval" -> "$who 停下来等你批准"
+        "missed" -> "$who 没有及时回应"
+        "lookup" -> if (fallback.isNotBlank()) "$who 在对话里查找「$fallback」" else "$who 查看了自己的对话"
+        "resumed" -> "$who 的工作被重启打断，已接着做"
+        "cut" -> "$who 的工作又被重启打断，已停下"
+        "schedule" -> fallback.ifBlank { "定时任务已启动" }
+        "failed" -> if (fallback.isNotBlank()) "$who 没能回答：$fallback" else "$who 没能回答"
+        else -> null
+    }
+    return prefix ?: (if (fallback.isNotBlank()) fallback else (kind ?: "更新"))
+}
+
 @Composable
-private fun EventLine(text: String) {
-    Text(
-        text = text,
-        style = Dshm.typography.rowTime,
-        color = Dshm.colors.textTertiary,
-        textAlign = TextAlign.Center,
+private fun NewMessagesDivider() {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = Dshm.spacing.xs),
-    )
+            .padding(vertical = Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = Dshm.colors.divider,
+        )
+        Text(
+            text = stringResource(R.string.chat_new_messages),
+            style = Dshm.typography.rowTime,
+            color = Dshm.colors.textTertiary,
+            modifier = Modifier.padding(horizontal = Dshm.spacing.sm),
+        )
+        androidx.compose.material3.HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = Dshm.colors.divider,
+        )
+    }
+}
+
+private fun clockLabel(timeMs: Long): String {
+    val c = java.util.Calendar.getInstance().apply { timeInMillis = timeMs }
+    val hh = String.format("%02d", c.get(java.util.Calendar.HOUR_OF_DAY))
+    val mm = String.format("%02d", c.get(java.util.Calendar.MINUTE))
+    return "$hh:$mm"
+}
+
+private fun copyMessage(context: Context, text: String) {
+    if (text.isBlank()) return
+    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    manager?.setPrimaryClip(ClipData.newPlainText("message", text))
+    Toast.makeText(context, context.getString(R.string.chat_copied), Toast.LENGTH_SHORT).show()
 }
 
 /** 头像下方的名字胶囊：白底圆角，悬浮效果与主界面按钮一致。 */

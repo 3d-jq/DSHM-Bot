@@ -23,6 +23,13 @@ data class ChatApproval(
     val kind: Kind = Kind.APPROVAL,
     /** 内部来源标记 —— 保留给提问卡片等还不能本地应答的类型。 */
     val source: Source = Source.DS_BOT,
+    /** 反问卡片：DSH 的 eventId（应答时带回）。 */
+    val eventId: String? = null,
+    /** 反问卡片：问题 id。 */
+    val questionId: String? = null,
+    /** 反问卡片的选项文案。 */
+    val options: List<String> = emptyList(),
+    val multiSelect: Boolean = false,
 ) {
     /** 请求种类。 */
     enum class Kind {

@@ -19,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,10 +27,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,6 +60,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.remote.SpeechRepository
@@ -84,6 +91,12 @@ fun ChatComposer(
     placeholder: String,
     modifier: Modifier = Modifier,
     onAttach: () -> Unit = {},
+    onPickFile: () -> Unit = {},
+    onPickImage: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
+    mentionCandidates: List<String> = emptyList(),
+    attachments: List<ChatAttachmentDraft> = emptyList(),
+    onRemoveAttachment: (Int) -> Unit = {},
     sendEnabled: Boolean = ComposerRules.canSend(value),
     maxLines: Int = 6,
     textScale: Float = 1f,
@@ -101,6 +114,20 @@ fun ChatComposer(
         lineHeight = Dshm.typography.composerText.lineHeight * textScale,
         color = colors.textPrimary,
     )
+    val mentionStart = value.lastIndexOf('@')
+    val mentionActive = mentionCandidates.isNotEmpty() && mentionStart >= 0 &&
+        (mentionStart == 0 || value[mentionStart - 1].isWhitespace()) &&
+        value.substring(mentionStart + 1).none { it.isWhitespace() }
+    val mentionQuery = if (mentionActive) value.substring(mentionStart + 1) else ""
+    val mentionEveryone = stringResource(R.string.composer_mention_everyone)
+    val mentionMatches = if (mentionActive) {
+        (listOf(mentionEveryone) + mentionCandidates)
+            .filter { it.contains(mentionQuery, ignoreCase = true) }
+            .distinct()
+            .take(8)
+    } else {
+        emptyList()
+    }
 
     var listening by remember { mutableStateOf(false) }
     var partial by remember { mutableStateOf("") }
@@ -298,22 +325,84 @@ fun ChatComposer(
         )
     }
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag(COMPOSER_TEST_TAG)
-            .shadow(
-                elevation = spacing.composerElevation,
-                shape = shape,
-                ambientColor = colors.shadowSoft,
-                spotColor = colors.shadowSoft,
-            )
-            .clip(shape)
-            .background(colors.surface)
-            .border(spacing.hairline, colors.divider, shape)
-            .padding(spacing.composerKeyGap),
-        verticalAlignment = Alignment.Bottom,
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (mentionActive && mentionMatches.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = spacing.xs)
+                    .clip(RoundedCornerShape(spacing.sm))
+                    .background(colors.surface)
+                    .border(spacing.hairline, colors.divider, RoundedCornerShape(spacing.sm)),
+            ) {
+                mentionMatches.forEach { name ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onValueChange(value.substring(0, mentionStart) + "@$name ")
+                            }
+                            .padding(horizontal = spacing.md, vertical = spacing.sm),
+                    ) {
+                        Text(
+                            text = name,
+                            style = Dshm.typography.rowPreview,
+                            color = colors.textPrimary,
+                        )
+                    }
+                }
+            }
+        }
+        if (attachments.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = spacing.xs),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(spacing.xs),
+            ) {
+                attachments.forEachIndexed { index, attachment ->
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(spacing.sm))
+                            .background(colors.surfaceMuted)
+                            .padding(start = spacing.sm, end = spacing.xs, top = spacing.xxs, bottom = spacing.xxs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = attachment.name,
+                            style = Dshm.typography.rowTime,
+                            color = colors.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 180.dp),
+                        )
+                        ComposerKey(
+                            icon = R.drawable.ic_lucide_x,
+                            contentDescription = stringResource(R.string.composer_attach_remove),
+                            onClick = { onRemoveAttachment(index) },
+                            size = 28.dp,
+                        )
+                    }
+                }
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(COMPOSER_TEST_TAG)
+                .shadow(
+                    elevation = spacing.composerElevation,
+                    shape = shape,
+                    ambientColor = colors.shadowSoft,
+                    spotColor = colors.shadowSoft,
+                )
+                .clip(shape)
+                .background(colors.surface)
+                .border(spacing.hairline, colors.divider, shape)
+                .padding(spacing.composerKeyGap),
+            verticalAlignment = Alignment.Bottom,
+        ) {
         // 听写中：＋ → ✕（取消）。
         if (listening) {
             ComposerKey(
@@ -322,10 +411,11 @@ fun ChatComposer(
                 onClick = { cancelDictation() },
             )
         } else {
-            ComposerKey(
-                icon = R.drawable.ic_lucide_plus,
-                contentDescription = stringResource(R.string.composer_attach),
-                onClick = onAttach,
+            AttachMenuKey(
+                onAttach = onAttach,
+                onPickFile = onPickFile,
+                onPickImage = onPickImage,
+                onTakePhoto = onTakePhoto,
             )
         }
         Spacer(Modifier.width(spacing.sm))
@@ -384,7 +474,7 @@ fun ChatComposer(
                 listening = listening,
                 transcribing = transcribing,
                 stopVisible = stopVisible,
-                draft = value,
+                draft = value.ifBlank { if (attachments.isNotEmpty()) " " else "" },
                 voiceAvailable = voiceAvailable,
             )
         ) {
@@ -398,6 +488,7 @@ fun ChatComposer(
             )
             ComposerTrailingAction.SEND -> SendKey(enabled = sendEnabled, onSend = onSend)
         }
+    }
     }
 }
 
@@ -434,10 +525,11 @@ private fun ComposerKey(
     @DrawableRes icon: Int,
     contentDescription: String,
     onClick: () -> Unit,
+    size: Dp = Dshm.spacing.composerKey,
 ) {
     Box(
         modifier = Modifier
-            .size(Dshm.spacing.composerKey)
+            .size(size)
             .clip(CircleShape)
             .background(Dshm.colors.surfaceMuted)
             .clickable(onClick = onClick),
@@ -447,8 +539,60 @@ private fun ComposerKey(
             painter = painterResource(icon),
             contentDescription = contentDescription,
             tint = Dshm.colors.iconTint,
-            modifier = Modifier.size(Dshm.spacing.icon),
+            modifier = Modifier.size(if (size < Dshm.spacing.composerKey) size * 0.7f else Dshm.spacing.icon),
         )
+    }
+}
+
+/** 「＋」附件菜单：文件 / 图片 / 拍照。 */
+@Composable
+private fun AttachMenuKey(
+    onAttach: () -> Unit,
+    onPickFile: () -> Unit,
+    onPickImage: () -> Unit,
+    onTakePhoto: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        ComposerKey(
+            icon = R.drawable.ic_lucide_plus,
+            contentDescription = stringResource(R.string.composer_attach),
+            onClick = {
+                onAttach()
+                expanded = true
+            },
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = Dshm.colors.surface,
+            shape = RoundedCornerShape(Dshm.radius.md),
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.composer_add_file)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_lucide_file_text), null) },
+                onClick = {
+                    expanded = false
+                    onPickFile()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.composer_add_image)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_lucide_image), null) },
+                onClick = {
+                    expanded = false
+                    onPickImage()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.composer_take_photo)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_lucide_camera), null) },
+                onClick = {
+                    expanded = false
+                    onTakePhoto()
+                },
+            )
+        }
     }
 }
 

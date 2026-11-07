@@ -120,6 +120,18 @@
     <string name="bot_shape_whale">Whale</string>
     <string name="composer_placeholder">Message %1$s</string>
     <string name="composer_attach">Attach</string>
+    <string name="composer_add_file">Add file</string>
+    <string name="composer_add_image">Add image</string>
+    <string name="composer_take_photo">Take photo</string>
+    <string name="composer_attach_remove">Remove attachment</string>
+    <string name="composer_mention">Mention a member</string>
+    <string name="composer_mention_everyone">Everyone</string>
+    <string name="chat_expand">Show all</string>
+    <string name="chat_collapse">Collapse</string>
+    <string name="chat_show_all">Show all · %1$s chars</string>
+    <string name="chat_copied">Copied</string>
+    <string name="question_submit">Submit</string>
+    <string name="chat_new_messages">New messages</string>
     <string name="composer_send">Send</string>
     <string name="search_hint">Type to search bots and groups</string>
 

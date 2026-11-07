@@ -12,9 +12,13 @@ import com.dshm.bot.data.remote.parseChatPage
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.remote.ChatCursor
 import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.DshClient
+import com.dshm.bot.data.remote.DshSessionRepository
 import com.dshm.bot.data.remote.DshMuxHub
 import com.dshm.bot.data.remote.DshHostEvent
 import com.dshm.bot.data.remote.DshQuestionRequest
+import com.dshm.bot.data.remote.DshQuestionAnswer
+import com.dshm.bot.data.remote.answersToJson
 import com.dshm.bot.data.remote.BotApproval
 import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.RemoteSpeechRepository
@@ -39,6 +43,22 @@ data class ChatEntry(
     val text: String,
     val author: String? = null,
     val botId: String? = null,
+    /** 本地待发/刚发的附件名；历史回读没有附件详情时为空。 */
+    val attachments: List<String> = emptyList(),
+    /** 消息时间（毫秒）。 */
+    val timeMs: Long? = null,
+    /** 群聊里这条回复的耗时（毫秒）。 */
+    val durationMs: Long? = null,
+    /** 群聊/单聊事件类型（done/stopped/working/...）。 */
+    val eventKind: String? = null,
+    val eventCode: String? = null,
+)
+
+/** 待发送的本地附件。 */
+data class ChatAttachmentDraft(
+    val name: String,
+    val bytes: ByteArray,
+    val isImage: Boolean,
 )
 
 data class BotChatUiState(
@@ -88,6 +108,7 @@ class BotChatViewModel(
 ) : ViewModel() {
 
     private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
+    private val rawClient: DshClient? = endpoint?.let { DshClients.of(it) }
     /** 语音输入：页面/输入框只依赖接口。 */
     val speechRepository: SpeechRepository? = endpoint?.let { RemoteSpeechRepository(DshClients.of(it)) }
     private val _uiState = MutableStateFlow(
@@ -104,6 +125,8 @@ class BotChatViewModel(
     private var botApprovals: List<BotApproval> = emptyList()
     /** 引擎在等用户回应的提问（eventId → 请求）。 */
     private val hostQuestions = LinkedHashMap<String, DshQuestionRequest>()
+    /** 当前 mux 连接的 clientId；反问作答要带回它。 */
+    private var hostClientId: String? = null
     /** 更早历史的游标；null 表示没有更早的了。 */
     private var cursor: ChatCursor? = null
     private var feedJob: Job? = null
@@ -149,6 +172,7 @@ class BotChatViewModel(
             // 新一代连接：没答完的请求会带着同样的 eventId 重新投递，
             // 所以先清掉旧的缓存，别攒下别人已经答完的幽灵卡片。
             is DshHostEvent.Ready -> {
+                hostClientId = event.clientId
                 hostQuestions.clear()
                 recomputeApprovals()
             }
@@ -259,16 +283,17 @@ class BotChatViewModel(
     }
 
     /** 发一条消息：用户气泡立刻上屏，服务端回显按 requestId 跳过。 */
-    fun send(raw: String) {
+    fun send(raw: String, attachments: List<ChatAttachmentDraft> = emptyList()) {
         val connection = client ?: return
         val text = raw.trim()
-        if (text.isEmpty() || _uiState.value.sending) return
+        if ((text.isEmpty() && attachments.isEmpty()) || _uiState.value.sending) return
         val requestId = UUID.randomUUID().toString()
         runStartedAt = System.nanoTime()
         val bubble = ChatEntry(
             id = "user:$requestId",
             kind = ChatEntryKind.USER,
             text = text,
+            attachments = attachments.map { it.name },
         )
         localUserEntries[requestId] = bubble
         seen.add(bubble.id)
@@ -282,13 +307,27 @@ class BotChatViewModel(
         }
         viewModelScope.launch {
             runCatching {
-                connection.bot(
-                    endpoint = "send",
-                    payload = JSONObject()
-                        .put("sessionId", botId)
-                        .put("requestId", requestId)
-                        .put("text", text),
-                )
+                if (attachments.isEmpty()) {
+                    connection.bot(
+                        endpoint = "send",
+                        payload = JSONObject()
+                            .put("sessionId", botId)
+                            .put("requestId", requestId)
+                            .put("text", text),
+                    )
+                } else {
+                    val session = sessionId ?: botId
+                    val receipts = attachments.map { draft ->
+                        (rawClient ?: error("本机引擎未运行"))
+                            .uploadAttachment(session, draft.name, draft.bytes)
+                    }
+                    DshSessionRepository(rawClient ?: error("本机引擎未运行")).prompt(
+                        sessionId = session,
+                        text = text,
+                        requestId = requestId,
+                        fileReceiptIds = receipts.map { it.receiptId },
+                    )
+                }
             }.onSuccess {
                 runStartedAt = System.nanoTime()
                 _uiState.update {
@@ -609,6 +648,34 @@ class BotChatViewModel(
         }
     }
 
+    /** 回答 Bot 的反问：把选中项按 DSH `userQuestions/answer` 回执。 */
+    fun answerQuestion(
+        approval: ChatApproval,
+        selected: List<String>,
+        onDone: (String?) -> Unit = {},
+    ) {
+        val clientId = hostClientId
+        val eventId = approval.eventId
+        val questionId = approval.questionId
+        val repo = rawClient
+        if (clientId == null || eventId == null || questionId == null || repo == null || selected.isEmpty()) {
+            onDone("这条提问暂时无法作答")
+            return
+        }
+        viewModelScope.launch {
+            val answers = answersToJson(selected.map { DshQuestionAnswer(questionId, it) })
+            val error = runCatching {
+                DshSessionRepository(repo).answerQuestion(clientId, eventId, answers)
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            if (error == null) {
+                hostQuestions.remove(eventId)
+                recomputeApprovals()
+                refreshBotStatus()
+            }
+            onDone(error)
+        }
+    }
+
     /** 停止当前对话正在执行的回合：按钮点下去立刻收起，再让引擎取消。 */
     fun stopRunning(onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
@@ -677,9 +744,18 @@ class BotChatViewModel(
         }
         val text = item.optString("text")
         val rpcId = item.optString("rpcId").takeIf { it.isNotEmpty() }
+        val time = item.optLong("time", -1L).takeIf { it > 0L }
+        val duration = item.optLong("duration", -1L).takeIf { it > 0L }
         return when (item.optString("kind")) {
             "user" -> text.takeIf { it.isNotBlank() }
-                ?.let { ChatEntry(if (rpcId != null) "user:$rpcId" else id, ChatEntryKind.USER, it) }
+                ?.let {
+                    ChatEntry(
+                        id = if (rpcId != null) "user:$rpcId" else id,
+                        kind = ChatEntryKind.USER,
+                        text = it,
+                        timeMs = time,
+                    )
+                }
 
             "bot" -> text.takeIf { it.isNotBlank() }
                 ?.let {
@@ -689,14 +765,28 @@ class BotChatViewModel(
                         text = it,
                         author = item.optString("name").ifEmpty { botName },
                         botId = item.optString("botId").takeIf { value -> value.isNotEmpty() },
+                        timeMs = time,
+                        durationMs = duration,
                     )
                 }
 
             "answer" -> text.takeIf { it.isNotBlank() }
-                ?.let { ChatEntry(id, ChatEntryKind.BOT, it, botName) }
+                ?.let { ChatEntry(id, ChatEntryKind.BOT, it, botName, timeMs = time) }
 
-            "event" -> text.takeIf { it.isNotBlank() }
-                ?.let { ChatEntry(id, ChatEntryKind.EVENT, it) }
+            "event" -> {
+                val eventKind = item.optString("event").ifEmpty { item.optString("role") }
+                val name = item.optString("name").ifEmpty { botName }
+                ChatEntry(
+                    id = id,
+                    kind = ChatEntryKind.EVENT,
+                    text = text,
+                    author = name,
+                    botId = item.optString("botId").takeIf { value -> value.isNotEmpty() },
+                    timeMs = time,
+                    eventKind = eventKind.takeIf { it.isNotEmpty() },
+                    eventCode = item.optString("code").takeIf { it.isNotEmpty() },
+                )
+            }
 
             else -> null
         }

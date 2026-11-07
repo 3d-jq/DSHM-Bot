@@ -50,16 +50,26 @@ internal fun mergeChatApprovals(
         // Bot 反问用户：选项 UI 和 `userQuestions/*` 还没接，先把问题本身显示出来，
         // 不静默丢弃（丢了这一轮就一直卡着）。
         relevantQuestions.forEach { question ->
-            val text = question.questions.firstOrNull()?.question.orEmpty()
+            val first = question.questions.firstOrNull()
+            val text = first?.question.orEmpty()
+            val options = first?.options?.map { it.label }.orEmpty()
             add(
                 ChatApproval(
                     key = "question:${question.eventId}",
                     tool = "",
-                    reason = text.ifEmpty { question.questions.firstOrNull()?.header.orEmpty() },
-                    detail = question.questions.firstOrNull()?.detail,
-                    action = ChatApproval.Action.ANSWER_ELSEWHERE,
+                    reason = text.ifEmpty { first?.header.orEmpty() },
+                    detail = first?.detail,
+                    action = if (options.isEmpty()) {
+                        ChatApproval.Action.ANSWER_ELSEWHERE
+                    } else {
+                        ChatApproval.Action.ANSWER
+                    },
                     kind = ChatApproval.Kind.QUESTION,
                     source = ChatApproval.Source.DSH_HOST,
+                    eventId = question.eventId,
+                    questionId = first?.id,
+                    options = options,
+                    multiSelect = first?.multiSelect == true,
                 ),
             )
         }

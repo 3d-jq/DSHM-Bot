@@ -299,7 +299,20 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   审批的合并规则已经抽成纯函数 `ApprovalMerge` 覆盖到了 JVM 单测，
   但「事件流 → 缓存 → 卡片」的接线部分还是要靠插桩测；和 `EngineSettingsViewModel`
   是同一个问题，一起做可注入工厂。
-- 提问卡片只能显示不能作答：选项 UI + `userQuestions/answer` / `attachWait` 未接
-  （dsh-Go `session_api.dart` 的 `answerQuestion` / `claimQuestionWait`）。
+- 提问卡片已接选项与 `userQuestions/answer`；`ViewCard` / `BtwCard` 仍未接。
 - 用 `java -cp` 手跑单测时**必须先 `cd app`**：`AppIconResourcesTest` /
   `LucideIconResourcesTest` 按相对路径找 `src/main/res`，在仓库根目录跑会假报缺资源。
+
+### 对话消息层（2026-11-08，本轮）
+
+- ☑️ 底部「＋」菜单：添加文件 / 添加图片 / 拍照；走 DSH `POST /api/session/uploadFileBinary`
+  取 `receiptId`，再 `session/prompt` 带 file block 发送；附件先在输入框上方暂存。
+- ☑️ Bot 反问选项：`ApprovalCard` 接 `userQuestions/answer`，单选取值即回执，多选可勾选提交。
+- ☑️ 消息事件行：`done/stopped/working/approval/failed/missed/lookup/resumed/cut/schedule`
+  以及单聊的 `request/reply/report/post/resume/retry/secret` 映射成 DS Bot 风格事件文案。
+- ☑️ 长文折叠：气泡内底部「显示全部 · N 字 / 收起」；长按气泡复制文本。
+- ☑️ 群聊 @：输入 `@` 触发成员面板，支持「所有人」；不再用独立 @ 按钮。
+- ⬜ **时间/耗时显示**：本轮按用户要求先隐藏（私聊、群聊、事件行都不显示时间）；
+  后续要按 DS Bot 的 `bt-group-time` / `bt-utime` / `bt-time-sep` 补回。
+- ⬜ **工具调用事件（Messaged / Created group / Posted in）**：数据来自 `session/follow`
+  的 `tool/call`，当前只接了部分事件；要补需要打开并按会话合并 `session/follow` 流。

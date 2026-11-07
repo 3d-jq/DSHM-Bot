@@ -14,9 +14,18 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /** DS Bot SSE 的一条事件（`event:` + `data:`）。 */
 data class BotFeedEvent(val event: String, val data: String)
+
+/** 一次附件上传的凭证（对应 DSH `fileUpload.upload` 的 receipt）。 */
+data class DshUploadReceipt(
+    val receiptId: String,
+    val attachmentId: String,
+    val name: String,
+    val bytes: Long,
+)
 
 /** 引擎 RPC 的业务错误（HTTP 200 + result.ok=false）。 */
 class DshRpcException(
@@ -133,6 +142,60 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                 }
             }
         }
+
+    /**
+     * 上传一个附件到某个 Session，返回 prompt 可消费的 receipt。
+     *
+     * 对齐 DSH `dsh-client-file-upload` 的原始路由：
+     * `POST /api/session/uploadFileBinary?sessionId=&name=`，body 是 `application/octet-stream`。
+     */
+    suspend fun uploadAttachment(
+        sessionId: String,
+        name: String,
+        bytes: ByteArray,
+    ): DshUploadReceipt = withContext(Dispatchers.IO) {
+        withAuthRetry { auth ->
+            val query = "sessionId=" + URLEncoder.encode(sessionId, "UTF-8") +
+                "&name=" + URLEncoder.encode(name, "UTF-8")
+            val connection = (URL(endpoint.baseUrl.trimEnd('/') + "/api/session/uploadFileBinary?" + query).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 30_000
+                readTimeout = 120_000
+                setRequestProperty("Content-Type", "application/octet-stream")
+                setRequestProperty("Cookie", auth)
+            }
+            try {
+                connection.outputStream.use { it.write(bytes) }
+                val code = connection.responseCode
+                checkAuthExpired(code)
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+                require(code in 200..299) { "上传附件失败：HTTP $code $text" }
+                val response = JSONObject(text)
+                if (!response.optBoolean("ok", false)) {
+                    val error = response.optJSONObject("error")
+                    throw DshRpcException(
+                        code = error?.anyOrNull("code") as? String,
+                        message = error?.anyOrNull("message") as? String ?: "上传附件失败",
+                        details = error?.optJSONObject("details"),
+                    )
+                }
+                val value = response.optJSONObject("value") ?: JSONObject()
+                val file = value.optJSONObject("file") ?: JSONObject()
+                val receiptId = value.optString("receiptId")
+                require(receiptId.isNotEmpty()) { "上传附件没有返回 receiptId" }
+                DshUploadReceipt(
+                    receiptId = receiptId,
+                    attachmentId = file.optString("attachmentId"),
+                    name = file.optString("name").ifEmpty { name },
+                    bytes = file.optLong("bytes"),
+                )
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
 
     /** 订阅 DS Bot SSE；断线自动重连，保留 event 名。 */
     fun feed(): Flow<BotFeedEvent> = flow {

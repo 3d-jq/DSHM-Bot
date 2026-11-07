@@ -120,6 +120,18 @@
     <string name="bot_shape_whale">鲸鱼</string>
     <string name="composer_placeholder">给%1$s发消息…</string>
     <string name="composer_attach">附件</string>
+    <string name="composer_add_file">添加文件</string>
+    <string name="composer_add_image">添加图片</string>
+    <string name="composer_take_photo">拍照</string>
+    <string name="composer_attach_remove">移除附件</string>
+    <string name="composer_mention">@ 成员</string>
+    <string name="composer_mention_everyone">所有人</string>
+    <string name="chat_expand">展开全文</string>
+    <string name="chat_collapse">收起</string>
+    <string name="chat_show_all">显示全部 · %1$s 字</string>
+    <string name="chat_copied">已复制</string>
+    <string name="question_submit">提交</string>
+    <string name="chat_new_messages">新消息</string>
     <string name="composer_send">发送</string>
     <string name="search_hint">输入关键词搜索 Bot 与群聊</string>
 
