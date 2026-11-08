@@ -121,6 +121,21 @@ internal fun BotBrowserPanel(
         val url = tab?.url.orEmpty()
         if (url.isNotEmpty()) draft = url
     }
+    // 下载进度：跟着 DownloadManager 轮询，完成后再留两秒。
+    LaunchedEffect(session?.download?.id) {
+        val current = session ?: return@LaunchedEffect
+        val id = current.download?.id ?: return@LaunchedEffect
+        while (true) {
+            val status = current.downloadStatus(id) ?: break
+            current.updateDownload(status)
+            if (status.done) {
+                kotlinx.coroutines.delay(2_500)
+                current.updateDownload(null)
+                break
+            }
+            kotlinx.coroutines.delay(500)
+        }
+    }
 
     Column(modifier.fillMaxWidth()) {
         UrlBar(
@@ -165,6 +180,7 @@ internal fun BotBrowserPanel(
         session?.handOverReason?.let { reason ->
             HandOverBanner(reason = reason, onDone = { session.finishHandOver() })
         }
+        session?.download?.let { entry -> DownloadBanner(entry) }
         // 页面和底栏之间留一口气，贴着看太挤。
         Spacer(Modifier.height(Dshm.spacing.sm))
         BrowserBottomBar(
@@ -604,6 +620,71 @@ private fun HandOverBanner(reason: String, onDone: () -> Unit) {
         }
         TextButton(onClick = onDone) {
             Text(stringResource(R.string.browser_hand_over_done))
+        }
+    }
+}
+
+/** 下载进度：文件名 + 一条细进度条（总量未知时只显示在下载）。 */
+@Composable
+private fun DownloadBanner(entry: BotDownload) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xs)
+            .clip(RoundedCornerShape(Dshm.radius.md))
+            .background(Dshm.colors.surface)
+            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_lucide_download),
+            contentDescription = null,
+            tint = if (entry.failed) Dshm.colors.danger else Dshm.colors.accent,
+            modifier = Modifier.size(Dshm.spacing.settingsRowIcon),
+        )
+        Spacer(Modifier.size(Dshm.spacing.sm))
+        Text(
+            text = entry.name,
+            style = Dshm.typography.rowPreview,
+            color = Dshm.colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.size(Dshm.spacing.sm))
+        if (entry.done) {
+            Text(
+                text = stringResource(
+                    if (entry.failed) R.string.browser_download_failed else R.string.browser_download_done,
+                ),
+                style = Dshm.typography.rowTime,
+                color = if (entry.failed) Dshm.colors.danger else Dshm.colors.success,
+            )
+        } else {
+            val progress = entry.progress.takeIf { it >= 0f }
+            if (progress != null) {
+                Box(
+                    modifier = Modifier
+                        .width(Dshm.spacing.xxxl * 2)
+                        .height(Dshm.spacing.statusDot)
+                        .clip(RoundedCornerShape(Dshm.radius.pill))
+                        .background(Dshm.colors.surfaceMuted),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .height(Dshm.spacing.statusDot)
+                            .clip(RoundedCornerShape(Dshm.radius.pill))
+                            .background(Dshm.colors.accent),
+                    )
+                }
+            } else {
+                Text(
+                    text = stringResource(R.string.browser_download_running),
+                    style = Dshm.typography.rowTime,
+                    color = Dshm.colors.textTertiary,
+                )
+            }
         }
     }
 }

@@ -1,5 +1,9 @@
 package com.dshm.bot.ui.chat
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import android.webkit.WebView
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -81,6 +85,29 @@ object BrowserReadBridge {
                     "close" -> closeTab(store, botId, item, payload)
                     "handOver" -> beginHandOver(store, botId, item, payload)
                     "handOverWait" -> waitHandOver(store, botId, item, payload)
+                    "hover" -> runScript(
+                        store,
+                        botId,
+                        BrowserExtraScripts.hover(item.optString("selector")),
+                        payload,
+                    )
+
+                    "executeJs" -> runScript(
+                        store,
+                        botId,
+                        BrowserExtraScripts.execute(item.optString("script")),
+                        payload,
+                    )
+
+                    "backbone" -> runScript(store, botId, BrowserExtraScripts.backbone(), payload)
+                    "fetch" -> fetchInPage(store, botId, item, payload)
+                    "waitStable" -> waitStable(store, botId, item, payload)
+                    "scrollCollect" -> scrollCollect(store, botId, payload)
+                    "screenshot" -> screenshot(store, botId, payload)
+                    "getCookies" -> cookies(store, botId, payload)
+                    "setCookie" -> setCookie(store, botId, item, payload)
+                    "userAgent" -> userAgent(store, botId, item, payload)
+                    "viewport" -> viewport(store, botId, item, payload)
                     "read" -> readPage(store, botId, payload)
                     else -> runAction(store, botId, kind, item, payload)
                 }
@@ -286,6 +313,271 @@ object BrowserReadBridge {
         }
     }
 
+    /** 跑一段「同步返回 JSON」的脚本，按 action 的约定回执。 */
+    private suspend fun runScript(
+        store: BotBrowserStore,
+        botId: String,
+        script: String,
+        payload: JSONObject,
+    ) {
+        val webView = store.existing(botId)?.activeWebView()
+        if (webView == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        val result = evaluatePageScript(webView, script)
+        when {
+            result == null -> payload.put("ok", false).put("error", "The page did not answer")
+            result.optString("error").isNotEmpty() ->
+                payload.put("ok", false).put("error", result.optString("error"))
+
+            else -> payload.put("ok", true).put("result", result)
+        }
+    }
+
+    /**
+     * 页面内的 fetch：先发起、再轮询取结果。
+     *
+     * `evaluateJavascript` 不会等 Promise，所以结果暂存在 `window.__dshmFetch`。
+     */
+    private suspend fun fetchInPage(
+        store: BotBrowserStore,
+        botId: String,
+        item: JSONObject,
+        payload: JSONObject,
+    ) {
+        val webView = store.existing(botId)?.activeWebView()
+        if (webView == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        val url = item.optString("url").trim()
+        if (url.isEmpty()) {
+            payload.put("ok", false).put("error", "Give a URL to fetch.")
+            return
+        }
+        val method = item.optString("method").ifEmpty { "GET" }
+        val body = item.optString("body").takeIf { it.isNotEmpty() }
+        val start = evaluatePageScript(webView, BrowserExtraScripts.fetchStart(url, method, body))
+        if (start == null || start.has("error")) {
+            payload.put("ok", false).put("error", start?.optString("error") ?: "The page did not answer")
+            return
+        }
+        val deadline = System.currentTimeMillis() + 15_000
+        while (System.currentTimeMillis() < deadline) {
+            delay(250)
+            val poll = evaluatePageScript(webView, BrowserExtraScripts.fetchPoll()) ?: continue
+            val value = poll.optJSONObject("value") ?: continue
+            if (value.has("error")) {
+                payload.put("ok", false).put("error", value.optString("error"))
+            } else {
+                payload.put("ok", true).put("result", value)
+            }
+            return
+        }
+        payload.put("ok", false).put("error", "The fetch did not finish in 15 seconds.")
+    }
+
+    /** 等页面「安静」下来（文本、节点数、高度连续一段时间不变）。 */
+    private suspend fun waitStable(
+        store: BotBrowserStore,
+        botId: String,
+        item: JSONObject,
+        payload: JSONObject,
+    ) {
+        val webView = store.existing(botId)?.activeWebView()
+        if (webView == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        val quietMs = item.optLong("quietMs", 800).coerceIn(200, 5_000)
+        val timeoutMs = item.optLong("timeoutMs", 15_000).coerceIn(1_000, 30_000)
+        val started = System.currentTimeMillis()
+        val deadline = started + timeoutMs
+        var last = ""
+        var lastChangedAt = started
+        while (System.currentTimeMillis() < deadline) {
+            val probe = evaluatePageScript(webView, BrowserExtraScripts.probe())
+            val signature = probe?.toString().orEmpty()
+            val now = System.currentTimeMillis()
+            if (signature != last) {
+                last = signature
+                lastChangedAt = now
+            } else if (now - lastChangedAt >= quietMs) {
+                payload.put(
+                    "ok",
+                    true,
+                ).put(
+                    "result",
+                    JSONObject().put("stable", true).put("waitedMs", now - started),
+                )
+                return
+            }
+            delay(200)
+        }
+        payload.put("ok", true).put(
+            "result",
+            JSONObject().put("stable", false).put("waitedMs", timeoutMs),
+        )
+    }
+
+    /** 一路往下滚（无限滚动列表用），滚到底后把整页读成 Markdown。 */
+    private suspend fun scrollCollect(store: BotBrowserStore, botId: String, payload: JSONObject) {
+        val session = store.existing(botId)
+        val webView = session?.activeWebView()
+        if (session == null || webView == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        var lastHeight = -1
+        var steps = 0
+        while (steps < MAX_SCROLL_STEPS) {
+            val step = evaluatePageScript(webView, BrowserExtraScripts.scrollStep(900))
+            val height = step?.optInt("height", -1) ?: -1
+            delay(350)
+            steps += 1
+            if (height in 1..lastHeight) break
+            lastHeight = height
+        }
+        val page = session.readActivePage()
+        if (page == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        payload.put("ok", true).put(
+            "result",
+            JSONObject().put("steps", steps).put("page", page),
+        )
+    }
+
+    /** 截当前标签的图，落到应用自己的目录里，回路径。 */
+    private suspend fun screenshot(store: BotBrowserStore, botId: String, payload: JSONObject) {
+        val webView = store.existing(botId)?.activeWebView()
+        if (webView == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        val bitmap = capture(webView)
+        val path = store.saveScreenshot(botId, bitmap)
+        if (path == null) {
+            payload.put("ok", false).put("error", "The screenshot could not be saved.")
+            return
+        }
+        payload.put(
+            "ok",
+            true,
+        ).put(
+            "result",
+            JSONObject()
+                .put("path", path)
+                .put("width", bitmap.width)
+                .put("height", bitmap.height),
+        )
+    }
+
+    private fun capture(webView: WebView): Bitmap {
+        var width = webView.width
+        var height = webView.height
+        if (width <= 0 || height <= 0) {
+            // 面板没开着时 WebView 没有尺寸：按 1080x1920 量一次再画。
+            width = 1080
+            height = 1920
+            webView.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+            )
+            webView.layout(0, 0, width, height)
+        }
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        webView.draw(Canvas(bitmap))
+        return bitmap
+    }
+
+    private fun cookies(store: BotBrowserStore, botId: String, payload: JSONObject) {
+        val session = store.existing(botId)
+        val url = session?.currentPage()?.first ?: session?.activeWebView()?.url
+        if (session == null || url.isNullOrEmpty()) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        payload.put(
+            "ok",
+            true,
+        ).put(
+            "result",
+            JSONObject().put("url", url).put("cookies", session.cookies().orEmpty()),
+        )
+    }
+
+    private fun setCookie(
+        store: BotBrowserStore,
+        botId: String,
+        item: JSONObject,
+        payload: JSONObject,
+    ) {
+        val session = store.existing(botId)
+        if (session == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        val name = item.optString("name").trim()
+        if (name.isEmpty()) {
+            payload.put("ok", false).put("error", "Give the cookie name.")
+            return
+        }
+        session.setCookie(item.optString("url"), name, item.optString("value"))
+        payload.put("ok", true).put("result", JSONObject().put("set", name))
+    }
+
+    private fun userAgent(
+        store: BotBrowserStore,
+        botId: String,
+        item: JSONObject,
+        payload: JSONObject,
+    ) {
+        val session = store.existing(botId)
+        if (session == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        if (!item.has("value")) {
+            payload.put(
+                "ok",
+                true,
+            ).put("result", JSONObject().put("userAgent", session.userAgent().orEmpty()))
+            return
+        }
+        val value = item.optString("value").trim()
+        session.setUserAgent(value.ifEmpty { null })
+        payload.put(
+            "ok",
+            true,
+        ).put(
+            "result",
+            JSONObject().put("userAgent", value.ifEmpty { "default" }),
+        )
+    }
+
+    private fun viewport(
+        store: BotBrowserStore,
+        botId: String,
+        item: JSONObject,
+        payload: JSONObject,
+    ) {
+        val session = store.existing(botId)
+        if (session == null || session.activeWebView() == null) {
+            payload.put("ok", false).put("error", "no-page")
+            return
+        }
+        val width = item.optInt("width", 0)
+        if (width <= 0) {
+            payload.put("ok", false).put("error", "Give the viewport width in CSS pixels.")
+            return
+        }
+        session.setViewportWidth(width)
+        payload.put("ok", true).put("result", JSONObject().put("width", width.coerceIn(200, 2400)))
+    }
+
     /** 当前标签的状态：id / 地址 / 标题 / 是否还在装载。 */
     private fun pageState(session: BotBrowserSession): JSONObject {
         val tab = session.activeTab()
@@ -299,4 +591,7 @@ object BrowserReadBridge {
 
     /** 会在面板里显示「正在操作」的动作。 */
     private val BUSY_KINDS = setOf("open", "back", "forward", "reload", "click", "type", "scroll")
+
+    /** `scroll_collect` 最多往下滚几次（防止无限列表）。 */
+    private const val MAX_SCROLL_STEPS = 25
 }

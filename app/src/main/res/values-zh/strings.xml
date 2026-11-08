@@ -132,6 +132,9 @@
     <string name="browser_guard_title">允许这次操作？</string>
     <string name="browser_guard_allow">允许一次</string>
     <string name="browser_guard_deny">拒绝</string>
+    <string name="browser_download_running">下载中…</string>
+    <string name="browser_download_done">已保存</string>
+    <string name="browser_download_failed">下载失败</string>
     <string name="bot_settings_manage">管理</string>
     <string name="bot_settings_schedules">定时任务</string>
     <string name="bot_settings_schedule_new">新建任务</string>

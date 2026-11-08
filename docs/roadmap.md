@@ -258,9 +258,16 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   「<名字> 正在操作浏览器」+「接管」（接管会打断这次等待，工具立刻回执 `takenOver`）；
   对话里按 `toolEventLine` 出事件行（`browser_open` 带站点名、click/type/scroll/导航各自一句），
   这些工具也进了 `FOLLOW_TOOLS` 的订阅集合。
-- ⬜ 与 DeepSearch `browser_use` 相比还差：`hover`、`execute_js`、`screenshot`（每个工具块的页面缩略图
-  `BrowserFrames`）、`get_backbone`、`fetch`、`get/set_cookies`、`set_user_agent` / `set_viewport`、
-  `scroll_and_collect`、`wait_for_dom_stable`、下载进度条、历史与浏览器设置。
+- ☑️ **工具面补齐（第十三轮）**：`browser_hover`、`browser_execute_js`、`browser_get_backbone`、
+  `browser_fetch`（页面内 fetch，先发起再轮询取结果）、`browser_wait_for_dom_stable`（文本/节点/高度
+  连续不变）、`browser_scroll_and_collect`（滚到底再整页读）、`browser_screenshot`（WebView 画到
+  PNG，落在应用自己的 `browser/` 目录并回路径）、`browser_get_cookies` / `browser_set_cookie`、
+  `browser_user_agent`、`browser_viewport`。
+- ☑️ 下载进度横幅：`DownloadManager.enqueue` 之后每 0.5s 查一次，完成/失败留 2.5s。
+- ☑️ 对话里**不再画**浏览器动作行和「更新记忆」行（每读一次、滚一下都来一行会把时间线冲乱），
+  只在活动状态栏显示（`ChatActivity`：`browser_*` → 「正在操作浏览器」、`read_browser` → 「正在读网页」）。
+- ⬜ 还差：浏览历史（按 Bot 记录可回访）、浏览器设置页（UA / 视口 / cookie / 清除数据入口）、
+  对话里的页面缩略图（与「不要每步一行」冲突，得换一种展示方式，比如操作结束后的一张卡）。
 - ☑️ **BrowserGuard（第十二轮）**：`type` 前先 `inspect` 目标元素 —— `type=password`、
   `autocomplete=*password*|one-time-code`、名字/占位符命中「密码/验证码/口令/OTP」直接拒绝，
   回给模型「用 browser_hand_over 交给用户」；`click` 前看按钮文案（pay/send/delete/支付/删除…）

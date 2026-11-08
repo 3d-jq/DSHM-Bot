@@ -392,6 +392,115 @@ export function install(rt) {
       return id === '' ? { error: 'Give the tab id from browser_tabs.' } : { kind: 'close', tabId: id }
     },
   )
+  browserTool(
+    'browser_hover',
+    'Move the pointer over one element in your own browser, for menus that open on hover.',
+    { selector: { type: 'string', required: true, description: 'CSS selector of the element' } },
+    (args) => {
+      const picked = selectorOf(args)
+      return picked.error === undefined ? { kind: 'hover', selector: picked.selector } : picked
+    },
+  )
+  browserTool(
+    'browser_execute_js',
+    'Run a snippet of JavaScript on the page in your own browser and get its value back. Only a synchronous value comes back; a Promise is refused (read the page afterwards instead). Use it for what the other tools cannot do.',
+    { script: { type: 'string', required: true, description: 'JavaScript to run in the page' } },
+    (args) => {
+      const script = typeof args.script === 'string' ? args.script : ''
+      return script.trim() === '' ? { error: 'Give the JavaScript to run.' } : { kind: 'executeJs', script }
+    },
+  )
+  browserTool(
+    'browser_get_backbone',
+    'Describe the structure of the page in your own browser: title, landmarks, headings, and the controls with a CSS selector for each. Read this when the page is big and you need to know what can be clicked.',
+    {},
+    () => ({ kind: 'backbone' }),
+  )
+  browserTool(
+    'browser_fetch',
+    'Request an address from inside the page you have open, with its cookies, and get the status and body back as text. Use it for JSON, or a page you only need as data.',
+    {
+      url: { type: 'string', required: true, description: 'Address to request; a relative path resolves against the page' },
+      method: { type: 'string', description: 'HTTP method; GET by default' },
+      body: { type: 'string', description: 'Request body for POST or PUT, sent as JSON' },
+    },
+    (args) => {
+      const url = typeof args.url === 'string' ? args.url.trim() : ''
+      if (url === '') return { error: 'Give a URL to fetch.' }
+      return {
+        kind: 'fetch',
+        url,
+        method: typeof args.method === 'string' ? args.method : 'GET',
+        body: typeof args.body === 'string' ? args.body : '',
+      }
+    },
+  )
+  browserTool(
+    'browser_wait_for_dom_stable',
+    'Wait until the page in your own browser stops changing (its text, elements and height stay the same), for a page that renders after it loads. Returns whether it settled and how long it waited.',
+    {
+      quiet_ms: { type: 'integer', description: 'How long nothing must change; 800 by default' },
+      timeout_ms: { type: 'integer', description: 'Give up after this long; 15000 by default' },
+    },
+    (args) => ({
+      kind: 'waitStable',
+      quietMs: Number.isInteger(args.quiet_ms) ? args.quiet_ms : 800,
+      timeoutMs: Number.isInteger(args.timeout_ms) ? args.timeout_ms : 15000,
+    }),
+  )
+  browserTool(
+    'browser_scroll_and_collect',
+    'Scroll the page in your own browser to the bottom, loading anything that appears as it goes, then read the whole page as Markdown. Use it for a long list or a feed instead of scrolling by hand.',
+    {},
+    () => ({ kind: 'scrollCollect' }),
+  )
+  browserTool(
+    'browser_screenshot',
+    'Take a picture of the page in your own browser and save it as a PNG file, returning its path. It works while the page is on screen; a page that was never shown may come out blank.',
+    {},
+    () => ({ kind: 'screenshot' }),
+  )
+  browserTool(
+    'browser_get_cookies',
+    'List the cookies your own browser has for the current page, as they are sent to that site.',
+    {},
+    () => ({ kind: 'getCookies' }),
+  )
+  browserTool(
+    'browser_set_cookie',
+    'Set one cookie in your own browser, for the current page or a given address. Use it when a site needs a flag or locale set before it works.',
+    {
+      name: { type: 'string', required: true, description: 'Cookie name' },
+      value: { type: 'string', required: true, description: 'Cookie value' },
+      url: { type: 'string', description: 'Address the cookie belongs to; the current page by default' },
+    },
+    (args) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : ''
+      if (name === '') return { error: 'Give the cookie name.' }
+      return {
+        kind: 'setCookie',
+        name,
+        value: typeof args.value === 'string' ? args.value : '',
+        url: typeof args.url === 'string' ? args.url : '',
+      }
+    },
+  )
+  browserTool(
+    'browser_user_agent',
+    'Read the user agent of your own browser, or set a new one (an empty value restores the default). It applies to every tab of this Bot and reloads the page.',
+    {
+      value: { type: 'string', description: 'User agent to use; omit to read the current one, empty to restore the default' },
+    },
+    (args) => (typeof args.value === 'string' ? { kind: 'userAgent', value: args.value } : { kind: 'userAgent' }),
+  )
+  browserTool(
+    'browser_viewport',
+    'Lay the page in your own browser out for a given CSS width, as a device of that width would see it, and reload. Use it when a site switches layout on width.',
+    { width: { type: 'integer', required: true, description: 'Viewport width in CSS pixels' } },
+    (args) => (Number.isInteger(args.width)
+      ? { kind: 'viewport', width: args.width }
+      : { error: 'Give the viewport width in CSS pixels.' }),
+  )
 
   // Handing the page to the person: a login, a code, a payment, a CAPTCHA. The window brings
   // the browser forward, this call waits (polling, so no request stays open for minutes), and

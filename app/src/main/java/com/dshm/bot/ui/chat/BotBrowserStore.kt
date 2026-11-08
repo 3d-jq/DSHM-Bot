@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
 import android.os.Message
@@ -25,6 +26,16 @@ data class BotBrowserTab(
     val id: Long,
     val url: String = "",
     val title: String = "",
+)
+
+/** 面板顶上的下载进度（`DownloadManager` 的一行）。 */
+data class BotDownload(
+    val id: Long,
+    val name: String,
+    /** 0..1；总量未知时是 -1。 */
+    val progress: Float,
+    val done: Boolean,
+    val failed: Boolean = false,
 )
 
 /**
@@ -67,6 +78,10 @@ class BotBrowserSession internal constructor(
         private set
     private var handOverId: String? = null
     private var handOverDone = false
+
+    /** 最近一次下载；完成后多留两秒再收。 */
+    var download by mutableStateOf<BotDownload?>(null)
+        private set
 
     private val views = mutableMapOf<Long, WebView>()
     private var nextId = 1L
@@ -212,12 +227,81 @@ class BotBrowserSession internal constructor(
         handOverDone = false
     }
 
+    fun updateDownload(value: BotDownload?) {
+        download = value
+    }
+
+    /** 查一次下载进度。 */
+    fun downloadStatus(id: Long): BotDownload? {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return null
+        val cursor = runCatching { manager.query(DownloadManager.Query().setFilterById(id)) }.getOrNull()
+            ?: return null
+        cursor.use { row ->
+            if (!row.moveToFirst()) return null
+            val bytes = row.getLong(row.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+            val total = row.getLong(row.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+            val status = row.getInt(row.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+            val name = row.getString(row.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)).orEmpty()
+            val progress = if (total > 0) (bytes.toFloat() / total).coerceIn(0f, 1f) else -1f
+            val finished = status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED
+            return BotDownload(
+                id = id,
+                name = name,
+                progress = progress,
+                done = finished,
+                failed = status == DownloadManager.STATUS_FAILED,
+            )
+        }
+    }
+
     /** 报告给引擎的「当前页」：只有真的载入了 http(s) 页面才算。 */
     fun currentPage(): Pair<String, String>? {
         val tab = activeTab() ?: return null
         val url = tab.url
         if (!url.startsWith("http://") && !url.startsWith("https://")) return null
         return url to tab.title
+    }
+
+    /** 当前页的 cookie（`get_cookies`）。 */
+    fun cookies(): String? {
+        val url = activeWebView()?.url?.takeIf { it.isNotEmpty() } ?: currentPage()?.first ?: return null
+        return CookieManager.getInstance().getCookie(url)
+    }
+
+    /** 写一条 cookie（`set_cookie`）。 */
+    fun setCookie(url: String, name: String, value: String) {
+        val target = url.takeIf { it.isNotEmpty() }
+            ?: activeWebView()?.url?.takeIf { it.isNotEmpty() }
+            ?: return
+        CookieManager.getInstance().setCookie(target, "$name=$value; path=/")
+        CookieManager.getInstance().flush()
+    }
+
+    fun userAgent(): String? = activeWebView()?.settings?.userAgentString
+
+    /** [value] 为空表示恢复默认 UA。 */
+    fun setUserAgent(value: String?) {
+        views.values.forEach { view ->
+            view.settings.userAgentString = value
+        }
+        activeWebView()?.reload()
+    }
+
+    /**
+     * 按 CSS 宽度摆一个视口：设备宽度对应过去算初始缩放。
+     *
+     * WebView 没有真正的 viewport 覆写，这是最接近的做法（DeepSearch 的 `set_viewport` 同理）。
+     */
+    fun setViewportWidth(width: Int) {
+        val view = activeWebView() ?: return
+        val metrics = context.resources.displayMetrics
+        val deviceWidth = (view.width.takeIf { it > 0 } ?: metrics.widthPixels).toFloat()
+        val target = width.coerceIn(200, 2400) * metrics.density
+        val scale = (deviceWidth / target * 100).toInt().coerceIn(10, 400)
+        view.settings.useWideViewPort = true
+        view.settings.loadWithOverviewMode = true
+        view.setInitialScale(scale)
+        view.reload()
     }
 
     /**
@@ -329,7 +413,8 @@ class BotBrowserSession internal constructor(
                     )
                 CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
                 userAgent?.let { request.addRequestHeader("User-Agent", it) }
-                (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                val id = (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                updateDownload(BotDownload(id, name, 0f, done = false))
             }
         }
         return view
@@ -391,6 +476,15 @@ class BotBrowserStore internal constructor(private val context: Context) {
         }
         return open
     }
+
+    /** 把一张截图落到应用自己的目录里，返回绝对路径。 */
+    fun saveScreenshot(botId: String, bitmap: Bitmap): String? = runCatching {
+        val dir = java.io.File(context.getExternalFilesDir(null) ?: context.filesDir, "browser")
+        if (!dir.isDirectory && !dir.mkdirs()) return null
+        val file = java.io.File(dir, "shot-$botId-${System.currentTimeMillis()}.png")
+        file.outputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 90, out) }
+        file.absolutePath
+    }.getOrNull()
 
     companion object {
         @Volatile

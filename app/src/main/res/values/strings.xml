@@ -132,6 +132,9 @@
     <string name="browser_guard_title">Allow this action?</string>
     <string name="browser_guard_allow">Allow once</string>
     <string name="browser_guard_deny">Deny</string>
+    <string name="browser_download_running">Downloading…</string>
+    <string name="browser_download_done">Saved</string>
+    <string name="browser_download_failed">Failed</string>
     <string name="bot_settings_manage">Manage</string>
     <string name="bot_settings_schedules">Scheduled tasks</string>
     <string name="bot_settings_schedule_new">New task</string>

@@ -238,9 +238,14 @@ private fun toolLabel(doing: JSONObject?): String? {
         "remember" -> "正在记下"
         "forget" -> "正在更新记忆"
         "recall" -> "正在查看记忆"
-        else -> GROUP_PHRASES[tool]
-            ?: TOOL_PHRASES.firstOrNull { (pattern, _) -> pattern.containsMatchIn(tool) }?.second
-            ?: "在做了"
+        "read_browser" -> "正在读网页"
+        else -> when {
+            // 浏览器动作只在活动状态栏显示，不进对话时间线。
+            tool.startsWith("browser_") -> "正在操作浏览器"
+            else -> GROUP_PHRASES[tool]
+                ?: TOOL_PHRASES.firstOrNull { (pattern, _) -> pattern.containsMatchIn(tool) }?.second
+                ?: "在做了"
+        }
     }
     val target = doing.optString("target").takeIf { it.isNotBlank() }
     return if (target != null) "$label · $target" else label

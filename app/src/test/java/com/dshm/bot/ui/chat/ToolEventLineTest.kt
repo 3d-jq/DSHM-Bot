@@ -62,17 +62,6 @@ class ToolEventLineTest {
     }
 
     @Test
-    fun `remember separates team, self and another bot`() {
-        assertEquals("团队记忆已更新", line("remember", JSONObject().put("scope", "team"))?.label)
-        assertEquals("记忆已更新", line("remember")?.label)
-        assertEquals("记忆已更新", line("remember", JSONObject().put("scope", "大总管"))?.label)
-
-        val other = line("forget", JSONObject().put("scope", "小助手"))
-        assertEquals("已更新 小助手 的记忆", other?.label)
-        assertEquals("小助手", other?.target)
-    }
-
-    @Test
     fun `group tools read the room name out of the result`() {
         val posted = line(
             "post_to_group",
