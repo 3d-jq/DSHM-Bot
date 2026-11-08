@@ -26,11 +26,17 @@ object DsBotPluginInstaller {
 
         val target = File(rootfs, TARGET)
         val marker = File(target, MARKER)
-        if (!marker.isFile || marker.readText().trim() != version) {
+        // 版本号只在跟随上游时才变，而这份包被我们改过（browser 动作等）。
+        // 用「插件版本 + 这次安装的时间」做指纹：APK 一更新就重新覆盖，改动的 JS 才进得去。
+        val stamp = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        }.getOrDefault(0L)
+        val fingerprint = "$version@$stamp"
+        if (!marker.isFile || marker.readText().trim() != fingerprint) {
             target.deleteRecursively()
             if (!target.mkdirs()) return false
             if (!copyTree(assets, ASSET_ROOT, target)) return false
-            marker.writeText(version)
+            marker.writeText(fingerprint)
         }
         ensurePatch(rootfs)
         return true

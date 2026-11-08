@@ -125,6 +125,13 @@
     <string name="browser_reload">刷新</string>
     <string name="browser_open_external">用系统浏览器打开</string>
     <string name="browser_expand">全屏</string>
+    <string name="browser_agent_busy">%1$s 正在操作浏览器</string>
+    <string name="browser_takeover">接管</string>
+    <string name="browser_hand_over_title">轮到你操作</string>
+    <string name="browser_hand_over_done">完成</string>
+    <string name="browser_guard_title">允许这次操作？</string>
+    <string name="browser_guard_allow">允许一次</string>
+    <string name="browser_guard_deny">拒绝</string>
     <string name="bot_settings_manage">管理</string>
     <string name="bot_settings_schedules">定时任务</string>
     <string name="bot_settings_schedule_new">新建任务</string>

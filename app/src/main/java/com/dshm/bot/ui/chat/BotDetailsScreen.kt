@@ -712,6 +712,7 @@ fun BotSettingsSheet(
                 BotBrowserPanel(
                     session = browserSession,
                     modifier = Modifier.weight(1f),
+                    botName = info?.name ?: bot.name,
                     onExpand = {
                         onDismiss()
                         onBrowser()

@@ -82,6 +82,10 @@ private val FOLLOW_TOOLS = setOf(
     "create_group", "update_group", "delete_group", "post_to_group",
     "read_group_chat", "read_own_chat", "remember", "forget", "recall",
     "list_bots", "list_secrets",
+    // 浏览器：Bot 自己开页面 / 读页面 / 点按输入，对话里要显示出来。
+    "browser_open", "read_browser", "browser_click", "browser_type", "browser_scroll",
+    "browser_back", "browser_forward", "browser_reload", "browser_tabs", "browser_close_tab",
+    "browser_hand_over",
 )
 
 /** 密钥卡答完后在 dock 里多留一会儿，让「已保存 / 已允许 / 已取消」看得见。 */

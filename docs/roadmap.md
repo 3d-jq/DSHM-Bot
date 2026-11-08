@@ -244,6 +244,36 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   收到读页请求后在 WebView 里跑 `READ_PAGE_SCRIPT`（可见文本 → Markdown，链接/控件标 `[#n]`，
   带 `items[{role,name,href,value,checked,disabled}]`），再回 `browser-result {id, ok, page}`。
   插件侧只在「有窗口」时才注册这个工具 —— 启动引擎时给 guest 加 `DS_BOT_APP=1`（`EngineViewModel`）。
+- ☑️ **浏览器动作（2026-11-08，第十轮）**：插件侧新增 `browser_open` / `browser_click` /
+  `browser_type` / `browser_scroll` / `browser_back` / `browser_forward` / `browser_reload` /
+  `browser_tabs` / `browser_close_tab`，复用同一条 `browser-wait` 通道
+  （`call(botId, {kind,…})`，回执带 `result`）；Android 侧把 DeepSearch 的 `BrowserUseJS`
+  三个动作搬进 `BrowserActionScripts.kt`，`BrowserReadBridge` 按 `kind` 分派。
+  **闭环**：`browser_open` 不要求面板已经打开 —— 通道的 `call()` 在 Bot 没有打开页面时会落到
+  「最近一个还活着的窗口」（`latestClient()`），App 侧按需 `store.session(botId)` 建 WebView、
+  装载完再回执；页面留在浏览器池里，用户打开面板就能看到。`open` / `navigate` 都会等装载完成
+  （`awaitIdle`，12s 上限）。「没有页面」和「App 没在跑」现在是两种不同的提示
+  （`no-page` → 让模型先 `browser_open`；`absent` → 请用户打开 App）。
+- ☑️ **「Bot 正在操作」的显示（第十一轮）**：面板里页面压一层薄雾 + 呼吸点 +
+  「<名字> 正在操作浏览器」+「接管」（接管会打断这次等待，工具立刻回执 `takenOver`）；
+  对话里按 `toolEventLine` 出事件行（`browser_open` 带站点名、click/type/scroll/导航各自一句），
+  这些工具也进了 `FOLLOW_TOOLS` 的订阅集合。
+- ⬜ 与 DeepSearch `browser_use` 相比还差：`hover`、`execute_js`、`screenshot`（每个工具块的页面缩略图
+  `BrowserFrames`）、`get_backbone`、`fetch`、`get/set_cookies`、`set_user_agent` / `set_viewport`、
+  `scroll_and_collect`、`wait_for_dom_stable`、下载进度条、历史与浏览器设置。
+- ☑️ **BrowserGuard（第十二轮）**：`type` 前先 `inspect` 目标元素 —— `type=password`、
+  `autocomplete=*password*|one-time-code`、名字/占位符命中「密码/验证码/口令/OTP」直接拒绝，
+  回给模型「用 browser_hand_over 交给用户」；`click` 前看按钮文案（pay/send/delete/支付/删除…）
+  则弹全局确认框（`BrowserGuardStore`，画在 `DshmBotApp` 顶层，20 秒没人答按拒绝）。
+  判定是纯函数（`BrowserGuardRules`），有 `BrowserGuardTest`。
+- ☑️ **交接给用户（第十二轮）**：`browser_hand_over { reason }` —— 插件把请求发给窗口后**轮询**
+  `handOverWait`（每 2 秒，最长 15 分钟，所以 HTTP 不会挂几分钟）；App 收到就当即将该 Bot 的
+  浏览器推到前台、面板出现「轮到你操作 + 完成」横幅，用户点完成，工具返回让模型重新 `read_browser`。
+  模型全程看不到用户输入的内容。
+- ☑️ 引擎启动等待 120s → 180s：插件刚覆盖 + 设备忙时冷启动会超过两分钟（实测一次 120s 超时后
+  才拿到 token），超时会把已经起来的引擎判成失败。
+  ⚠️ 这是**我们改过的插件代码**（`assets/ds-bot/src/host/browser.js`），升级上游要合并；
+  `DsBotPluginInstaller` 的指纹改成「插件版本 + APK 更新时间」，否则改了 JS 版本号不变不会覆盖 rootfs。
   ⚠️ 同一开关会让插件的 `update` / `dsh-update` 认为「整个 App 一起更新」，不再自己检查 npm 版本；
   对我们反而更安全（避免插件把 npm 包覆盖到打包副本上），但面板里的「可更新到 x.y.z」会消失。
 - ☑️ **记忆新增 / 编辑**：`memory-add` / `memory-edit`，Bot 有 `own` / `team` 两个 scope，

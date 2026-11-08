@@ -47,6 +47,26 @@ class BotBrowserSession internal constructor(
         private set
     var canGoForward by mutableStateOf(false)
         private set
+    /** 当前标签在装载页面（`onPageStarted` → `onPageFinished`）。 */
+    var loading by mutableStateOf(false)
+        private set
+    private var loadingTabId: Long? = null
+
+    /** Bot 正在操作这个浏览器：面板里要显示「谁在操作 + 接管」。 */
+    var agentBusy by mutableStateOf(false)
+        private set
+    var agentAction by mutableStateOf<String?>(null)
+        private set
+    private var agentCancelled = false
+
+    /** 用户在面板里点了「接管」：这一条回执要告诉模型别再等。 */
+    val agentTakenOver: Boolean get() = agentCancelled
+
+    /** 交接给用户：面板里显示横幅，等用户点「完成」。 */
+    var handOverReason by mutableStateOf<String?>(null)
+        private set
+    private var handOverId: String? = null
+    private var handOverDone = false
 
     private val views = mutableMapOf<Long, WebView>()
     private var nextId = 1L
@@ -58,6 +78,8 @@ class BotBrowserSession internal constructor(
     fun select(id: Long) {
         if (tabs.none { it.id == id }) return
         activeId = id
+        loadingTabId = null
+        loading = false
         syncNavigation()
     }
 
@@ -73,7 +95,7 @@ class BotBrowserSession internal constructor(
         activeId = id
         canGoBack = false
         canGoForward = false
-        if (url.isNotEmpty()) view.loadUrl(fixedUrl(url))
+        if (url.isNotEmpty()) startLoad(view, url)
         return id
     }
 
@@ -81,6 +103,10 @@ class BotBrowserSession internal constructor(
         val index = tabs.indexOfFirst { it.id == id }
         if (index < 0) return
         tabs.removeAt(index)
+        if (loadingTabId == id) {
+            loadingTabId = null
+            loading = false
+        }
         views.remove(id)?.let { view ->
             runCatching {
                 (view.parent as? android.view.ViewGroup)?.removeView(view)
@@ -98,19 +124,92 @@ class BotBrowserSession internal constructor(
         val text = url.trim()
         if (text.isEmpty()) return
         val view = activeWebView() ?: return
-        view.loadUrl(fixedUrl(text))
+        startLoad(view, text)
     }
 
     fun reload() {
-        activeWebView()?.reload()
+        activeWebView()?.let { view ->
+            loadingTabId = activeId
+            loading = true
+            view.reload()
+        }
     }
 
     fun goBack() {
-        activeWebView()?.let { view -> if (view.canGoBack()) view.goBack() }
+        activeWebView()?.let { view ->
+            if (view.canGoBack()) {
+                loadingTabId = activeId
+                loading = true
+                view.goBack()
+            }
+        }
     }
 
     fun goForward() {
-        activeWebView()?.let { view -> if (view.canGoForward()) view.goForward() }
+        activeWebView()?.let { view ->
+            if (view.canGoForward()) {
+                loadingTabId = activeId
+                loading = true
+                view.goForward()
+            }
+        }
+    }
+
+    /**
+     * 等当前标签装载完。
+     *
+     * `loadUrl` 和 `onPageStarted` 之间有一小段空档，所以起点先自己置上 [loading]，
+     * 不然刚发出请求就会以为已经好了。
+     */
+    suspend fun awaitIdle(timeoutMs: Long = 12_000) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (loading && !agentCancelled && System.currentTimeMillis() < deadline) {
+            kotlinx.coroutines.delay(100)
+        }
+    }
+
+    /** 一次动作开始：置上「Bot 在操作」，并清掉上一次的接管标记。 */
+    fun beginAgent(action: String) {
+        agentCancelled = false
+        agentAction = action
+        agentBusy = true
+    }
+
+    fun endAgent() {
+        agentBusy = false
+        agentAction = null
+    }
+
+    /** 用户点「接管」：打断当前的等待，动作尽快回执。 */
+    fun cancelAgent() {
+        agentCancelled = true
+        endAgent()
+    }
+
+    /** 开始一次交接（`id` 是通道请求的 id）。 */
+    fun beginHandOver(id: String, reason: String) {
+        handOverId = id
+        handOverReason = reason
+        handOverDone = false
+        endAgent()
+    }
+
+    /** 用户点了「完成」。 */
+    fun finishHandOver() {
+        handOverDone = true
+    }
+
+    /** `pending` / `done` / `gone`（这次交接已经不在这个标签页上）。 */
+    fun handOverStatus(id: String): String = when {
+        handOverId != id -> "gone"
+        handOverDone -> "done"
+        else -> "pending"
+    }
+
+    fun endHandOver() {
+        handOverId = null
+        handOverReason = null
+        handOverDone = false
     }
 
     /** 报告给引擎的「当前页」：只有真的载入了 http(s) 页面才算。 */
@@ -161,6 +260,10 @@ class BotBrowserSession internal constructor(
         }
         view.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String?) {
+                if (loadingTabId == id) {
+                    loadingTabId = null
+                    loading = false
+                }
                 update(id) { it.copy(url = view.url.orEmpty(), title = view.title.orEmpty()) }
                 if (id == activeId) syncNavigation()
             }
@@ -185,6 +288,12 @@ class BotBrowserSession internal constructor(
                     )
                 }
                 return true
+            }
+
+            override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                loadingTabId = id
+                loading = true
+                update(id) { it.copy(url = url.orEmpty()) }
             }
         }
         view.webChromeClient = object : WebChromeClient() {
@@ -236,6 +345,12 @@ class BotBrowserSession internal constructor(
         val view = activeWebView()
         canGoBack = view?.canGoBack() == true
         canGoForward = view?.canGoForward() == true
+    }
+
+    private fun startLoad(view: WebView, raw: String) {
+        loadingTabId = activeId
+        loading = true
+        view.loadUrl(fixedUrl(raw))
     }
 
     private fun fixedUrl(raw: String): String = when {

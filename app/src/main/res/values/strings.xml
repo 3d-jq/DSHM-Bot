@@ -125,6 +125,13 @@
     <string name="browser_reload">Reload</string>
     <string name="browser_open_external">Open in browser</string>
     <string name="browser_expand">Full screen</string>
+    <string name="browser_agent_busy">%1$s is using the browser</string>
+    <string name="browser_takeover">Take over</string>
+    <string name="browser_hand_over_title">Your turn</string>
+    <string name="browser_hand_over_done">Done</string>
+    <string name="browser_guard_title">Allow this action?</string>
+    <string name="browser_guard_allow">Allow once</string>
+    <string name="browser_guard_deny">Deny</string>
     <string name="bot_settings_manage">Manage</string>
     <string name="bot_settings_schedules">Scheduled tasks</string>
     <string name="bot_settings_schedule_new">New task</string>

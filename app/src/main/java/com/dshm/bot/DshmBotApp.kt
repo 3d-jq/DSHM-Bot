@@ -12,6 +12,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,6 +39,8 @@ import com.dshm.bot.ui.account.AccountScreen
 import com.dshm.bot.ui.account.AccountViewModel
 import com.dshm.bot.ui.chat.BotBrowserScreen
 import com.dshm.bot.ui.chat.BotBrowserStore
+import com.dshm.bot.ui.chat.BrowserGuardStore
+import com.dshm.bot.ui.chat.BrowserHandOverStore
 import com.dshm.bot.ui.chat.BrowserReadBridge
 import com.dshm.bot.ui.chat.BotChatScreen
 import com.dshm.bot.ui.chat.BotDetailsScreen
@@ -850,6 +855,35 @@ fun DshmBotApp(
                 botDetailsOpen = true
             },
         )
+    }
+
+    // 浏览器守卫：Bot 要点「付款 / 发送 / 删除」这类按钮时，先在这里问一次。
+    val guardRequest by BrowserGuardStore.pending.collectAsStateWithLifecycle()
+    guardRequest?.let { request ->
+        AlertDialog(
+            onDismissRequest = { BrowserGuardStore.answer(false) },
+            title = { Text(stringResource(R.string.browser_guard_title)) },
+            text = { Text(request.reason) },
+            confirmButton = {
+                TextButton(onClick = { BrowserGuardStore.answer(true) }) {
+                    Text(stringResource(R.string.browser_guard_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { BrowserGuardStore.answer(false) }) {
+                    Text(stringResource(R.string.browser_guard_deny))
+                }
+            },
+        )
+    }
+
+    // 交接给用户：把那个 Bot 的浏览器推到前台（登录 / 验证码 / 付款）。
+    val handOver by BrowserHandOverStore.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(handOver) {
+        val request = handOver ?: return@LaunchedEffect
+        openBotId = request.first
+        botBrowserOpen = true
+        navForward = true
     }
 
     }

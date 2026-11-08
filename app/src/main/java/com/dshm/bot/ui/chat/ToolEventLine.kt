@@ -94,11 +94,51 @@ fun toolEventLine(
         "read_own_chat" -> ToolEventLine("翻看了自己的聊天记录")
         "list_bots" -> ToolEventLine("查看了团队")
         "list_secrets" -> ToolEventLine("查看了密钥")
+
+        // 浏览器：Bot 自己开页面、读页面、点按输入 —— 用户要看得见它在操作。
+        "browser_open" -> {
+            val host = browserHost(args.optString("url")) ?: browserResultHost(result)
+            ToolEventLine(
+                when {
+                    isError -> "没能打开网页"
+                    host != null -> "打开了 $host"
+                    else -> "打开了网页"
+                },
+            )
+        }
+
+        "read_browser" -> ToolEventLine(if (isError) "没能读网页" else "读了网页")
+        "browser_click" -> ToolEventLine(if (isError) "没能点页面上的元素" else "点了页面上的元素")
+        "browser_type" -> ToolEventLine(if (isError) "没能填输入框" else "填了网页上的输入框")
+        "browser_scroll" -> ToolEventLine(if (isError) "没能滚动网页" else "滚动了网页")
+        "browser_back" -> ToolEventLine(if (isError) "网页后退失败" else "网页后退了")
+        "browser_forward" -> ToolEventLine(if (isError) "网页前进失败" else "网页前进了")
+        "browser_reload" -> ToolEventLine(if (isError) "刷新网页失败" else "刷新了网页")
+        "browser_tabs" -> ToolEventLine("看了浏览器标签页")
+        "browser_close_tab" -> ToolEventLine(if (isError) "没能关闭标签页" else "关了一个浏览器标签页")
+        "browser_hand_over" -> ToolEventLine(if (isError) "没能交接浏览器" else "把浏览器交给了你")
+
         "remember", "forget" -> memoryEventLine(args, isError, selfName)
         "recall" -> ToolEventLine("查看了记忆")
         else -> null
     }
 }
+
+/** 事件行里的站点名：`https://www.example.com/a` → `example.com`。 */
+private fun browserHost(raw: String): String? {
+    val text = raw.trim()
+    if (text.isEmpty() || text.contains(' ')) return null
+    val withScheme = if (text.contains("://")) text else "https://$text"
+    return runCatching { java.net.URI(withScheme).host }.getOrNull()
+        ?.removePrefix("www.")
+        ?.takeIf { it.isNotBlank() }
+}
+
+/** `browser_open` 的回执里带最终地址（重定向后以它为准）。 */
+private fun browserResultHost(result: String): String? = runCatching {
+    if (!result.trimStart().startsWith("{")) return@runCatching null
+    browserHost(JSONObject(result).optString("url"))
+}.getOrNull()
 
 /** DS Bot `MemoryEvent`：团队 / 自己 / 另一个 Bot 的记忆。 */
 private fun memoryEventLine(args: JSONObject, isError: Boolean, selfName: String): ToolEventLine {

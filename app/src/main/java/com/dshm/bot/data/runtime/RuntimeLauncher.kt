@@ -74,7 +74,8 @@ class RuntimeLauncher(
             }
         }.apply { isDaemon = true; start() }
 
-        val deadline = System.currentTimeMillis() + 120_000
+        // 插件刚覆盖、设备又忙的时候，冷启动会明显超过两分钟；token 到了才是真的起来了。
+        val deadline = System.currentTimeMillis() + 180_000
         while (System.currentTimeMillis() < deadline) {
             val line = queue.poll(500, TimeUnit.MILLISECONDS)
             if (line == null) {

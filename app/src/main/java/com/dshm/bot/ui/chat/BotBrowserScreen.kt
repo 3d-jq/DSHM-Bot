@@ -9,6 +9,7 @@ import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +38,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,7 +84,11 @@ fun BotBrowserScreen(
                 ?: stringResource(R.string.browser_title),
             onBack = onBack,
         )
-        BotBrowserPanel(session = session, modifier = Modifier.weight(1f))
+        BotBrowserPanel(
+            session = session,
+            modifier = Modifier.weight(1f),
+            botName = botName.orEmpty(),
+        )
     }
 }
 
@@ -93,6 +104,7 @@ internal fun BotBrowserPanel(
     session: BotBrowserSession?,
     modifier: Modifier = Modifier,
     onExpand: (() -> Unit)? = null,
+    botName: String = "",
 ) {
     val context = LocalContext.current
     val tab = session?.activeTab()
@@ -143,6 +155,15 @@ internal fun BotBrowserPanel(
             } else {
                 BrowserWebArea(webView = webView, modifier = Modifier.fillMaxSize())
             }
+            if (session?.agentBusy == true) {
+                AgentBrowsingOverlay(
+                    botName = botName.ifBlank { "Bot" },
+                    onTakeover = { session.cancelAgent() },
+                )
+            }
+        }
+        session?.handOverReason?.let { reason ->
+            HandOverBanner(reason = reason, onDone = { session.finishHandOver() })
         }
         // 页面和底栏之间留一口气，贴着看太挤。
         Spacer(Modifier.height(Dshm.spacing.sm))
@@ -490,6 +511,101 @@ private fun BrowserHint(text: String) {
         color = Dshm.colors.textTertiary,
         modifier = Modifier.padding(Dshm.spacing.lg),
     )
+}
+
+/**
+ * 「Bot 正在操作浏览器」。
+ *
+ * 对齐 DeepSearch 的 `AgentBrowsingOverlay`：页面压一层薄雾，中间一颗呼吸的点 +
+ * 谁在操作 + 「接管」。接管会打断当前的等待，工具立刻回执，用户拿回页面。
+ */
+@Composable
+private fun AgentBrowsingOverlay(botName: String, onTakeover: () -> Unit) {
+    val transition = rememberInfiniteTransition(label = "agent-busy")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 1200), RepeatMode.Reverse),
+        label = "agent-busy-alpha",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Dshm.colors.scrim.copy(alpha = 0.28f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(Dshm.radius.pill))
+                .background(Dshm.colors.surface)
+                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(Dshm.spacing.statusDot)
+                    .clip(CircleShape)
+                    .background(Dshm.colors.accent.copy(alpha = alpha)),
+            )
+            Spacer(Modifier.size(Dshm.spacing.sm))
+            Text(
+                text = stringResource(R.string.browser_agent_busy, botName),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textPrimary,
+            )
+            Spacer(Modifier.size(Dshm.spacing.md))
+            Box(
+                Modifier
+                    .width(Dshm.spacing.hairline)
+                    .height(Dshm.spacing.sm + Dshm.spacing.xs)
+                    .background(Dshm.colors.divider),
+            )
+            Spacer(Modifier.size(Dshm.spacing.md))
+            Text(
+                text = stringResource(R.string.browser_takeover),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(Dshm.radius.sm))
+                    .clickable(onClick = onTakeover)
+                    .padding(horizontal = Dshm.spacing.xxs, vertical = Dshm.spacing.xxs),
+            )
+        }
+    }
+}
+
+/**
+ * 「轮到你操作了」：Bot 把页面交给人（登录 / 验证码 / 付款），点「完成」继续。
+ */
+@Composable
+private fun HandOverBanner(reason: String, onDone: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xs)
+            .clip(RoundedCornerShape(Dshm.radius.md))
+            .background(Dshm.colors.accent.copy(alpha = 0.12f))
+            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.browser_hand_over_title),
+                style = Dshm.typography.rowTitle,
+                color = Dshm.colors.accent,
+            )
+            Text(
+                text = reason,
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        TextButton(onClick = onDone) {
+            Text(stringResource(R.string.browser_hand_over_done))
+        }
+    }
 }
 
 /**
