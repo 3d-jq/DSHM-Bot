@@ -78,7 +78,7 @@ data class DshmSpacing(
      * 和气泡之间的间距一致 —— 气泡离输入框太远会看着「脱开」，
      * 最后一颗气泡和输入框看起来不是一组的。
      */
-    val composerClearance: Dp = 8.dp,
+    val composerClearance: Dp = 16.dp,
     /**
      * 换人说话时气泡之间的距离（用户 ↔ 大模型、群聊换成员、产物卡前面）。
      *
