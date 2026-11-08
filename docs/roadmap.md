@@ -294,7 +294,9 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 
 ### DS Bot 团队设置（2026-11-08，第十四轮）
 
-- ☑️ 设置首页新增「团队」组，先落两页（对齐网页端 `SETTINGS_PAGES` 的 Secrets / Connectors）：
+- ☑️ 设置首页新增「团队」组（对齐网页端 `SETTINGS_PAGES` 的 Secrets / Connectors /
+  Capabilities / Scheduled tasks / Usage），原来单独一张「团队」卡里的定时任务已并进来，
+  不再出现两个同名分组：
   - **密钥**：列表（名字 / 用途 / 谁能用 / 是否用过）；新增走 `secret-set`，
     改用途与范围走 `secret-update`，换值走同名的 `secret-set`（同名覆盖），删除走 `secret-delete`。
     范围支持「所有 Bot / 指定 Bot（勾选成员）」。
@@ -316,6 +318,16 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   只读用「不传 onClick」表达，标题保持主文字色。完整设置页 / 群面板 / 详情页的用量行已一并改掉。
 - ☑️ 刷新改成顶栏右侧悬浮圆钮（`FloatingIconButton` + `ic_lucide_refresh_cw`），扫描中禁用并在标题
   下方显示「正在读历史用量…」，页底不再留一行刷新。
+- ☑️ **定时任务（Scheduled tasks）** 按 DS Bot `client/schedules.js` 补齐：
+  - 任务按目标（Bot / 群聊）分组，组标题是目标名，行首是 Bot 头像或群成员头像堆叠；
+  - 行内：名字、时间规则 + 内容预览（+ 群名）、下次运行 / 已完成；点行看详情，尾部垃圾桶
+    「再点一次删除」（3 秒后自动取消确认）；
+  - 「新建任务」内联表单：发送给（Bot + 群聊 combobox，不支持搜索）/ 名字 / 做什么 / 什么时候跑
+    （一次 `at`、每天、每周 + 周几、重复 N 分钟/小时/天）；
+  - 新增 `ScheduleTiming.At` → `{ kind: "at", at: ISO }`，跟宿主 `selectorOf` 一致；
+    `scheduleAtIso` / `scheduleAtLabel` 做本机时间与 ISO 的互转（有单测）。
+- ⬜ **待办（2026-11-08 老大明确）**：定时任务页与新建表单先保证接线和功能可用，
+  UI 之后专门做一轮优化（表单排版、分组标题带头像、点击区域等都还要打磨）。
 - ⬜ 还没做：**General**（主题/强调色/消息布局是网页端 `prefs`，原生界面不适用）、
   **Feedback**（意见反馈已有自己的入口）。
 

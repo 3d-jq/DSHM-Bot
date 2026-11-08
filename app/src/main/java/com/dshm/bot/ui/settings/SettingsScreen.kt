@@ -199,6 +199,12 @@ fun SettingsScreen(
                 )
                 SettingsRowDivider()
                 SettingsRow(
+                    title = stringResource(R.string.schedules_title),
+                    icon = R.drawable.ic_lucide_clock_3,
+                    onClick = { onOpenPage(SettingsPageId.SCHEDULES) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
                     title = stringResource(R.string.settings_team_usage),
                     icon = R.drawable.ic_lucide_gauge,
                     onClick = { onOpenPage(SettingsPageId.USAGE) },
@@ -337,16 +343,6 @@ fun SettingsScreen(
                     icon = R.drawable.ic_lucide_sliders_horizontal,
                     value = stringResource(R.string.settings_this_phone),
                     onClick = { onOpenPage(SettingsPageId.ENGINE_PARAMS) },
-                )
-            }
-        }
-
-        item {
-            SettingsSection(title = stringResource(R.string.settings_group_team)) {
-                SettingsRow(
-                    title = stringResource(R.string.schedules_title),
-                    icon = R.drawable.ic_lucide_clock_3,
-                    onClick = { onOpenPage(SettingsPageId.SCHEDULES) },
                 )
             }
         }

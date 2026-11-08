@@ -902,6 +902,28 @@
     <string name="schedules_unavailable_hint">Turn on the Automation tasks plugin in DSH to use this.</string>
     <string name="schedules_delete_title">Delete “%1$s”?</string>
     <string name="schedules_delete_hint">The task will stop running. Chats already started are unaffected.</string>
+    <string name="schedules_send_to">Send to</string>
+    <string name="schedules_when">When it runs</string>
+    <string name="schedules_kind_at">Once</string>
+    <string name="schedules_kind_daily">Every day</string>
+    <string name="schedules_kind_weekly">Every week</string>
+    <string name="schedules_kind_every">Repeat</string>
+    <string name="schedules_at_hint">2026-11-09 09:00</string>
+    <string name="schedules_time_hint">09:00</string>
+    <string name="schedules_every_hint">Interval (1 minute to 7 days)</string>
+    <string name="schedules_unit_minutes">minutes</string>
+    <string name="schedules_unit_hours">hours</string>
+    <string name="schedules_unit_days">days</string>
+    <string name="schedules_create">Create task</string>
+    <string name="schedules_creating">Creating…</string>
+    <string name="schedules_next">Next: %1$s</string>
+    <string name="schedules_finished">Finished</string>
+    <string name="schedules_in_room">in %1$s</string>
+    <string name="schedules_delete_again">Tap again to delete</string>
+    <string name="schedules_unknown_target">Unlinked</string>
+    <string name="schedules_room_suffix">Group chat</string>
+    <string name="schedules_weekdays">Days</string>
+    <string name="schedules_need_fields">Fill in the name and what to do</string>
 </resources>
 
 

@@ -1,6 +1,7 @@
 package com.dshm.bot.data.remote
 
 import org.json.JSONObject
+import com.dshm.bot.ui.home.RoomMemberUi
 
 /**
  * DS Bot 的 `/api/bot` 通道里我们用到的几个端点。
@@ -47,32 +48,23 @@ class DsBotApi(private val client: DshClient) {
     /** 团队里的 Bot 与群聊（定时任务的目标）。 */
     suspend fun targets(): List<ScheduleTarget> {
         val state = client.bot("state")
-        val out = mutableListOf<ScheduleTarget>()
-        state.optJSONArray("bots")?.let { array ->
-            for (index in 0 until array.length()) {
-                val bot = array.optJSONObject(index) ?: continue
-                val id = bot.optString("id")
-                if (id.isEmpty()) continue
-                out += ScheduleTarget(
-                    id = id,
-                    name = bot.optString("name").ifEmpty { id },
-                    kind = ScheduleTargetKind.BOT,
-                )
-            }
+        val bots = DsBotParser.teamMembers(state).map { member ->
+            ScheduleTarget(
+                id = member.id,
+                name = member.name,
+                kind = ScheduleTargetKind.BOT,
+                bot = member,
+            )
         }
-        state.optJSONArray("rooms")?.let { array ->
-            for (index in 0 until array.length()) {
-                val room = array.optJSONObject(index) ?: continue
-                val id = room.optString("id")
-                if (id.isEmpty()) continue
-                out += ScheduleTarget(
-                    id = id,
-                    name = room.optString("name").ifEmpty { id },
-                    kind = ScheduleTargetKind.ROOM,
-                )
-            }
+        val rooms = DsBotParser.teamRooms(state).map { room ->
+            ScheduleTarget(
+                id = room.id,
+                name = room.name,
+                kind = ScheduleTargetKind.ROOM,
+                members = room.members,
+            )
         }
-        return out
+        return bots + rooms
     }
 }
 
@@ -84,4 +76,8 @@ data class ScheduleTarget(
     val id: String,
     val name: String,
     val kind: ScheduleTargetKind,
+    /** Bot 目标：它的显示身份（头像 / 颜色）；群聊目标为 null。 */
+    val bot: RoomMemberUi? = null,
+    /** 群聊目标：成员头像堆叠。 */
+    val members: List<RoomMemberUi> = emptyList(),
 )

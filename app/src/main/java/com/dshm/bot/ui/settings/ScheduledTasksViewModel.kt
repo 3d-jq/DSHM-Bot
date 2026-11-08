@@ -10,6 +10,7 @@ import com.dshm.bot.data.remote.DsBotApi
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.ScheduleList
 import com.dshm.bot.data.remote.ScheduleTarget
+import com.dshm.bot.data.remote.ScheduleTiming
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -77,6 +78,25 @@ class ScheduledTasksViewModel(
                     onDone(null)
                 }
                 .onFailure { failure -> onDone(failure.message ?: "删除失败") }
+        }
+    }
+
+    /** 新建一个任务：`target` 是 Bot id 或群聊 id。 */
+    fun create(
+        target: ScheduleTarget,
+        title: String,
+        prompt: String,
+        timing: ScheduleTiming,
+        onDone: (String?) -> Unit = {},
+    ) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            runCatching { repo.createSchedule(target.id, title, prompt, timing) }
+                .onSuccess { list ->
+                    _ui.update { it.copy(available = list.available, tasks = list.tasks, error = null) }
+                    onDone(null)
+                }
+                .onFailure { failure -> onDone(failure.message ?: "创建失败") }
         }
     }
 

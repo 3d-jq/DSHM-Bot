@@ -2,6 +2,9 @@ package com.dshm.bot.data.remote
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * 「定时任务」：DS Bot 的 `/api/bot` 端点 `schedules` 返回的任务。
@@ -93,6 +96,9 @@ fun parseScheduleList(raw: JSONObject?): ScheduleList {
  * 只支持三种不需要日历的规则；`at` 与 `cron` 需要选时间/写表达式，本项目不做。
  */
 sealed interface ScheduleTiming {
+    /** 只跑一次。`at` 是带时区的 ISO 时间（`2026-11-09T09:00:00+08:00`）。 */
+    data class At(val at: String) : ScheduleTiming
+
     /** 每天几点。 */
     data class Daily(val time: String, val timeZone: String) : ScheduleTiming
 
@@ -105,6 +111,14 @@ sealed interface ScheduleTiming {
 
 /** 时间规则的校验结果：null 表示没问题，否则是给用户看的错误。 */
 fun validateScheduleTiming(timing: ScheduleTiming): String? = when (timing) {
+    is ScheduleTiming.At -> {
+        val instant = runCatching { java.time.Instant.parse(timing.at) }.getOrNull()
+        when {
+            instant == null -> "时间要写成 2026-11-09 09:00 这种"
+            instant.toEpochMilli() <= System.currentTimeMillis() -> "时间要在将来"
+            else -> null
+        }
+    }
     is ScheduleTiming.Daily -> if (TIME_PATTERN.matches(timing.time)) null else "时间要写成 HH:mm"
     is ScheduleTiming.Weekly -> {
         if (!TIME_PATTERN.matches(timing.time)) {
@@ -120,6 +134,9 @@ fun validateScheduleTiming(timing: ScheduleTiming): String? = when (timing) {
 
 /** 转成 `schedule-create` 的 `when` 对象。 */
 fun scheduleTimingSelector(timing: ScheduleTiming): JSONObject = when (timing) {
+    is ScheduleTiming.At -> JSONObject()
+        .put("kind", "at")
+        .put("at", timing.at)
     is ScheduleTiming.Daily -> JSONObject()
         .put("kind", "daily")
         .put("time", timing.time)
@@ -132,6 +149,24 @@ fun scheduleTimingSelector(timing: ScheduleTiming): JSONObject = when (timing) {
     is ScheduleTiming.Every -> JSONObject()
         .put("kind", "every")
         .put("minutes", timing.minutes)
+}
+
+private val AT_INPUT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+/** 界面上的 `2026-11-09 09:00` → 本机时区的 ISO 时间；格式不对返回 null。 */
+fun scheduleAtIso(text: String): String? = runCatching {
+    LocalDateTime.parse(text.trim(), AT_INPUT)
+        .atZone(ZoneId.systemDefault())
+        .toInstant()
+        .toString()
+}.getOrNull()
+
+/** ISO 时间 → 本机时区的 `2026-11-09 09:00`；解析不了就原样返回。 */
+fun scheduleAtLabel(iso: String?): String? {
+    if (iso.isNullOrBlank()) return null
+    return runCatching {
+        java.time.Instant.parse(iso).atZone(ZoneId.systemDefault()).format(AT_INPUT)
+    }.getOrElse { iso.replace("T", " ").take(16) }
 }
 
 /**
@@ -158,7 +193,7 @@ fun scheduleTimingLabel(task: ScheduledTask): String = when (task.kind) {
         val seconds = task.afterSeconds ?: 0
         "每轮会话结束后 ${seconds / 60} 分钟"
     }
-    "at" -> task.scheduledAt?.replace("T", " ")?.take(16) ?: "指定时间"
+    "at" -> scheduleAtLabel(task.scheduledAt) ?: "指定时间"
     "cron" -> task.expression ?: "cron"
     else -> task.kind
 }

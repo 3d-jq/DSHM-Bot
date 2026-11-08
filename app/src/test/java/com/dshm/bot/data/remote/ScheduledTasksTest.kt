@@ -3,6 +3,7 @@ package com.dshm.bot.data.remote
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -117,5 +118,30 @@ class ScheduledTasksTest {
         val every = scheduleTimingSelector(ScheduleTiming.Every(30))
         assertEquals("every", every.getString("kind"))
         assertEquals(30, every.getInt("minutes"))
+    }
+
+    @Test
+    fun oneOffTimingUsesTheHostsIsoShape() {
+        val iso = scheduleAtIso("2099-01-02 03:04")
+        assertNotNull(iso)
+        val selector = scheduleTimingSelector(ScheduleTiming.At(iso!!))
+        assertEquals("at", selector.getString("kind"))
+        assertEquals(iso, selector.getString("at"))
+        // 同一个时区往返不丢时间。
+        assertEquals("2099-01-02 03:04", scheduleAtLabel(iso))
+        assertNull(validateScheduleTiming(ScheduleTiming.At(iso)))
+    }
+
+    @Test
+    fun oneOffTimingRejectsGarbageAndPastTimes() {
+        assertEquals(
+            "时间要写成 2026-11-09 09:00 这种",
+            validateScheduleTiming(ScheduleTiming.At("nope")),
+        )
+        assertEquals(
+            "时间要在将来",
+            validateScheduleTiming(ScheduleTiming.At("2000-01-01T00:00:00Z")),
+        )
+        assertNull(scheduleAtIso("2026/11/09 09:00"))
     }
 }
