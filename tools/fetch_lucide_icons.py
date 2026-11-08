@@ -75,6 +75,10 @@ ICONS = [
     "shopping-bag",
     "package-search",
     "chevron-down",
+    "ellipsis",
+    "external-link",
+    "share-2",
+    "folder",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

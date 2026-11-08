@@ -112,6 +112,8 @@ import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.ui.components.BotAvatar
 import com.dshm.bot.ui.components.FloatingIconButton
 import com.dshm.bot.ui.home.ChatRowUi
+import com.dshm.bot.ui.home.RoomMemberUi
+import com.dshm.bot.ui.home.TeamRoomUi
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
@@ -208,6 +210,7 @@ fun BotChatScreen(
         cameraLauncher.launch(uri)
     }
     var quickSettings by remember { mutableStateOf(false) }
+    var exchangeWith by remember(bot.id) { mutableStateOf<String?>(null) }
     val quickSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val working = state.sending || state.waitingForReply || state.streaming.isNotEmpty()
     // 审批应答中（按钮禁用，避免重复点）。
@@ -356,6 +359,9 @@ fun BotChatScreen(
                         activity = state.activity,
                         lastSendAt = lastSendAt,
                         bot = bot,
+                        endpoint = endpoint,
+                        members = if (bot.isGroup) bot.roomMembers else state.teamMembers,
+                        rooms = state.teamRooms,
                         fontScale = fontScale,
                         topPadding = innerPadding.calculateTopPadding(),
                         // 最后一条消息避开输入框（输入框浮在列表上面）：
@@ -373,6 +379,7 @@ fun BotChatScreen(
                         autoLoadEnabled = state.error == null,
                         onLoadEarlier = viewModel::loadEarlier,
                         onOpenMember = onOpenMember,
+                        onOpenExchange = { id -> exchangeWith = id },
                     )
                 }
             }
@@ -506,7 +513,28 @@ fun BotChatScreen(
             )
         }
     }
+    // Bot 间对话：DS Bot 的 `ExchangeDialog`（点「消息发给了 X / 回复来自 X」打开）。
+    exchangeWith?.let { otherId ->
+        BotExchangeDialog(
+            selfId = bot.id,
+            otherId = otherId,
+            endpoint = endpoint,
+            selfLook = state.teamMembers.firstOrNull { it.id == bot.id } ?: bot.asMemberLook(),
+            otherLook = state.teamMembers.firstOrNull { it.id == otherId },
+            fontScale = fontScale,
+            onDismiss = { exchangeWith = null },
+        )
+    }
 }
+
+/** 本对话 Bot 的身份（团队表里没有时自己拼一份）。 */
+private fun ChatRowUi.asMemberLook(): RoomMemberUi = RoomMemberUi(
+    id = id,
+    name = name,
+    inkId = inkId,
+    avatarImage = avatarImage,
+    avatarShape = avatarShape,
+)
 
 /**
  * 距顶多少像素内就自动往前翻页。
@@ -552,6 +580,11 @@ private fun ChatMessages(
     streaming: String,
     activity: ChatActivity?,
     bot: ChatRowUi,
+    endpoint: RuntimeEndpoint?,
+    /** 事件行认人用的身份表：群聊用成员，单聊用团队。 */
+    members: List<com.dshm.bot.ui.home.RoomMemberUi>,
+    /** 团队的群聊（事件行「阅读群聊 / 群发言」要画成员头像堆叠）。 */
+    rooms: List<com.dshm.bot.ui.home.TeamRoomUi>,
     fontScale: Float,
     topPadding: Dp,
     bottomPadding: Dp,
@@ -567,21 +600,13 @@ private fun ChatMessages(
     /** 上次加载出错时不再自动触发（否则会一直重试）。 */
     autoLoadEnabled: Boolean = true,
     onOpenMember: (String) -> Unit = {},
+    /** 点事件行打开「Bot 间对话」（DS Bot `openExchange`）。 */
+    onOpenExchange: (String) -> Unit = {},
     onLoadEarlier: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val typing = activity != null
     val streamingNow = streaming.isNotEmpty()
-    // 打开对话时已经存在的消息视为已读；之后新到的消息前显示「新消息」分隔。
-    var seenAtOpen by remember { mutableStateOf<Set<String>?>(null) }
-    LaunchedEffect(entries) {
-        if (seenAtOpen == null && entries.isNotEmpty()) {
-            seenAtOpen = entries.map { it.id }.toSet()
-        }
-    }
-    val oldestNewId = seenAtOpen?.let { seen ->
-        entries.firstOrNull { it.id !in seen }?.id
-    }
 
     // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
     // 显示在底部。Compose 的 reverseLayout 原生就会把底部锚住 ——
@@ -741,16 +766,13 @@ private fun ChatMessages(
                 val groupStart = bot.isGroup && isBotEntry && !sameBotAsOlder
                 Column(
                     modifier = Modifier.padding(
-                        top = if (groupStart || turnsChanged) {
+                        top = if (groupStart || turnsChanged || entry.kind == ChatEntryKind.ARTIFACTS) {
                             Dshm.spacing.turnGap - Dshm.spacing.sm
                         } else {
                             Dshm.spacing.xs
                         },
                     ),
                 ) {
-                if (entry.id == oldestNewId) {
-                    NewMessagesDivider()
-                }
                 when (entry.kind) {
                     ChatEntryKind.USER -> UserBubble(
                         text = entry.text,
@@ -771,15 +793,36 @@ private fun ChatMessages(
                         timeMs = null,
                         durationMs = null,
                     )
-                    ChatEntryKind.EVENT -> EventLine(
-                        text = entry.text,
-                        kind = entry.eventKind,
-                        name = entry.author,
-                        code = entry.eventCode,
-                        timeMs = null,
-                        botId = entry.botId,
-                        bot = if (bot.isGroup) null else bot,
-                        members = bot.roomMembers,
+                    ChatEntryKind.EVENT -> {
+                        // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
+                        // 点开的是目标（`openExchange`）。relay 事件的目标是发件人（`botId`）。
+                        val targetMember = entry.target
+                            ?.let { name -> members.firstOrNull { it.name.equals(name, ignoreCase = true) } }
+                        val targetRoom = entry.target
+                            ?.let { name -> rooms.firstOrNull { it.name == name } }
+                        val clickId = entry.botId?.takeIf { it != bot.id } ?: targetMember?.id
+                        EventLine(
+                            text = entry.text,
+                            kind = entry.eventKind,
+                            name = entry.author,
+                            code = entry.eventCode,
+                            timeMs = null,
+                            botId = clickId,
+                            // 工具事件行画的是「目标」，不套本对话 Bot 自己的头像。
+                            bot = if (bot.isGroup || entry.tool != null) null else bot,
+                            members = members,
+                            room = targetRoom,
+                            iconRes = when (entry.tool) {
+                                "remember", "forget" -> R.drawable.ic_dsbot_memory
+                                else -> null
+                            },
+                            onOpen = clickId?.let { id -> { onOpenExchange(id) } },
+                        )
+                    }
+                    ChatEntryKind.ARTIFACTS -> ArtifactCard(
+                        artifacts = entry.artifacts,
+                        endpoint = endpoint,
+                        sessionId = bot.id,
                     )
                 }
                 }
@@ -1230,54 +1273,94 @@ private fun EventLine(
     timeMs: Long? = null,
     botId: String? = null,
     bot: ChatRowUi? = null,
-    members: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
+    members: List<RoomMemberUi> = emptyList(),
+    room: TeamRoomUi? = null,
+    @androidx.annotation.DrawableRes iconRes: Int? = null,
+    onOpen: (() -> Unit)? = null,
 ) {
     val member = members.firstOrNull { it.id == botId }
-    val subject: Any? = if (bot != null && bot.isGroup) member else bot
+    // relay 事件（消息来自 / 回复来自 / 叫停）里的 `botId` 是「对方」的会话 id：
+    // 先按 id 认人（DS Bot 也是从 roster 认 sender），认不出来就不要乱套本对话的头像。
+    val relaySender = RELAY_EVENT_KINDS.contains(kind)
+    val subject: Any? = when {
+        member != null -> member
+        room != null -> room
+        // 记忆事件用 DS Bot 的 MemoryIcon，不套自己的头像。
+        iconRes != null -> null
+        relaySender && botId != null -> null
+        bot != null && bot.isGroup -> null
+        else -> bot
+    }
     val subjectName = when (subject) {
-        is com.dshm.bot.ui.home.RoomMemberUi -> subject.name
+        is RoomMemberUi -> subject.name
+        is TeamRoomUi -> subject.name
         is ChatRowUi -> subject.name
-        else -> name
+        else -> relaySenderName(name)
     }
     val label = eventLineLabel(kind, subjectName, text, code)
+    // DS Bot 的事件行是「前缀 + 头像 + 名字」（`prefix` 在 `BotMark` 前面），
+    // 所以把文案按名字切开：名字跟头像贴在一起，前缀留在头像前面。
+    val nameAt = subjectName?.let { label.indexOf(it) }?.takeIf { it >= 0 }
+    val head = nameAt?.let { label.take(it) }.orEmpty()
+    val tail = if (nameAt != null && subjectName != null) {
+        label.substring(nameAt + subjectName.length)
+    } else {
+        ""
+    }
+    val inlineName = subjectName != null && nameAt != null
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier)
             .padding(vertical = Dshm.spacing.xs),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (inlineName && head.isNotBlank()) {
+            Text(
+                text = head.trimEnd(),
+                style = Dshm.typography.rowTime,
+                color = Dshm.colors.textSecondary,
+            )
+            Spacer(Modifier.width(Dshm.spacing.xs))
+        }
         if (subject != null) {
-            if (subject is com.dshm.bot.ui.home.RoomMemberUi) {
-                BotAvatar(
+            when (subject) {
+                is TeamRoomUi -> RoomAvatar(members = subject.members, size = Dshm.spacing.lg)
+                is RoomMemberUi -> BotAvatar(
                     inkId = subject.inkId,
                     glyph = AvatarGlyph.BOT,
                     avatarImage = subject.avatarImage,
                     avatarShape = subject.avatarShape,
                     size = Dshm.spacing.lg,
                 )
-            } else {
-                @Suppress("UNCHECKED_CAST")
-                val row = subject as ChatRowUi
-                BotAvatar(
-                    inkId = row.inkId,
-                    glyph = row.glyph,
-                    avatarImage = row.avatarImage,
-                    avatarShape = row.avatarShape,
-                    size = Dshm.spacing.lg,
-                )
+                else -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val row = subject as ChatRowUi
+                    BotAvatar(
+                        inkId = row.inkId,
+                        glyph = row.glyph,
+                        avatarImage = row.avatarImage,
+                        avatarShape = row.avatarShape,
+                        size = Dshm.spacing.lg,
+                    )
+                }
             }
+            Spacer(Modifier.width(Dshm.spacing.xs))
+        } else if (iconRes != null) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = Dshm.colors.textSecondary,
+                modifier = Modifier.size(Dshm.spacing.lg),
+            )
             Spacer(Modifier.width(Dshm.spacing.xs))
         }
         Text(
-            text = label,
+            text = if (inlineName) requireNotNull(subjectName) + tail else label,
             style = Dshm.typography.rowTime,
-            color = when (subject) {
-                is com.dshm.bot.ui.home.RoomMemberUi -> Dshm.colors.textSecondary
-                is ChatRowUi -> Dshm.colors.textSecondary
-                else -> Dshm.colors.textTertiary
-            },
-            textAlign = TextAlign.Center,
+            color = if (subject != null) Dshm.colors.textSecondary else Dshm.colors.textTertiary,
+            textAlign = if (inlineName && head.isNotBlank()) TextAlign.Start else TextAlign.Center,
             modifier = Modifier.weight(1f, fill = false),
         )
         timeMs?.let { t ->
@@ -1291,9 +1374,17 @@ private fun EventLine(
     }
 }
 
+/** relay 事件的种类：这些行的「谁」是对方 Bot，不是本对话的 Bot。 */
+private val RELAY_EVENT_KINDS = setOf("request", "reply", "report", "stopped")
+
+/** relay 事件里的名字：DS Bot 认不出对方时写的是 `You`，不能当名字用。 */
+private fun relaySenderName(name: String?): String? =
+    name?.trim()?.takeIf { it.isNotEmpty() && !it.equals("You", ignoreCase = true) }
+
 /** DS Bot `bt-event` 文案：按 event kind 映射，落回原文。 */
+@Composable
 private fun eventLineLabel(kind: String?, name: String?, fallback: String, code: String?): String {
-    val who = name?.let { it } ?: ""
+    val who = name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_event_some_bot)
     val prefix = when (kind) {
         "request" -> "消息来自 $who"
         "reply" -> "回复来自 $who"
@@ -1318,30 +1409,6 @@ private fun eventLineLabel(kind: String?, name: String?, fallback: String, code:
     return prefix ?: (if (fallback.isNotBlank()) fallback else (kind ?: "更新"))
 }
 
-@Composable
-private fun NewMessagesDivider() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = Dshm.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        androidx.compose.material3.HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = Dshm.colors.divider,
-        )
-        Text(
-            text = stringResource(R.string.chat_new_messages),
-            style = Dshm.typography.rowTime,
-            color = Dshm.colors.textTertiary,
-            modifier = Modifier.padding(horizontal = Dshm.spacing.sm),
-        )
-        androidx.compose.material3.HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = Dshm.colors.divider,
-        )
-    }
-}
 
 private fun clockLabel(timeMs: Long): String {
     val c = java.util.Calendar.getInstance().apply { timeInMillis = timeMs }

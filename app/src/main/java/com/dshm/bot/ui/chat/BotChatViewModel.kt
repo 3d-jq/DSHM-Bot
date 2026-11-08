@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.BotFeedEvent
+import com.dshm.bot.data.remote.DsBotParser
 import com.dshm.bot.domain.model.ChatApproval
+import com.dshm.bot.data.remote.DELIVERABLES_PRESENTED_EVENT
+import com.dshm.bot.data.remote.presentedFilesOf
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.parseChatPage
 import com.dshm.bot.data.remote.RemoteDshApi
@@ -16,6 +19,7 @@ import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.remote.DshSessionRepository
 import com.dshm.bot.data.remote.DshMuxHub
 import com.dshm.bot.data.remote.DshMux
+import com.dshm.bot.data.remote.DshMuxLog
 import com.dshm.bot.data.remote.DshHostEvent
 import com.dshm.bot.data.remote.DshQuestionRequest
 import com.dshm.bot.data.remote.DshQuestionAnswer
@@ -25,6 +29,8 @@ import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.RemoteSpeechRepository
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import com.dshm.bot.ui.home.RoomMemberUi
+import com.dshm.bot.ui.home.TeamRoomUi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +43,7 @@ import org.json.JSONArray
 import java.util.UUID
 
 /** 对话里的一行：用户消息、Bot 消息、或系统事件。 */
-enum class ChatEntryKind { USER, BOT, EVENT }
+enum class ChatEntryKind { USER, BOT, EVENT, ARTIFACTS }
 
 data class ChatEntry(
     val id: String,
@@ -56,6 +62,12 @@ data class ChatEntry(
     val eventCode: String? = null,
     /** 会话事件 seq；用于把 tool call 事件合并回时间线。 */
     val seq: Long? = null,
+    /** 一轮结束时交付的文件（`present` 声明）；非空时画成产物卡。 */
+    val artifacts: List<ChatArtifact> = emptyList(),
+    /** 工具事件的目标（Bot / 群聊名字）；界面用它在团队里认头像。 */
+    val target: String? = null,
+    /** 产生这条事件的 DS Bot 工具名（`message_bot` / `remember`…），界面据此选图标。 */
+    val tool: String? = null,
 )
 
 /** 待发送的本地附件。 */
@@ -68,10 +80,9 @@ data class ChatAttachmentDraft(
 private val FOLLOW_TOOLS = setOf(
     "message_bot", "stop_bot", "create_bot", "update_bot",
     "create_group", "update_group", "delete_group", "post_to_group",
-    "read_group_chat", "remember", "forget",
+    "read_group_chat", "read_own_chat", "remember", "forget", "recall",
+    "list_bots", "list_secrets",
 )
-private val GROUP_NAME = Regex("""(?:Created group|Updated group|Nothing changed in group) "([^"]+)"""")
-private val POST_NAME = Regex("""Posted in "([^"]+)"""")
 
 data class BotChatUiState(
     val loading: Boolean = true,
@@ -102,6 +113,15 @@ data class BotChatUiState(
     val hasEarlier: Boolean = false,
     /** 正在往前翻一页。 */
     val loadingEarlier: Boolean = false,
+    /**
+     * 团队成员的显示身份（会话 id → 头像/名字）。
+     *
+     * 事件行要认「事件来自谁」：单聊里 relay 事件来自另一个 Bot，
+     * 光靠本对话的 Bot 会认错人（DS Bot 用 roster 认）。
+     */
+    val teamMembers: List<RoomMemberUi> = emptyList(),
+    /** 团队的群聊（事件行「阅读群聊」要画成员头像堆叠）。 */
+    val teamRooms: List<TeamRoomUi> = emptyList(),
 )
 
 /**
@@ -143,6 +163,23 @@ class BotChatViewModel(
     private var followStreamId: String? = null
     private var followSessionId: String? = null
     private val toolEvents = LinkedHashMap<Long, ChatEntry>()
+    /** 每个 turn 的交付声明（按声明顺序，路径去重）：turn → 文件。 */
+    private val presentedByTurn = LinkedHashMap<Int, MutableList<ChatArtifact>>()
+    /** 声明所在的 seq：这一轮还没结束（没有 turn/end）时用它占位。 */
+    private val presentedSeq = HashMap<Int, Long>()
+    /** 每个 turn 的 `turn/end` seq —— 产物卡按官方口径贴在一轮结束处。 */
+    private val turnEndSeq = HashMap<Int, Long>()
+    /**
+     * DSH 的会话运行状态（mux 的 `api-session/status`）：会话 id → 这一轮还在跑吗。
+     *
+     * 这是「回合结束」的权威信号：DS Bot 网页端的活动行同样读它
+     * （`useSessionStatus(map.get(sessionId)?.running)`）。只看 DS Bot 的 `state.work`
+     * 会在它没清干净时把停止键和活动行一直挂在界面上。
+     */
+    private val sessionRunningById = HashMap<String, Boolean>()
+    /** 会话事件里最近一次 `turn/start` / `turn/end` 的 seq：最后的边界是哪一边。 */
+    private var lastTurnStartSeq = 0L
+    private var lastTurnEndSeq = 0L
     private val pendingTools = LinkedHashMap<String, PendingTool>()
 
     private data class PendingTool(
@@ -194,15 +231,30 @@ class BotChatViewModel(
         followStreamId?.let { mux?.closeStream(it) }
         followSessionId = session
         toolEvents.clear()
+        clearPresented()
         pendingTools.clear()
+        lastTurnStartSeq = 0L
+        lastTurnEndSeq = 0L
         val args = JSONObject()
-            .put("address", JSONObject().put("kind", "session").put("sessionId", session))
-            .put("maxMessages", 50)
+            .put(
+                // 网关的 `session/follow` 只认 `{request: {...}}`（dsh-Go 的
+                // `SessionEventStream.follow` 也是这么包的）；平铺会把整条流打回
+                // `gateway/arguments-invalid`，工具事件和产物卡就全都收不到。
+                "request",
+                JSONObject()
+                    .put("address", JSONObject().put("kind", "session").put("sessionId", session))
+                    // 快照窗口要够长：交付声明（`present`）只活在会话事件里，DS Bot 的 `chat`
+                    // 历史不带它。窗口太短会让几轮之前的产物卡查不到（dsh-Go 的对话窗口也是 200 起）。
+                    .put("maxMessages", 200),
+            )
         followStreamId = mux?.openStream(
             endpoint = "session/follow",
             args = args,
             onFrame = { frame -> handleFollowFrame(frame) },
-            onEnd = { followStreamId = null },
+            onEnd = { error ->
+                DshMuxLog.log("session/follow 结束：${error ?: "closed"}")
+                followStreamId = null
+            },
         )
     }
 
@@ -210,7 +262,10 @@ class BotChatViewModel(
         when (frame.optString("type")) {
             "snapshot" -> {
                 toolEvents.clear()
+                clearPresented()
                 pendingTools.clear()
+                lastTurnStartSeq = 0L
+                lastTurnEndSeq = 0L
                 frame.optJSONArray("records")?.let { records ->
                     for (index in 0 until records.length()) {
                         val record = records.optJSONObject(index) ?: continue
@@ -219,11 +274,11 @@ class BotChatViewModel(
                         }
                     }
                 }
-                mergeToolEvents()
+                mergeSessionEvents()
             }
             "event" -> {
                 handleSessionEvent(frame.optJSONObject("event"))
-                mergeToolEvents()
+                mergeSessionEvents()
             }
         }
     }
@@ -254,14 +309,37 @@ class BotChatViewModel(
                     message?.optBoolean("isError") == true ||
                     data.optBoolean("error")
                 val resultText = textContent(message?.opt("content"))
-                val label = followToolLabel(pending, resultText, isError) ?: return
+                val line = toolEventLine(pending.name, pending.args, resultText, isError, botName) ?: return
                 toolEvents[seq] = ChatEntry(
                     id = "tool:$seq",
                     kind = ChatEntryKind.EVENT,
-                    text = label,
+                    text = line.label,
                     seq = seq,
                     timeMs = time,
+                    target = line.target,
+                    tool = pending.name,
                 )
+            }
+            DELIVERABLES_PRESENTED_EVENT -> {
+                val presented = presentedFilesOf(event) ?: return
+                if (presented.isEmpty()) return
+                val turn = presented.first().turn
+                val files = presentedByTurn.getOrPut(turn) { mutableListOf() }
+                val known = files.mapTo(HashSet()) { it.path }
+                presented.forEach { file ->
+                    if (known.add(file.path)) {
+                        files += ChatArtifact(path = file.path, description = file.description)
+                    }
+                }
+                presentedSeq.putIfAbsent(turn, seq)
+            }
+            // 一轮的结束点：产物卡贴在这里（官方网页版也是画在一轮结束处，而不是
+            // `present` 调用发生的位置 —— 后面往往还有一段收尾文字）。
+            "turn/start" -> lastTurnStartSeq = maxOf(lastTurnStartSeq, seq)
+            "turn/end" -> {
+                lastTurnEndSeq = maxOf(lastTurnEndSeq, seq)
+                val turn = data.optInt("turn", -1)
+                if (turn >= 0) turnEndSeq[turn] = seq
             }
         }
     }
@@ -282,42 +360,35 @@ class BotChatViewModel(
         }.trim()
     }
 
-    private fun followToolLabel(pending: PendingTool, result: String, isError: Boolean): String? {
-        val args = pending.args
-        val target = sequenceOf(
-            args.optString("to"),
-            args.optString("bot"),
-            args.optString("name"),
-            args.optString("group"),
-        ).firstOrNull { it.isNotBlank() }.orEmpty()
-        return when (pending.name) {
-            "message_bot" -> if (isError) "没能发消息给 $target" else "消息发给 $target"
-            "stop_bot" -> if (isError) "没能叫停 $target" else "叫停了 $target"
-            "create_bot" -> if (isError) "创建 Bot 失败" else "创建了 $target"
-            "update_bot" -> if (isError) "更新 Bot 失败" else "更新了 $target"
-            "create_group" -> {
-                val name = GROUP_NAME.find(result)?.groupValues?.getOrNull(1) ?: target
-                if (isError) "创建群聊失败" else "创建了群聊${if (name.isBlank()) "" else "：$name"}"
-            }
-            "update_group" -> if (isError) "更新群聊失败" else "更新了群聊"
-            "delete_group" -> if (isError) "删除群聊失败" else "删除了群聊"
-            "post_to_group" -> {
-                val name = POST_NAME.find(result)?.groupValues?.getOrNull(1) ?: target
-                if (isError) "群发言失败" else "在${if (name.isBlank()) "群里" else " $name "}发言"
-            }
-            "read_group_chat" -> if (target.isBlank()) "查看了群聊" else "查看了 $target"
-            "remember", "forget" -> "更新了记忆"
-            else -> null
-        }
+    /** 每个 turn 的产物卡：有 `turn/end` 就贴在那一轮结束处，否则留在声明的位置。 */
+    private fun presentedEntries(): List<ChatEntry> = presentedByTurn.mapNotNull { (turn, files) ->
+        if (files.isEmpty()) return@mapNotNull null
+        val seq = turnEndSeq[turn] ?: presentedSeq[turn] ?: return@mapNotNull null
+        ChatEntry(
+            id = "present:$turn",
+            kind = ChatEntryKind.ARTIFACTS,
+            text = "",
+            seq = seq,
+            artifacts = files.toList(),
+        )
     }
 
-    private fun mergeToolEvents() {
-        if (toolEvents.isEmpty()) return
+    private fun clearPresented() {
+        presentedByTurn.clear()
+        presentedSeq.clear()
+        turnEndSeq.clear()
+    }
+
+    private fun mergeSessionEvents() {
+        if (toolEvents.isEmpty() && presentedByTurn.isEmpty()) return
         _uiState.update { state ->
-            val base = state.entries.filterNot { it.id.startsWith("tool:") }
-            val merged = (base + toolEvents.values).sortedWith(
-                compareBy<ChatEntry> { it.seq ?: Long.MAX_VALUE },
-            )
+            val base = state.entries.filterNot { it.id.startsWith("tool:") || it.id.startsWith("present:") }
+            // follow 的快照覆盖整个会话；只把「已经加载出来的这段历史」里的事件并进去，
+            // 否则列表顶部会堆一堆比最早一条消息还老的事件行。
+            val oldest = base.mapNotNull { it.seq }.minOrNull()
+            fun loaded(entry: ChatEntry) = oldest == null || (entry.seq ?: Long.MIN_VALUE) >= oldest
+            val merged = (base + toolEvents.values.filter(::loaded) + presentedEntries().filter(::loaded))
+                .sortedWith(compareBy<ChatEntry> { it.seq ?: Long.MAX_VALUE })
             state.copy(entries = merged)
         }
     }
@@ -352,7 +423,61 @@ class BotChatViewModel(
                 recomputeApprovals()
             }
 
+            // 会话状态：一轮开始 / 会话回到空闲（dsh-Go `SessionStatusEvent`）。
+            is DshHostEvent.Emit -> handleEmitEvent(event)
+
             else -> Unit
+        }
+    }
+
+    /**
+     * `$events` 里我们关心的广播事件。
+     *
+     * `api-session/status [sessionId, running]` 是本对话「还在跑吗」的权威答案；
+     * `api-session/added` 带整份会话摘要（含 `running`），用来给刚连上时补状态。
+     */
+    private fun handleEmitEvent(event: DshHostEvent.Emit) {
+        val args = event.args
+        when (event.event) {
+            "api-session/status" -> {
+                val id = args.optString(0)
+                if (id.isEmpty()) return
+                val running = args.optBoolean(1, false)
+                sessionRunningById[id] = running
+                if (id == sessionId) applySessionRunning(running)
+            }
+
+            "api-session/added" -> {
+                val summary = args.optJSONObject(0) ?: return
+                val id = summary.optString("sessionId")
+                if (id.isEmpty()) return
+                sessionRunningById[id] = summary.optBoolean("running", false)
+                if (id == sessionId) applySessionRunning(sessionRunningById.getValue(id))
+            }
+        }
+    }
+
+    /** 会话状态变了：跑起来就刷状态行，停下了立刻收掉停止键和活动行。 */
+    private fun applySessionRunning(running: Boolean) {
+        if (running) {
+            _uiState.update { if (it.running) it else it.copy(running = true, stopVisible = true) }
+            refreshBotStatus()
+            return
+        }
+        runFinishedAt = System.nanoTime()
+        runningWatchJob?.cancel()
+        clearStreaming()
+        _uiState.update {
+            if (!it.running && !it.stopVisible && it.activity == null) {
+                it
+            } else {
+                it.copy(
+                    running = false,
+                    stopVisible = false,
+                    activity = null,
+                    waitingForReply = false,
+                )
+            }
         }
     }
 
@@ -559,9 +684,10 @@ class BotChatViewModel(
                 }
                 clearStreaming()
                 loadedOnce = true
-                mergeToolEvents()
+                mergeSessionEvents()
                 // 刚学到这个 Bot 当前用的 DSH 会话 id：事件流里的请求靠它认领。
                 recomputeApprovals()
+                refreshBotStatus()
             }.onFailure { failure ->
                 _uiState.update { state ->
                     state.copy(
@@ -609,6 +735,8 @@ class BotChatViewModel(
                         )
                     }
                     earlier.forEach { seen.add(it.id) }
+                    // 翻到更早的一页后，那一页对应的事件行（工具调用/产物卡）也要补进来。
+                    mergeSessionEvents()
                 }
                 .onFailure { failure ->
                     _uiState.update { it.copy(loadingEarlier = false, error = describeChatError(failure)) }
@@ -746,16 +874,13 @@ class BotChatViewModel(
             }
             val isMain = botId in mainIds
             val work = state.optJSONObject("work")
-            val stateRunning = if (isGroup) {
+            val workRunning = if (isGroup) {
                 val rooms = work?.optJSONObject("rooms")
                 (rooms?.optJSONArray(botId)?.length() ?: 0) > 0
             } else {
                 work?.optJSONObject("bots")?.has(botId) == true
             }
-            val running = stateRunning || (
-                runStartedAt > runFinishedAt &&
-                    System.nanoTime() - runStartedAt < RUNNING_OPTIMISTIC_NS
-                )
+            val running = runningNow(workRunning)
             val activity = parseChatActivity(
                 state = state,
                 botId = botId,
@@ -763,6 +888,8 @@ class BotChatViewModel(
                 isGroup = isGroup,
                 running = running,
             )
+            val team = DsBotParser.teamMembers(state)
+            val rooms = DsBotParser.teamRooms(state)
             val news = state.optJSONObject("memoryNews")?.optJSONObject(botId)
             val newsAt = news?.optLong("at", 0L) ?: 0L
             val recentNews = newsAt > 0L && System.currentTimeMillis() - newsAt < 5 * 60_000L
@@ -786,10 +913,29 @@ class BotChatViewModel(
                     running = running,
                     stopVisible = running,
                     activity = activity,
+                    teamMembers = team,
+                    teamRooms = rooms,
                 )
             }
             recomputeApprovals()
         }
+    }
+
+    /**
+     * 这一轮还在跑吗。
+     *
+     * 优先用 DSH 的会话状态（权威）；还没收到过就退回 DS Bot 的 `work`；
+     * 刚发出消息的一小段时间内本地的乐观状态压过一切（别让按钮闪）。
+     */
+    private fun runningNow(workRunning: Boolean): Boolean {
+        val optimistic = runStartedAt > runFinishedAt &&
+            System.nanoTime() - runStartedAt < RUNNING_OPTIMISTIC_NS
+        if (optimistic) return true
+        sessionId?.let { id -> sessionRunningById[id] }?.let { return it }
+        // 会话事件里最后一条回合边界是 turn/end → 这一轮已经结束：
+        // DS Bot 的 `work` 偶尔没清干净，用它压住（重启/断线漏掉状态事件时靠这条兜底）。
+        if (lastTurnEndSeq > lastTurnStartSeq) return false
+        return workRunning
     }
 
     /** 应答一条审批：允许一次 / 拒绝。统一走 DS Bot 的 `approval-answer`。 */
@@ -845,6 +991,8 @@ class BotChatViewModel(
     fun stopRunning(onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
         runFinishedAt = System.nanoTime()
+        // 本地先认「已经停下」：引擎的会话状态事件随后会确认，不让停止键闪回来。
+        sessionId?.let { sessionRunningById[it] = false }
         clearStreaming()
         runningWatchJob?.cancel()
         _uiState.update {
@@ -877,11 +1025,12 @@ class BotChatViewModel(
                 delay(1_000)
                 val state = runCatching { connection.bot("state") }.getOrNull() ?: continue
                 val work = state.optJSONObject("work")
-                val running = if (isGroup) {
+                val workRunning = if (isGroup) {
                     (work?.optJSONObject("rooms")?.optJSONArray(botId)?.length() ?: 0) > 0
                 } else {
                     work?.optJSONObject("bots")?.has(botId) == true
                 }
+                val running = runningNow(workRunning)
                 if (running) {
                     idlePolls = 0
                     refreshBotStatus()

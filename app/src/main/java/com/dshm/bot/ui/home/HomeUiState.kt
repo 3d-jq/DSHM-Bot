@@ -30,6 +30,13 @@ data class RoomMemberUi(
     val role: String? = null,
 )
 
+/** 团队里的一个群聊（事件行认群用：`阅读群聊` 要画成员头像堆叠）。 */
+data class TeamRoomUi(
+    val id: String,
+    val name: String,
+    val members: List<RoomMemberUi>,
+)
+
 /** 主界面状态：单一数据源，UI 只渲染，不判断业务。 */
 data class HomeUiState(
     val isLoading: Boolean = true,

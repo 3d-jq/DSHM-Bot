@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import org.json.JSONArray
 import org.json.JSONObject
 import com.dshm.bot.domain.model.BotShapeDefaults
+import com.dshm.bot.domain.model.BotInks
 import com.dshm.bot.ui.home.RoomMemberUi
 
 data class RoomMemberOption(val id: String, val name: String)
@@ -64,7 +65,9 @@ fun parseRoomSettings(state: JSONObject, roomId: String): RoomSettingsUi {
                         id = id,
                         name = item.optString("name").ifEmpty { id },
                         role = item.optString("role").takeIf { it.isNotBlank() },
-                        inkId = item.optString("color").takeIf { it.isNotEmpty() },
+                        // 对齐 DS Bot `colorOf`：没手选颜色时按 id 取默认色。
+                        inkId = item.optString("color").takeIf { BotInks.isColor(it) }
+                            ?: BotInks.defaultColorId(id),
                         avatarImage = avatar?.optString("image")?.takeIf { it.isNotEmpty() },
                         avatarShape = avatar?.optString("shape")?.takeIf { it.isNotEmpty() }
                             ?: BotShapeDefaults.shapeFor(id),

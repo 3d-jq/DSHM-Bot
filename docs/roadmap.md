@@ -316,3 +316,106 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   后续要按 DS Bot 的 `bt-group-time` / `bt-utime` / `bt-time-sep` 补回。
 - ⬜ **工具调用事件（Messaged / Created group / Posted in）**：数据来自 `session/follow`
   的 `tool/call`，当前只接了部分事件；要补需要打开并按会话合并 `session/follow` 流。
+
+### 交付文件链路（2026-11-08，本轮）
+
+「让 Bot 做 PPT / 做文件」这条链路：DSH 的 `present` 工具在对话记录里追加一条持久事件
+`deliverables/presented`（`{turn, callId, files:[{path, description?}]}`），官方网页前端
+（`@deepseek-ai/dsh-client-ui-deliverables`）据此在一轮结束处画产物卡。我们之前既没有这张卡，
+也没有把文件取出手机的路径。
+
+- ☑️ `Deliverables.kt`：解析 `deliverables/presented`，校验口径照 dsh-Go
+  `packages/dsh_client/lib/src/deliverables.dart`（`turn` 必须是 >= 1 的整数、`callId` 非空、
+  `files` 是数组；坏条目跳过但不影响其他条目）；单测 `DeliverablesTest`。
+- ☑️ 产物卡 `ArtifactCard.kt`：`▣ 交付了 N 个文件` + 每行类型图标 / 文件名 / 说明，
+  收起时最多 4 个、多出来的走「全部 N 个文件 / 收起」。
+- ☑️ 取文件：`WorkspaceFilesApi`（`workspaceFiles/stat` → 绝对路径与大小）+
+  `DshClient.readFileBytes`（`GET /api/file?path=<绝对路径>`，路由由
+  `@deepseek-ai/dsh-api-session-controller` 提供，路径必须绝对、超限回 413）。
+  字节落到 `cacheDir/artifacts/`，FileProvider 已加该路径。
+- ☑️ 一行上的动作：打开 / 用其他应用打开 / 分享 / 保存到「下载」（API 29+ 走 MediaStore）/ 复制路径。
+  取不到时在说明行里原地显示原因（不在工作目录、超过上限、没应用能打开…）。
+- ☑️ 单聊订阅 `session/follow` 时不只收工具事件，也收交付声明；快照窗口从 50 提到 200，
+  否则几轮之前的产物卡查不到（DS Bot 的 `chat` 历史不带交付声明）。
+- ⬜ **群聊产物**：成员 Bot 的 `present` 落在成员自己的会话里，群会话只有 `group_relay`；
+  DS Bot 网页版的群消息也不画产物卡，本轮不做。
+- ⬜ **没有 `present` 的轮次**：官方还有「这一轮生成的文件」兜底（按文件变更事件推），未做。
+- ⬜ **`show_view` 视图卡**：DS Bot `chat` 会返回 `kind: "view"` 条目（`show_view` 工具），
+  我们仍然丢掉；要做需要画视图蓝图（text/metric/table/chart/progress/callout/sources/html）。
+
+### 运行状态与事件行（2026-11-08，第二轮）
+
+- ☑️ 去掉对话里的「新消息」分隔（用户要求；`chat_new_messages` 字符串一并删掉）。
+- ☑️ **一轮结束的判定**：改用 DSH 的会话状态。mux 的 `api-session/status [sessionId, running]`
+  是权威信号（DS Bot 网页端的活动行也读它：`useSessionStatus(map.get(sessionId)?.running)`），
+  另有 `api-session/added`（会话摘要带 `running`）兜底。之前只看 DS Bot `state.work.bots`，
+  它没清干净时停止键和活动行会一直挂在界面上。
+  第三重兜底：`session/follow` 里最后一条回合边界是 `turn/end` 时按「已结束」处理
+  （重启/断线漏掉状态事件时用得上）。
+- ☑️ 事件行认人：relay 事件（`role = request / reply / report / stopped`）里的 `botId` 是**对方**
+  的会话 id，之前一律套本对话 Bot 的头像和名字（「回复来自 大总管」这类错法）。
+  现在先用 team lookup（`DsBotParser.teamMembers(state)`，Bot id 就是会话 id）认人，
+  认不出来就只显示文字；`senderName` 为 `You`（DS Bot 认不出对方时的占位）也不当名字用。
+- ☑️ 补齐 DS Bot 会命名的团队级工具事件：`list_bots` / `read_own_chat` / `recall` / `list_secrets`，
+  `message_bot` 文案对齐 DS Bot `toolActivity`（`Asking {name}` → 「询问 X」）。
+- ☑️ **根因（2026-11-08 晚）**：`session/follow` 的网关参数只认 `{request:{address,maxMessages}}`，
+  我们之前平铺 `{address,maxMessages}`，整条流被 `gateway/arguments-invalid` 打回 ——
+  所以工具事件和产物卡**一次都没收到过**（`onEnd` 只把 streamId 清空，静默失败）。
+  现在按 dsh-Go `SessionEventStream.follow` 的包法传 `request`，并把流结束原因写进 `DshMuxLog`。
+- ☑️ follow 的快照覆盖整个会话：只把「已加载出来的这段历史」内的事件并进列表
+  （按最早一条消息的 seq 截断），翻更早的页后再并一次。否则列表顶部会堆一堆更老的事件行。
+- ☑️ relay 事件行可点：点开对方 Bot 的对话（DS Bot 的 `EventLine` 用 `openExchange` 打开双方来往）。
+
+### 与 DS Bot 的差距清单（2026-11-08 全面对比）
+
+对照 `app/src/main/assets/ds-bot/client.js` 的插槽注册（`shadow(...)`）与各组件。
+状态：☑️ 已对齐 / 🟡 部分 / ⬜ 未做。
+
+**对话消息流**
+- ☑️ 「Bot 间对话」（2026-11-08 第四轮）：点事件行（消息发给了 X / 回复来自 X / 叫停了 X）
+  打开 `exchange {a,b}` 的记录 —— 主机记下的每一次 Bot→Bot 投递，配 `exchange-text` 取全文，
+  打开时每 2 秒刷新。壳子按本 App 习惯做**底部面板**（屏幕 80%），内容照 DS Bot
+  `ExchangeDialog`（`[头像] A ⇄ [头像] B` 胶囊 + 30 分钟日期分隔 + Markdown 气泡）。
+- ☑️ 工具事件行（2026-11-08 第三轮）：`message_bot / stop_bot / create_bot / update_bot`
+  带目标 Bot 的头像、可点开对方对话（DS Bot `renderCall` 的 Messaged/Stopped/Created/Updated）；
+  `read_group_chat` 带群聊成员头像堆叠；`remember / forget` 用 DS Bot 的 MemoryIcon，
+  文案分「团队 / 自己 / 另一个 Bot」（`ToolEventLine.kt` + `ToolEventLineTest`）。
+- ☑️ 头像颜色：`state.bots[].color` 为空（没手选过颜色）时按 **Bot id 取默认色**
+  （DS Bot `colorOf`：`isColor(color) ? color : defaultColor(id)`）。
+  之前直接回落灰色，所以小助手在群头像堆叠 / 成员选择器里是灰的。
+  修在 `DsBotParser.inkOf` 与 `parseRoomSettings`，单测覆盖。
+- ⬜ 工具卡 `ToolCell`：`ask_user`（提问卡）、`request_secret`（密钥卡）、`show_view`（视图卡）
+  是可交互卡片；`read_group_chat` / `remember` / `forget` 有专属样式。
+- ⬜ `group_relay` 进行中的「正在发言的成员 + 当前工具」行（`GroupReplies` 的 pending）。
+- ⬜ 旁路任务卡 `BtwCardView` + `BtwDock`（`state.btwCards`）。
+- ⬜ 待办卡悬浮在输入框上方：`QuestionDock` / `WidgetDock` / `SecretDock`（现在塞在消息流里）。
+- ⬜ 已回答提问 `AnsweredReply` / `SettledQuestion`。
+- ⬜ 时间分隔 `TurnTailCell`（两轮间隔 ≥30 分钟）与定时任务触发卡 `TriggerCell`。
+- 🟡 「新消息」分隔：DS Bot 用 `TurnProcessCell` 的 visit 语义；我们按用户要求先删掉，未换新语义。
+- 🟡 活动行时机：DS Bot `rowVisible` 要求「没有文字流式输出」才显示；我们现在流式时也显示。
+- 🟡 群聊 `paused` + 「继续」（`room-continue`）未接。
+- 🟡 长文折叠：DS Bot 单聊也折叠（`FOLD_HUGE`），按用户要求目前只在群聊折叠。
+
+**输入区**
+- ⬜ 成员 dock（群聊成员在输入框上方，`MemberDock`）。
+- ⬜ 模型选择 dock（输入框上方，`ModelChoiceDock`）；目前只在详情/新建页选。
+- ⬜ 输入框上方的 usage dock / btw dock（DS Bot 里 activity/usage 两个 dock 被隐藏，btw 显示）。
+- ⬜ 斜杠命令 / 技能引用（DSH 输入触发器）。
+
+**顶栏 / 主界面**
+- ⬜ 新回复药丸 `NewMessagePills`。
+- ⬜ 主界面行状态：头像状态环（running / waiting / approval）、主 Bot 徽标、未读点、置顶标记、
+  运行中那一行（`doingLine`）、Working / Waiting / Unread 文案。
+- ⬜ 侧栏 workspace/team 分组、footer 的账号 / 连接插件入口（`TeamSidebar` 等）。
+
+**详情面板**
+- ⬜ `RunStats`：`N turns · xx tok/s · cache hit xx% · context xx%`。
+- ⬜ 「复制整段对话为 Markdown」（`Share` 按钮）。
+- ⬜ more 菜单：side chat / terminal / files（DSH 右栏标签）。
+- ⬜ 浏览器 tab（Bot 专属多标签浏览器，当前仍是占位）。
+- 🟡 群详情成员列表缺实时状态（working / approval）。
+
+**其它**
+- ⬜ `request_secret` 密钥卡 + 设置里的 Secrets 页（Bot 只拿到变量名）。
+- ⬜ `/side` 侧聊。
+- ⬜ 会话搜索（`session/search`）与命令面板 `CommandPalette`。

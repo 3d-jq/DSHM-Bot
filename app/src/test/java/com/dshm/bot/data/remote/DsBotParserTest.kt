@@ -1,6 +1,7 @@
 package com.dshm.bot.data.remote
 
 import com.dshm.bot.domain.model.AvatarGlyph
+import com.dshm.bot.domain.model.BotInks
 import com.dshm.bot.domain.model.BotShapeDefaults
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -11,6 +12,34 @@ import org.junit.Test
 
 /** DS Bot `state` → 列表行：形状、颜色、隐藏项、缺省值都不能悄悄漂移。 */
 class DsBotParserTest {
+
+    @Test
+    fun fallsBackToTheIdDefaultWhenABotHasNoColour() {
+        val state = JSONObject(
+            """
+            {
+              "bots": [
+                {"id": "bot-pink", "name": "小助手", "color": "", "avatar": null},
+                {"id": "bot-red", "name": "红", "color": "red"}
+              ],
+              "rooms": [{"id": "room-1", "name": "群", "members": ["bot-pink", "bot-red"]}]
+            }
+            """.trimIndent(),
+        )
+
+        val rows = DsBotParser.parseState(state)
+        // DS Bot `colorOf`：没手选颜色时按 id 取默认色，不是灰色。
+        assertEquals(BotInks.defaultColorId("bot-pink"), rows[0].inkId)
+        assertEquals("red", rows[1].inkId)
+        // 群成员用的是同一份身份表：群头像里的颜色要和行里一致。
+        val members = rows.first { it.isGroup }.roomMembers
+        assertEquals(BotInks.defaultColorId("bot-pink"), members[0].inkId)
+        assertEquals("red", members[1].inkId)
+        assertEquals(
+            BotInks.defaultColorId("bot-pink"),
+            DsBotParser.teamMembers(state).first { it.id == "bot-pink" }.inkId,
+        )
+    }
 
     @Test
     fun mapsBotsAndRoomsIntoRows() {
@@ -103,7 +132,7 @@ class DsBotParserTest {
     }
 
     @Test
-    fun invalidColorsAreDroppedAndKnownFormsAreKept() {
+    fun unknownColorsFallBackToTheIdDefaultAndKnownFormsAreKept() {
         val rows = DsBotParser.parseState(
             JSONObject(
                 """
@@ -116,10 +145,11 @@ class DsBotParserTest {
                 """.trimIndent(),
             ),
         )
-        assertNull(rows[0].inkId)
+        // 认不出来的颜色（和没写颜色）都按 id 取默认色 —— DS Bot `colorOf` 的口径。
+        assertEquals(BotInks.defaultColorId("a"), rows[0].inkId)
         assertEquals("#AABBCC", rows[1].inkId)
         assertEquals("kimi", rows[2].inkId)
-        assertNull(rows[3].inkId)
+        assertEquals(BotInks.defaultColorId("d"), rows[3].inkId)
     }
 
     @Test

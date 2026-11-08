@@ -107,6 +107,14 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
      * 与 dsh_client 的 DsBot API 一致。
      */
     suspend fun bot(endpoint: String, payload: JSONObject = JSONObject()): JSONObject =
+        botValue(endpoint, payload) as? JSONObject ?: JSONObject()
+
+    /**
+     * 同 [bot]，但保留原始 `value` 的形状（数组 / 布尔 / 字符串）。
+     *
+     * DS Bot 的 `exchange` 返回的是数组，`optJSONObject` 会把它吞成空对象。
+     */
+    suspend fun botValue(endpoint: String, payload: JSONObject = JSONObject()): Any? =
         withContext(Dispatchers.IO) {
             val body = JSONObject()
                 .put("endpoint", endpoint)
@@ -136,7 +144,7 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                             details = error?.optJSONObject("details"),
                         )
                     }
-                    response.optJSONObject("value") ?: JSONObject()
+                    response.opt("value")
                 } finally {
                     connection.disconnect()
                 }
@@ -191,6 +199,46 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                     name = file.optString("name").ifEmpty { name },
                     bytes = file.optLong("bytes"),
                 )
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    /**
+     * 读一个文件的内容：`GET /api/file?path=<绝对路径>`。
+     *
+     * 对齐 dsh-Go `files_api.dart` 的 HTTP 回落 —— 文件字节只有这条路径最简单可靠
+     * （`workspaceFiles/readBytes` 的 HTTP 结果是 multipart，另一个通道才用得上）。
+     * 上限由 Host 自己的图片字节上限决定（默认 20 MiB）。
+     */
+    suspend fun readFileBytes(absolutePath: String): ByteArray = withContext(Dispatchers.IO) {
+        withAuthRetry { auth ->
+            val encoded = URLEncoder.encode(absolutePath, "UTF-8").replace("+", "%20")
+            val connection =
+                (URL(endpoint.baseUrl.trimEnd('/') + "/api/file?path=" + encoded).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15_000
+                    readTimeout = 300_000
+                    setRequestProperty("Cookie", auth)
+                }
+            try {
+                val code = connection.responseCode
+                if (code == HTTP_UNAUTHORIZED) throw AuthExpiredException(code)
+                if (code !in 200..299) {
+                    val text = connection.errorStream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+                    throw DshRpcException(
+                        code = when (code) {
+                            404 -> "workspace-file/not-found"
+                            403 -> "workspace-file/not-allowed"
+                            413 -> "workspace-file/too-large"
+                            else -> "workspace-file/http-$code"
+                        },
+                        message = "/api/file: HTTP $code ${text.trim()}".trim(),
+                        details = null,
+                    )
+                }
+                connection.inputStream.use { it.readBytes() }
             } finally {
                 connection.disconnect()
             }
