@@ -26,9 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -165,6 +165,7 @@ fun MarkdownText(
     markdown: String,
     fontScale: Float,
     modifier: Modifier = Modifier,
+    mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
 ) {
     val colors = Dshm.colors
     val blocks = remember(markdown) { parseMarkdown(markdown) }
@@ -181,12 +182,12 @@ fun MarkdownText(
         blocks.forEach { block ->
             when (block) {
                 is MarkdownBlock.Paragraph -> Text(
-                    text = inlineMarkdown(block.text, colors, base),
+                    text = inlineMarkdown(block.text, colors, base, mentionMembers),
                     style = base,
                 )
 
                 is MarkdownBlock.Heading -> Text(
-                    text = inlineMarkdown(block.text, colors, base),
+                    text = inlineMarkdown(block.text, colors, base, mentionMembers),
                     style = base.copy(
                         fontSize = base.fontSize * if (block.level <= 2) 1.18f else 1.08f,
                         lineHeight = base.lineHeight * if (block.level <= 2) 1.18f else 1.08f,
@@ -199,10 +200,11 @@ fun MarkdownText(
                     number = block.number,
                     colors = colors,
                     base = base,
+                    mentionMembers = mentionMembers,
                 )
 
                 is MarkdownBlock.Quote -> Text(
-                    text = inlineMarkdown(block.text, colors, base),
+                    text = inlineMarkdown(block.text, colors, base, mentionMembers),
                     style = base.copy(
                         color = colors.textSecondary,
                         fontStyle = FontStyle.Italic,
@@ -345,6 +347,7 @@ private fun ListLine(
     number: Int?,
     colors: DshmColors,
     base: TextStyle,
+    mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Text(
@@ -357,22 +360,46 @@ private fun ListLine(
         )
         Spacer(Modifier.width(Dshm.spacing.xxs))
         Text(
-            text = inlineMarkdown(text, colors, base),
+            text = inlineMarkdown(text, colors, base, mentionMembers),
             style = base,
             modifier = Modifier.weight(1f),
         )
     }
 }
 
-/** 行内 Markdown → AnnotatedString。 */
+/** 行内 Markdown → AnnotatedString；`@名字` 会按成员颜色着色。 */
 internal fun inlineMarkdown(
     text: String,
     colors: DshmColors,
     base: TextStyle,
+    mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
 ): AnnotatedString = buildAnnotatedString {
     var index = 0
     while (index < text.length) {
         when {
+            text[index] == '@' -> {
+                val nameStart = index + 1
+                var nameEnd = nameStart
+                while (nameEnd < text.length && !text[nameEnd].isWhitespace() &&
+                    text[nameEnd] != ',' && text[nameEnd] != '。' && text[nameEnd] != '，' &&
+                    text[nameEnd] != '.' && text[nameEnd] != '？' && text[nameEnd] != '!' &&
+                    text[nameEnd] != '；'
+                ) nameEnd += 1
+                val name = text.substring(nameStart, nameEnd)
+                val member = mentionMembers.firstOrNull { it.name == name }
+                if (member != null) {
+                    withStyle(
+                        SpanStyle(color = Color(com.dshm.bot.domain.model.BotInks.color(member.inkId, colors.isDark))),
+                    ) {
+                        append(text.substring(index, nameEnd))
+                    }
+                    index = nameEnd
+                } else {
+                    append(text[index])
+                    index += 1
+                }
+            }
+
             text.startsWith("**", index) -> {
                 val end = text.indexOf("**", index + 2)
                 if (end > index) {
@@ -462,3 +489,4 @@ internal fun inlineMarkdown(
         }
     }
 }
+

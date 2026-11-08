@@ -777,6 +777,9 @@ private fun ChatMessages(
                         name = entry.author,
                         code = entry.eventCode,
                         timeMs = null,
+                        botId = entry.botId,
+                        bot = if (bot.isGroup) null else bot,
+                        members = bot.roomMembers,
                     )
                 }
                 }
@@ -887,6 +890,12 @@ private fun ChatActivityRow(
         }
     }
     val label = chatActivityLabel(shown, phraseIndex)
+    // DS Bot `bt-typing`：群聊状态行显示「正在发言的那个成员」的头像，不是群头像。
+    val speakingMember = if (bot.isGroup && shown.memberId != null) {
+        bot.roomMembers.firstOrNull { it.id == shown.memberId }
+    } else {
+        null
+    }
     val transition = rememberInfiniteTransition(label = "thinking")
     val scale by transition.animateFloat(
         initialValue = if (shown.kind == ChatActivityKind.ALERT) 1f else 0.94f,
@@ -902,7 +911,19 @@ private fun ChatActivityRow(
         horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (bot.isGroup) {
+        if (speakingMember != null) {
+            BotAvatar(
+                inkId = speakingMember.inkId,
+                glyph = AvatarGlyph.BOT,
+                avatarImage = speakingMember.avatarImage,
+                avatarShape = speakingMember.avatarShape,
+                size = Dshm.spacing.lg + Dshm.spacing.sm,
+                modifier = Modifier.graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+            )
+        } else if (bot.isGroup) {
             RoomAvatar(
                 members = bot.roomMembers,
                 size = Dshm.spacing.lg + Dshm.spacing.sm,
@@ -1077,7 +1098,8 @@ private fun BotBubble(
     val avatarSize = Dshm.spacing.lg + Dshm.spacing.xs
     val context = LocalContext.current
     var expanded by remember(text) { mutableStateOf(false) }
-    val collapsible = text.length > 600
+    // DS Bot 群聊才有「显示全部 / 收起」；单 Bot 不折叠。
+    val collapsible = isGroup && text.length > 600
 
     val bubble: @Composable () -> Unit = {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -1100,7 +1122,7 @@ private fun BotBubble(
                         )
                         .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
                 ) {
-                    MarkdownText(markdown = text, fontScale = fontScale)
+                    MarkdownText(markdown = text, fontScale = fontScale, mentionMembers = members)
                 }
                 if (collapsible) {
                     androidx.compose.material3.HorizontalDivider(color = Dshm.colors.divider)
@@ -1157,7 +1179,12 @@ private fun BotBubble(
                 Text(
                     text = name,
                     style = Dshm.typography.rowTitle.copy(fontSize = 13.sp),
-                    color = Dshm.colors.textPrimary,
+                    // DS Bot 群名行用成员自己的 BotInk 色，不是统一黑。
+                    color = member?.let {
+                        androidx.compose.ui.graphics.Color(
+                            com.dshm.bot.domain.model.BotInks.color(it.inkId, Dshm.colors.isDark),
+                        )
+                    } ?: Dshm.colors.textPrimary,
                 )
                 if (isAdmin) {
                     Spacer(Modifier.width(Dshm.spacing.xs))
@@ -1201,8 +1228,18 @@ private fun EventLine(
     name: String? = null,
     code: String? = null,
     timeMs: Long? = null,
+    botId: String? = null,
+    bot: ChatRowUi? = null,
+    members: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
 ) {
-    val label = eventLineLabel(kind, name, text, code)
+    val member = members.firstOrNull { it.id == botId }
+    val subject: Any? = if (bot != null && bot.isGroup) member else bot
+    val subjectName = when (subject) {
+        is com.dshm.bot.ui.home.RoomMemberUi -> subject.name
+        is ChatRowUi -> subject.name
+        else -> name
+    }
+    val label = eventLineLabel(kind, subjectName, text, code)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1210,10 +1247,36 @@ private fun EventLine(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (subject != null) {
+            if (subject is com.dshm.bot.ui.home.RoomMemberUi) {
+                BotAvatar(
+                    inkId = subject.inkId,
+                    glyph = AvatarGlyph.BOT,
+                    avatarImage = subject.avatarImage,
+                    avatarShape = subject.avatarShape,
+                    size = Dshm.spacing.lg,
+                )
+            } else {
+                @Suppress("UNCHECKED_CAST")
+                val row = subject as ChatRowUi
+                BotAvatar(
+                    inkId = row.inkId,
+                    glyph = row.glyph,
+                    avatarImage = row.avatarImage,
+                    avatarShape = row.avatarShape,
+                    size = Dshm.spacing.lg,
+                )
+            }
+            Spacer(Modifier.width(Dshm.spacing.xs))
+        }
         Text(
             text = label,
             style = Dshm.typography.rowTime,
-            color = Dshm.colors.textTertiary,
+            color = when (subject) {
+                is com.dshm.bot.ui.home.RoomMemberUi -> Dshm.colors.textSecondary
+                is ChatRowUi -> Dshm.colors.textSecondary
+                else -> Dshm.colors.textTertiary
+            },
             textAlign = TextAlign.Center,
             modifier = Modifier.weight(1f, fill = false),
         )

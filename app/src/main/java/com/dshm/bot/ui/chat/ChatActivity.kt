@@ -22,6 +22,8 @@ data class ChatActivity(
     val label: String?,
     val startedAtMs: Long?,
     val waitingForApproval: Boolean = false,
+    /** 群聊时当前正在发言的成员 id；单 Bot 为 null。 */
+    val memberId: String? = null,
 )
 
 /** DS Bot `ActivityIndicator` 的状态行文案与最短换词间隔。 */
@@ -147,6 +149,11 @@ fun parseChatActivity(
         label = label,
         startedAtMs = startedAt,
         waitingForApproval = waiting,
+        memberId = if (isGroup) {
+            doing?.optString("botId")?.takeIf { it.isNotEmpty() }
+        } else {
+            null
+        },
     )
 }
 
