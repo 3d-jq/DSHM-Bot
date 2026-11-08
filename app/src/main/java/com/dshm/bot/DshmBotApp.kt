@@ -63,6 +63,10 @@ import com.dshm.bot.ui.settings.BackgroundSettingsScreen
 import com.dshm.bot.ui.settings.PluginMarketViewModel
 import com.dshm.bot.ui.settings.ScheduledTasksScreen
 import com.dshm.bot.ui.settings.ScheduledTasksViewModel
+import com.dshm.bot.ui.settings.SecretsScreen
+import com.dshm.bot.ui.settings.ConnectorsScreen
+import com.dshm.bot.ui.settings.CapabilitiesScreen
+import com.dshm.bot.ui.settings.UsageScreen
 import com.dshm.bot.ui.settings.ChatFontScreen
 import com.dshm.bot.ui.settings.EngineSettingsScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
@@ -693,6 +697,26 @@ fun DshmBotApp(
 
                     SettingsPageId.SCHEDULES -> ScheduledTasksScreen(
                         viewModel = scheduledTasksViewModel,
+                        onBack = close,
+                    )
+
+                    SettingsPageId.SECRETS -> SecretsScreen(
+                        endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                        onBack = close,
+                    )
+
+                    SettingsPageId.CONNECTORS -> ConnectorsScreen(
+                        endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                        onBack = close,
+                    )
+
+                    SettingsPageId.CAPABILITIES -> CapabilitiesScreen(
+                        endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                        onBack = close,
+                    )
+
+                    SettingsPageId.USAGE -> UsageScreen(
+                        endpoint = (engineState as? RuntimeState.Running)?.endpoint,
                         onBack = close,
                     )
 

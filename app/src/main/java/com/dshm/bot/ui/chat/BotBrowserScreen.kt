@@ -51,10 +51,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.components.FloatingIconButton
 
 /**
  * Bot 的浏览器：全屏页。面板里的「浏览器」分类直接内嵌 [BotBrowserPanel]，这一页是它的
@@ -83,6 +85,8 @@ fun BotBrowserScreen(
                 ?: botName?.takeIf { it.isNotBlank() }
                 ?: stringResource(R.string.browser_title),
             onBack = onBack,
+            onReload = session?.let { current -> { current.reload() } },
+            reloadEnabled = session?.activeTab() != null,
         )
         BotBrowserPanel(
             session = session,
@@ -305,29 +309,41 @@ internal fun BotBrowserPanel(
 private fun BrowserTopBar(
     title: String,
     onBack: () -> Unit,
+    onReload: (() -> Unit)? = null,
+    reloadEnabled: Boolean = true,
 ) {
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(Dshm.spacing.topBarHeight)
-            .padding(horizontal = Dshm.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
     ) {
-        BrowserIcon(
+        FloatingIconButton(
             icon = R.drawable.ic_lucide_arrow_left,
-            description = stringResource(R.string.action_back),
+            contentDescription = stringResource(R.string.action_back),
             onClick = onBack,
+            modifier = Modifier.align(Alignment.CenterStart),
         )
         Text(
             text = title,
-            style = Dshm.typography.screenTitle,
+            style = Dshm.typography.pageTitle,
             color = Dshm.colors.textPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
             modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = Dshm.spacing.sm),
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .padding(horizontal = Dshm.spacing.iconButton + Dshm.spacing.lg),
         )
+        if (onReload != null) {
+            FloatingIconButton(
+                icon = R.drawable.ic_lucide_refresh_cw,
+                contentDescription = stringResource(R.string.browser_reload),
+                onClick = onReload,
+                enabled = reloadEnabled,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
     }
 }
 

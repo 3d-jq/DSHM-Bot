@@ -89,12 +89,8 @@ fun toolEventLine(
             target?.takeUnless { isError },
         )
 
-        "read_own_chat" -> ToolEventLine("翻看了自己的聊天记录")
-        "list_bots" -> ToolEventLine("查看了团队")
-        "list_secrets" -> ToolEventLine("查看了密钥")
-
-        // 浏览器动作和「更新记忆」不进对话：活动状态栏已经在显示，
-        // 每读一次、滚一下都来一行会把对话冲乱。
+        // 「看了一眼」类的动作（看团队 / 看密钥 / 翻自己的记录）、浏览器动作、
+        // 更新记忆都不进对话：活动状态栏已经在显示，多一行只会把对话冲乱。
         else -> null
     }
 }

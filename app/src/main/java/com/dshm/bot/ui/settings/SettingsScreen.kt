@@ -177,6 +177,35 @@ fun SettingsScreen(
             }
         }
 
+        // DS Bot 团队设置（对齐网页端的 Secrets / Connectors 两页）。
+        item {
+            SettingsSection(title = stringResource(R.string.settings_group_team)) {
+                SettingsRow(
+                    title = stringResource(R.string.settings_team_secrets),
+                    icon = R.drawable.ic_lucide_key_round,
+                    onClick = { onOpenPage(SettingsPageId.SECRETS) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_team_connectors),
+                    icon = R.drawable.ic_lucide_server,
+                    onClick = { onOpenPage(SettingsPageId.CONNECTORS) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_team_capabilities),
+                    icon = R.drawable.ic_lucide_package_search,
+                    onClick = { onOpenPage(SettingsPageId.CAPABILITIES) },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.settings_team_usage),
+                    icon = R.drawable.ic_lucide_gauge,
+                    onClick = { onOpenPage(SettingsPageId.USAGE) },
+                )
+            }
+        }
+
         item {
             SettingsSection(title = stringResource(R.string.settings_group_appearance)) {
                 Box(Modifier.onGloballyPositioned { themeAnchorHeight = it.size.height }) {

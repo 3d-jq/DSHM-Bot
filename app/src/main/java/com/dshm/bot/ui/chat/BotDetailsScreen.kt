@@ -234,7 +234,6 @@ fun BotDetailsScreen(
                 SettingsRow(
                     title = info?.name ?: bot.name,
                     value = usageLabel(state.usageTokens, state.cacheHit),
-                    enabled = false,
                 )
             }
         }
@@ -243,7 +242,7 @@ fun BotDetailsScreen(
         runStatsLine?.let { label ->
             item {
                 SettingsSection(title = stringResource(R.string.bot_settings_context)) {
-                    SettingsRow(title = label, enabled = false)
+                    SettingsRow(title = label)
                 }
             }
         }
@@ -798,7 +797,6 @@ fun BotSettingsSheet(
                 SettingsRow(
                     title = info?.name ?: bot.name,
                     value = usageLabel(state.usageTokens, state.cacheHit),
-                    enabled = false,
                 )
             }
 
@@ -806,7 +804,7 @@ fun BotSettingsSheet(
             runStatsLabel(state.runStats)?.let { label ->
                 Spacer(Modifier.height(Dshm.spacing.xxl))
                 SettingsSection(title = stringResource(R.string.bot_settings_context)) {
-                    SettingsRow(title = label, enabled = false)
+                    SettingsRow(title = label)
                 }
             }
 

@@ -167,7 +167,6 @@ fun RoomSettingsScreen(
                     value = info?.relayLimit?.toString()
                         ?: info?.relayLimitDefault?.toString()
                         ?: stringResource(R.string.settings_value_default),
-                    enabled = false,
                 )
             }
         }
@@ -293,7 +292,6 @@ fun RoomSettingsScreen(
                 SettingsRow(
                     title = info?.name ?: row.name,
                     value = usageLabel(state.usageTokens, state.cacheHit),
-                    enabled = false,
                 )
             }
         }

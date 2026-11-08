@@ -240,6 +240,8 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   每个 Bot 一套标签（`MAX_TABS = 6`），支持开/关/切换、地址栏、后退/前进/刷新、系统浏览器打开、
   下载（落到应用自己的 Downloads 目录）。面板的 `browser` 分类显示标签卡（`BrowserTabsCard`）。
   ⚠️ Android WebView 的 cookie 是进程级共享的，做不到桌面版「每个 Bot 独立 storage partition」。
+- ☑️ 全屏浏览器顶栏统一成项目标准的悬浮圆钮：返回（左）+ 居中标题 + 刷新（右），
+  跟 `SettingsPage` / 对话页顶栏同一套 `FloatingIconButton`，不再用自绘的扁平顶栏。
 - ☑️ **浏览器控制（`read_browser`）**：`BrowserReadBridge` 长轮询 `browser-wait {clientId, open}`，
   收到读页请求后在 WebView 里跑 `READ_PAGE_SCRIPT`（可见文本 → Markdown，链接/控件标 `[#n]`，
   带 `items[{role,name,href,value,checked,disabled}]`），再回 `browser-result {id, ok, page}`。
@@ -289,6 +291,33 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   `folder-pick`（原生选择器，本机没有）。手动输入路径保留为最后一个选项。
 - ☑️ **运行统计**：`run-stats` → `N turns · xx tok/s · Cache hit xx% · Context xx%`，
   显示在详情页用量区块（DS Bot `runStatsOf` 同一套算法）。
+
+### DS Bot 团队设置（2026-11-08，第十四轮）
+
+- ☑️ 设置首页新增「团队」组，先落两页（对齐网页端 `SETTINGS_PAGES` 的 Secrets / Connectors）：
+  - **密钥**：列表（名字 / 用途 / 谁能用 / 是否用过）；新增走 `secret-set`，
+    改用途与范围走 `secret-update`，换值走同名的 `secret-set`（同名覆盖），删除走 `secret-delete`。
+    范围支持「所有 Bot / 指定 Bot（勾选成员）」。
+  - **连接器**：`state.connectors`（GitHub 的状态 / 账号 / 错误），
+    连接走 `connector-connect {id, token}`（token 存成密钥）、断开 `connector-disconnect`、出错重试
+    `connector-retry`。
+- ☑️ **能力（Capabilities）**：能力库列表（MCP 服务 / 技能 / 组合包 + 描述 + 已挂几个 Bot）；
+  点开可给每个 Bot 开关（`bot-capability {botId, name, attached}`）、批准未批准的 stdio MCP
+  （`capability-approve`）、两次点击删除（`capability-delete`）；每个 Bot 的
+  `capabilityStatuses`（就绪 / 连接中 / 待批准 / 出错）也显示出来。
+- ☑️ **用量（Usage）**：读 `usage` 原始行（`hour / owner / model / kind / input / cacheRead /
+  cacheWrite / output / calls`），聚合放在 `TeamUsage.kt`（有单测）：
+  - 范围 chip：今天 / 7 天 / 30 天，按 `now` 推起点，`hour` 是 `2026-11-08 14` 这种字符串；
+  - 合计一行（tokens / 调用次数 / 缓存命中）+ 每天 token 柱状图（最近 14 天）；
+  - 按归属（Bot / 群聊 / Agent / 其他，按 tokens 降序）和按模型两组明细；
+  - 底部「刷新」行带「正在读历史用量…」状态。
+- 样式约定：范围切换用项目标准的 `SettingsSegmentedPill`（不要再自己画灰色胶囊）；
+  只读数据行不要传 `enabled = false` —— 那会让标题变成 `textTertiary` 的灰字，
+  只读用「不传 onClick」表达，标题保持主文字色。完整设置页 / 群面板 / 详情页的用量行已一并改掉。
+- ☑️ 刷新改成顶栏右侧悬浮圆钮（`FloatingIconButton` + `ic_lucide_refresh_cw`），扫描中禁用并在标题
+  下方显示「正在读历史用量…」，页底不再留一行刷新。
+- ⬜ 还没做：**General**（主题/强调色/消息布局是网页端 `prefs`，原生界面不适用）、
+  **Feedback**（意见反馈已有自己的入口）。
 
 ### Bot 完整设置页接线审计（2026-11-07）
 
@@ -402,7 +431,9 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   的会话 id，之前一律套本对话 Bot 的头像和名字（「回复来自 大总管」这类错法）。
   现在先用 team lookup（`DsBotParser.teamMembers(state)`，Bot id 就是会话 id）认人，
   认不出来就只显示文字；`senderName` 为 `You`（DS Bot 认不出对方时的占位）也不当名字用。
-- ☑️ 补齐 DS Bot 会命名的团队级工具事件：`list_bots` / `read_own_chat` / `recall` / `list_secrets`，
+- ☑️ 团队级工具（`list_bots` / `read_own_chat` / `recall` / `list_secrets`）**不再画成对话里的
+  事件行**，只走活动状态行（`ChatActivity.SEARCH_TOOLS` 命中 → 「查看团队…」「翻看聊天记录…」
+  「查找中…」「查看密钥…」），避免把只有状态价值的动作刷进时间线。
   `message_bot` 文案对齐 DS Bot `toolActivity`（`Asking {name}` → 「询问 X」）。
 - ☑️ **根因（2026-11-08 晚）**：`session/follow` 的网关参数只认 `{request:{address,maxMessages}}`，
   我们之前平铺 `{address,maxMessages}`，整条流被 `gateway/arguments-invalid` 打回 ——

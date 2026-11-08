@@ -80,10 +80,9 @@ data class ChatAttachmentDraft(
 private val FOLLOW_TOOLS = setOf(
     "message_bot", "stop_bot", "create_bot", "update_bot",
     "create_group", "update_group", "delete_group", "post_to_group",
-    "read_group_chat", "read_own_chat",
-    "list_bots", "list_secrets",
-    // 浏览器动作和「更新记忆」不进对话时间线：活动状态栏已经在显示了，
-    // 每读一次、滚一下都来一行会把对话冲乱。
+    "read_group_chat",
+    // 「看了一眼」类的动作（看团队 / 看密钥 / 翻自己的记录）、浏览器动作、更新记忆
+    // 都不进对话时间线：活动状态栏已经在显示，每来一行只会把对话冲乱。
 )
 
 /** 密钥卡答完后在 dock 里多留一会儿，让「已保存 / 已允许 / 已取消」看得见。 */

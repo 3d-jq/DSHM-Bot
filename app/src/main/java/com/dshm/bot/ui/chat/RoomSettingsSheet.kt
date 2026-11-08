@@ -102,7 +102,6 @@ fun RoomSettingsSheet(
                     value = info?.admin?.let { admin ->
                         state.bots.firstOrNull { it.id == admin }?.name ?: admin
                     } ?: stringResource(R.string.room_settings_admin_none),
-                    enabled = false,
                 )
                 SettingsRowDivider()
                 SettingsRow(
@@ -112,14 +111,12 @@ fun RoomSettingsSheet(
                     } else {
                         stringResource(R.string.room_settings_mode_admin)
                     },
-                    enabled = false,
                 )
                 info?.permission?.let { permission ->
                     SettingsRowDivider()
                     SettingsRow(
                         title = stringResource(R.string.bot_settings_permission),
                         value = state.permissions.firstOrNull { it.ref == permission }?.name ?: permission,
-                        enabled = false,
                     )
                 }
             }
@@ -178,7 +175,6 @@ fun RoomSettingsSheet(
                 SettingsRow(
                     title = info?.name ?: row.name,
                     value = usageLabel(state.usageTokens, state.cacheHit),
-                    enabled = false,
                 )
             }
             Spacer(Modifier.height(Dshm.spacing.xxl))
