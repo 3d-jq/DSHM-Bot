@@ -565,3 +565,22 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   ⬜ 升到 `0.3.x` 是大动作（新依赖 `deep-view`，还多了 `skills` / `goals` / `office` / `im` 等模块），单独排期。
 - ⬜ `/side` 侧聊。
 - ⬜ 会话搜索（`session/search`）与命令面板 `CommandPalette`。
+
+### 启动体验与对话附件（2026-11-08，第十六轮）
+
+- ☑️ **启动画面**（对齐 dsh-Go `LaunchOverlay` / `LaunchMotion`）：`ui/launch/LaunchOverlay.kt`
+  - Android 12+ 系统启动画面（`values-v31/themes.xml`）用同一底色 + 同一图标，交接看不出硬切；
+  - 0–640ms 图标从系统尺寸（276dp 画布）收到 0.62 并上移；200–640ms「DSHM Bot」字标淡入升起；
+    560–1360ms 一道细光扫过图标；引擎就绪或动画播完 → 300ms 淡出；点屏幕跳过；关动画时静止；
+  - 每个进程只播一次（Activity 重建不重播）。
+- ☑️ **启动计时**：`RuntimeLauncher` 记 `app / prepare / dsh` 三段（对齐 dsh-Go `StartupTimeline`）。
+  本机实测冷启动 `app ~540ms · prepare ~45ms · dsh 7.3–8.6s`，慢在 node + dsh 自身。
+- ☑️ **NODE_COMPILE_CACHE**：guest env 加 `/root/.cache/node-compile-cache`（Node 24 的 V8 编译缓存，
+  实测约 3%，无副作用）。
+- ☑️ **接管还活着的引擎**：`RuntimeLauncher.adoptAlive` 从 `engine.log` 取回 token、确认进程与端口，
+  且 APK 更新时间 / 运行时版本没变才接管；`EngineViewModel.start` 用 `login()` 验一次再决定。
+- ☑️ **首页骨架**：引擎启动中（或首屏无缓存）铺 6 行骨架（呼吸透明度）替代「还没有内容」。
+  同时修了 `manager.state` 的 StateFlow 初值把 `Starting` 盖回去、首页误判「引擎没在启动」的问题。
+- ☑️ **对话气泡里的附件**：用户发过的图片显示缩略图（最多 3 张 + `+N`），文件显示文件卡；
+  附件在选定时就落到 `cacheDir/chat-attachments`，`ChatEntry.attachmentItems` 带路径。
+  历史回读只有文件名时仍走原来的 `📎 名字` 回退。

@@ -1,6 +1,7 @@
 package com.dshm.bot.data.runtime
 
 import android.content.Context
+import android.os.SystemClock
 import android.os.Process as AndroidProcess
 import android.system.Os
 import android.system.OsConstants
@@ -27,8 +28,28 @@ class RuntimeLauncher(
         EngineLog.init(appContext)
     }
 
+    /**
+     * 上次 App 进程被杀之后，proot/node 常常还活着。
+     *
+     * 能接上就直接接上：从 `engine.log` 取回上次的连接信息，确认进程与端口都还在，
+     * 并且这次安装的 APK / 运行时版本没变过（否则连到的是旧插件）。返回非空就说明
+     * 不用重启引擎 —— 冷启动从十几秒变成一秒。
+     */
+    fun adoptAlive(manifest: RuntimeManifest): RuntimeEndpoint? {
+        val rootfs = installer.rootfsDir
+        if (!rootfs.isDirectory) return null
+        if (engineProcesses(rootfs).isEmpty()) return null
+        val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getLong(KEY_APK_STAMP, -1L) != appStamp()) return null
+        if (prefs.getString(KEY_RUNTIME_VERSION, null) != manifest.runtimeVersion) return null
+        val endpoint = lastEndpoint() ?: return null
+        if (!listening(endpoint.baseUrl)) return null
+        return endpoint
+    }
+
     /** 启动并等待 token；[guestEnv] 是可选的 KEY=VALUE（如 TZ、API Key）。 */
     fun start(manifest: RuntimeManifest, guestEnv: List<String> = emptyList()): RuntimeEndpoint {
+        val requested = SystemClock.elapsedRealtime()
         val rootfs = installer.rootfsDir
         require(rootfs.isDirectory) { "运行时尚未安装" }
         GuestSetup.apply(rootfs)
@@ -62,6 +83,11 @@ class RuntimeLauncher(
         builder.environment()["PROOT_NO_SECCOMP"] = "1"
         val started = builder.start()
         process = started
+        val spawned = SystemClock.elapsedRealtime()
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_APK_STAMP, appStamp())
+            .putString(KEY_RUNTIME_VERSION, manifest.runtimeVersion)
+            .apply()
 
         val queue = java.util.concurrent.LinkedBlockingQueue<String>()
         val tail = ArrayDeque<String>()
@@ -86,6 +112,7 @@ class RuntimeLauncher(
             if (tail.size > 30) tail.removeFirst()
             ProotCommand.parseToken(line)?.let { endpoint ->
                 EngineLog.log("DSH is listening at ${endpoint.baseUrl}")
+                EngineLog.log("startup: ${startupLine(requested, spawned, SystemClock.elapsedRealtime())}")
                 EngineLog.log("startup: app ${EngineLog.elapsedMs()} ms (port $actualPort)")
                 return endpoint
             }
@@ -187,6 +214,45 @@ class RuntimeLauncher(
     val isRunning: Boolean
         get() = process?.isAlive == true
 
+    /** 对齐 dsh-Go `StartupTimeline.line`：进程起点 → 请求启动 → 进程拉起 → 开始监听。 */
+    private fun startupLine(requested: Long, spawned: Long, ready: Long): String {
+        val processStart = runCatching { AndroidProcess.getStartElapsedRealtime() }.getOrNull()
+        val parts = mutableListOf<String>()
+        if (processStart != null && processStart in 1..requested && requested - processStart < 30_000) {
+            parts += "app ${requested - processStart} ms"
+        }
+        parts += "prepare ${spawned - requested} ms"
+        parts += "dsh ${ready - spawned} ms"
+        return parts.joinToString(", ")
+    }
+
+    /** 从日志末尾取回上一次的 token / 端口（只看最后 64KB，日志可能很长）。 */
+    private fun lastEndpoint(): RuntimeEndpoint? {
+        val log = File(appContext.filesDir, "engine.log").takeIf { it.isFile } ?: return null
+        val text = runCatching {
+            log.inputStream().use { input ->
+                val skip = (log.length() - 64 * 1024).coerceAtLeast(0)
+                if (skip > 0) input.skip(skip)
+                input.readBytes().toString(Charsets.UTF_8)
+            }
+        }.getOrNull() ?: return null
+        return text.lineSequence().toList().asReversed()
+            .firstNotNullOfOrNull { ProotCommand.parseToken(it) }
+    }
+
+    private fun listening(baseUrl: String): Boolean = runCatching {
+        val url = java.net.URL(baseUrl)
+        val port = if (url.port > 0) url.port else 80
+        java.net.Socket().use { socket ->
+            socket.connect(java.net.InetSocketAddress("127.0.0.1", port), 400)
+        }
+        true
+    }.getOrDefault(false)
+
+    private fun appStamp(): Long = runCatching {
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).lastUpdateTime
+    }.getOrDefault(0L)
+
     /**
      * 与 dsh-Go 一致：先在 3080–3100 找空闲端口（地址稳定），全被占才用系统临时端口。
      */
@@ -203,6 +269,9 @@ class RuntimeLauncher(
 
     private companion object {
         const val DEFAULT_PORT = 3080
+        const val PREFS = "runtime-launch"
+        const val KEY_APK_STAMP = "apk-stamp"
+        const val KEY_RUNTIME_VERSION = "runtime-version"
     }
 }
 

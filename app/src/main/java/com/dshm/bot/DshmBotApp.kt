@@ -63,6 +63,7 @@ import com.dshm.bot.ui.settings.BackgroundSettingsScreen
 import com.dshm.bot.ui.settings.PluginMarketViewModel
 import com.dshm.bot.ui.settings.ScheduledTasksScreen
 import com.dshm.bot.ui.settings.ScheduledTasksViewModel
+import com.dshm.bot.ui.launch.LaunchOverlay
 import com.dshm.bot.ui.settings.SecretsScreen
 import com.dshm.bot.ui.settings.ConnectorsScreen
 import com.dshm.bot.ui.settings.CapabilitiesScreen
@@ -203,9 +204,12 @@ fun DshmBotApp(
 
     // 打开 App 自动拉起本机引擎（已安装/已停止时），不挡主界面。
     // 「引擎启动」里那个开关关掉后就不再自动拉起了。
+    val autoStartEnabled = settingsUiState.dshGo.flag(DshGoPreferences.KEY_AUTO_START_LOCAL)
+    // 自动启动开着、引擎还在拉起（或刚装好等待拉起）时，首页先出骨架，别显示「还没有内容」。
+    val engineBooting = engineState is RuntimeState.Starting ||
+        (engineState is RuntimeState.Installed && autoStartEnabled)
     LaunchedEffect(Unit) {
-        val autoStart = settingsUiState.dshGo.flag(DshGoPreferences.KEY_AUTO_START_LOCAL)
-        if (autoStart &&
+        if (autoStartEnabled &&
             (engineState is RuntimeState.Installed || engineState is RuntimeState.Stopped)
         ) {
             engineViewModel.start()
@@ -416,6 +420,7 @@ fun DshmBotApp(
                             settingsOpen = true
                         },
                         engineLabel = engineNotice,
+                        engineBooting = engineBooting,
                         onEngineClick = {
                             navForward = true
                             engineOpen = true
@@ -463,6 +468,7 @@ fun DshmBotApp(
                             settingsOpen = true
                         },
                         engineLabel = engineNotice,
+                        engineBooting = engineBooting,
                         onEngineClick = {
                             navForward = true
                             engineOpen = true
@@ -520,6 +526,7 @@ fun DshmBotApp(
                             settingsOpen = true
                         },
                         engineLabel = engineNotice,
+                        engineBooting = engineBooting,
                         onEngineClick = {
                             navForward = true
                             engineOpen = true
@@ -851,7 +858,8 @@ fun DshmBotApp(
                     navForward = true
                     settingsOpen = true
                 },
-                        engineLabel = engineNotice,
+                engineLabel = engineNotice,
+                engineBooting = engineBooting,
                         onEngineClick = {
                             navForward = true
                             engineOpen = true
@@ -909,6 +917,12 @@ fun DshmBotApp(
         botBrowserOpen = true
         navForward = true
     }
+
+    // 冷启动的启动画面：图标落定 + 字标 + 一道细光，引擎就绪或动画播完就淡出。
+    LaunchOverlay(
+        engineReady = engineState is RuntimeState.Running,
+        reduceMotion = reduceMotion,
+    )
 
     }
 }

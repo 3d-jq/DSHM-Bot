@@ -14,6 +14,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -90,6 +91,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
@@ -202,7 +204,13 @@ fun BotChatScreen(
             val draftAttachment = withContext(Dispatchers.IO) {
                 runCatching {
                     val bytes = attachContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes == null || bytes.isEmpty()) null else ChatAttachmentDraft(displayName(uri), bytes, isImage)
+                    if (bytes == null || bytes.isEmpty()) return@runCatching null
+                    val name = displayName(uri)
+                    // 留一份在缓存里：气泡里的缩略图 / 文件卡按路径读，内存里的字节发完就没了。
+                    val dir = File(attachContext.cacheDir, "chat-attachments").apply { mkdirs() }
+                    val cached = File(dir, "${System.currentTimeMillis()}-${name.replace('/', '_')}")
+                    cached.outputStream().use { it.write(bytes) }
+                    ChatAttachmentDraft(name, bytes, isImage, cached.absolutePath)
                 }.getOrNull()
             }
             if (draftAttachment == null) {
@@ -218,7 +226,11 @@ fun BotChatScreen(
             val draftAttachment = withContext(Dispatchers.IO) {
                 runCatching {
                     val bytes = file.readBytes()
-                    if (bytes.isEmpty()) null else ChatAttachmentDraft(file.name, bytes, isImage)
+                    if (bytes.isEmpty()) {
+                        null
+                    } else {
+                        ChatAttachmentDraft(file.name, bytes, isImage, file.absolutePath)
+                    }
                 }.getOrNull()
             }
             if (draftAttachment == null) {
@@ -375,9 +387,8 @@ fun BotChatScreen(
                         hint = stringResource(R.string.chat_engine_off_hint),
                     )
 
-                    state.loading && state.entries.isEmpty() -> CircularProgressIndicator(
-                        color = Dshm.colors.accent,
-                        modifier = Modifier.size(Dshm.spacing.xxl),
+                    state.loading && state.entries.isEmpty() -> ChatSkeleton(
+                        isGroup = bot.isGroup,
                     )
 
                     state.error != null && state.entries.isEmpty() -> ChatError(
@@ -835,6 +846,7 @@ private fun ChatMessages(
                         text = entry.text,
                         fontScale = fontScale,
                         attachments = entry.attachments,
+                        items = entry.attachmentItems,
                         timeMs = null,
                     )
                     ChatEntryKind.BOT -> BotBubble(
@@ -1126,6 +1138,7 @@ private fun UserBubble(
     text: String,
     fontScale: Float,
     attachments: List<String> = emptyList(),
+    items: List<ChatAttachmentItem> = emptyList(),
     timeMs: Long? = null,
 ) {
     val context = LocalContext.current
@@ -1147,6 +1160,10 @@ private fun UserBubble(
                 )
                 .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
         ) {
+            if (items.isNotEmpty()) {
+                UserAttachmentCards(items)
+                if (text.isNotBlank()) Spacer(Modifier.height(Dshm.spacing.xs))
+            }
             if (text.isNotBlank()) {
                 Text(
                     text = text,
@@ -1157,7 +1174,8 @@ private fun UserBubble(
                     color = Dshm.colors.onAccent,
                 )
             }
-            attachments.forEach { name ->
+            // 老路径（只拿到名字，没有本地文件）：保留原来的回退样子。
+            if (items.isEmpty()) attachments.forEach { name ->
                 Text(
                     text = "📎 $name",
                     style = Dshm.typography.rowTime,
@@ -1176,6 +1194,93 @@ private fun UserBubble(
         }
     }
 }
+
+/** 用户气泡里的附件：图片缩略图 + 文件卡（都画在气泡的主色底上）。 */
+@Composable
+private fun UserAttachmentCards(items: List<ChatAttachmentItem>) {
+    val images = items.filter { it.isImage }
+    val files = items.filterNot { it.isImage }
+    Column(horizontalAlignment = Alignment.End) {
+        if (images.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
+            ) {
+                images.take(MAX_USER_THUMBS).forEach { item ->
+                    UserThumb(item, Modifier.size(THUMB_SIZE))
+                }
+            }
+            if (images.size > MAX_USER_THUMBS) {
+                Text(
+                    text = "+${images.size - MAX_USER_THUMBS}",
+                    style = Dshm.typography.rowTime,
+                    color = Dshm.colors.onAccent.copy(alpha = 0.85f),
+                    modifier = Modifier.padding(top = Dshm.spacing.xxs),
+                )
+            }
+        }
+        files.forEach { item ->
+            Row(
+                modifier = Modifier
+                    .padding(top = Dshm.spacing.xs)
+                    .clip(RoundedCornerShape(Dshm.radius.sm))
+                    .background(Dshm.colors.onAccent.copy(alpha = 0.16f))
+                    .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xxs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_lucide_file_text),
+                    contentDescription = null,
+                    tint = Dshm.colors.onAccent.copy(alpha = 0.85f),
+                    modifier = Modifier.size(Dshm.spacing.md),
+                )
+                Spacer(Modifier.width(Dshm.spacing.xxs))
+                Text(
+                    text = item.name,
+                    style = Dshm.typography.rowTime,
+                    color = Dshm.colors.onAccent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** 气泡里的一张图片缩略图（方形、圆角、按高度裁切）。 */
+@Composable
+private fun UserThumb(item: ChatAttachmentItem, modifier: Modifier = Modifier) {
+    val bitmap = remember(item.path) {
+        runCatching {
+            val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
+            android.graphics.BitmapFactory.decodeFile(item.path, options)
+        }.getOrNull()
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(Dshm.spacing.sm))
+            .background(Dshm.colors.onAccent.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+        } else {
+            Icon(
+                painter = painterResource(R.drawable.ic_lucide_image),
+                contentDescription = item.name,
+                tint = Dshm.colors.onAccent.copy(alpha = 0.8f),
+                modifier = Modifier.size(Dshm.spacing.lg),
+            )
+        }
+    }
+}
+
+private const val MAX_USER_THUMBS = 3
+private val THUMB_SIZE = 96.dp
 
 /**
  * Bot 消息气泡：

@@ -16,6 +16,7 @@ import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.data.runtime.TextMasking
 import com.dshm.bot.data.runtime.buildDiagnosticsReport
 import com.dshm.bot.data.runtime.phaseName
+import com.dshm.bot.data.remote.DshClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +41,16 @@ enum class ResetKeep {
  * 通道（`src/host/browser.js` 的 `install`）。手机端那个窗口就是我们的 WebView，
  * 由 `BrowserReadBridge` 应答读页请求。
  */
-private val BROWSER_GUEST_ENV = listOf("DS_BOT_APP=1")
+/**
+ * 引擎进程的环境：
+ * - `DS_BOT_APP=1`：让 DS Bot 认为宿主有浏览器窗口（见上）；
+ * - `NODE_COMPILE_CACHE`：Node 22.8+ 的 V8 编译缓存。DSH 启动要加载大量 JS，
+ *   缓存落在 rootfs 里（跟着运行时一起持久化），第二次以后的冷启动能省一截解析/编译时间。
+ */
+private val BROWSER_GUEST_ENV = listOf(
+    "DS_BOT_APP=1",
+    "NODE_COMPILE_CACHE=/root/.cache/node-compile-cache",
+)
 
 /** 本机引擎页状态层：安装/状态交给 RuntimeManager，启动/停止交给 RuntimeLauncher。 */
 class EngineViewModel(
@@ -65,7 +75,16 @@ class EngineViewModel(
     val installedVersion: String? get() = installer.installedVersion()
 
     init {
-        viewModelScope.launch { manager.state.collect { _state.value = it } }
+        viewModelScope.launch {
+            manager.state.collect { state ->
+                // StateFlow 会给新订阅者重放当前值（Installed / NotInstalled）。它可能
+                // 晚于 start() 到达，把刚写进去的 Starting 盖回去 —— 首页就会误以为
+                // 「引擎没在启动」而显示空列表。启动中 / 运行中不让 manager 覆盖。
+                if (_state.value !is RuntimeState.Starting && _state.value !is RuntimeState.Running) {
+                    _state.value = state
+                }
+            }
+        }
     }
 
     fun install(url: String) {
@@ -76,6 +95,21 @@ class EngineViewModel(
         if (launcher.isRunning) return
         _state.value = RuntimeState.Starting
         viewModelScope.launch {
+            // 上次进程被杀后引擎可能还活着：接上比重新 boot（proot + node + dsh）快一个数量级。
+            val adopted = withContext(Dispatchers.IO) {
+                runCatching { launcher.adoptAlive(manifest) }.getOrNull()
+            }
+            if (adopted != null) {
+                val usable = withContext(Dispatchers.IO) {
+                    runCatching { DshClients.of(adopted).login() }.isSuccess
+                }
+                if (usable) {
+                    EngineLog.log("startup: adopted running engine at ${adopted.baseUrl}")
+                    _state.value = RuntimeState.Running(adopted)
+                    return@launch
+                }
+                EngineLog.log("startup: adopted engine rejected the token; restarting")
+            }
             runCatching {
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }

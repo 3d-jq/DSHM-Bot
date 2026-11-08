@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ 的系统启动画面：底色和图标与 App 自己的启动画面一致，
+         交接时只看到图标在动，不是「白底图标」→「另一张图」的硬切。 -->
+    <style name="Theme.DshmBot" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/dshm_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowSplashScreenBackground">@color/dshm_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/dshm_background</item>
+    </style>
+</resources>

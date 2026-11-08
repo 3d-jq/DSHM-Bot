@@ -65,6 +65,8 @@ data class ChatEntry(
     val botId: String? = null,
     /** 本地待发/刚发的附件名；历史回读没有附件详情时为空。 */
     val attachments: List<String> = emptyList(),
+    /** 本地发过的附件（带缓存路径）：气泡里用来画缩略图 / 文件卡。 */
+    val attachmentItems: List<ChatAttachmentItem> = emptyList(),
     /** 消息时间（毫秒）。 */
     val timeMs: Long? = null,
     /** 群聊里这条回复的耗时（毫秒）。 */
@@ -88,6 +90,15 @@ data class ChatEntry(
 data class ChatAttachmentDraft(
     val name: String,
     val bytes: ByteArray,
+    val isImage: Boolean,
+    /** 缓存的本地路径：对话气泡里的缩略图 / 文件卡按它读（历史回显时字节已经不在内存里）。 */
+    val cachePath: String? = null,
+)
+
+/** 对话气泡里的一个附件（图片画缩略图，文件画文件卡）。 */
+data class ChatAttachmentItem(
+    val name: String,
+    val path: String,
     val isImage: Boolean,
 )
 
@@ -174,7 +185,8 @@ class BotChatViewModel(
     val speechRepository: SpeechRepository? = endpoint?.let { RemoteSpeechRepository(DshClients.of(it)) }
     private val _uiState = MutableStateFlow(
         BotChatUiState(
-            loading = endpoint == null,
+            // 打开对话到 `chat` 回来之间就是「在加载」：骨架屏靠它，不能等请求回来才置上。
+            loading = true,
             engineOff = endpoint == null,
         ),
     )
@@ -650,6 +662,11 @@ class BotChatViewModel(
             kind = ChatEntryKind.USER,
             text = text,
             attachments = attachments.map { it.name },
+            attachmentItems = attachments.mapNotNull { draft ->
+                draft.cachePath?.let { path ->
+                    ChatAttachmentItem(draft.name, path, draft.isImage)
+                }
+            },
         )
         localUserEntries[requestId] = bubble
         seen.add(bubble.id)
@@ -712,7 +729,13 @@ class BotChatViewModel(
 
     private fun load(initial: Boolean) {
         val connection = client ?: return
-        if (!initial) _uiState.update { it.copy(error = null) }
+        _uiState.update { state ->
+            state.copy(
+                // 没有内容时重新拉：又回到加载态（骨架屏）；已有内容就静默刷新。
+                loading = state.entries.isEmpty(),
+                error = if (initial) state.error else null,
+            )
+        }
         viewModelScope.launch {
             runCatching {
                 connection.bot(
