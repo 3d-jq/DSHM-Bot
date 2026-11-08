@@ -389,6 +389,15 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - ⬜ `group_relay` 进行中的「正在发言的成员 + 当前工具」行（`GroupReplies` 的 pending）。
 - ⬜ 旁路任务卡 `BtwCardView` + `BtwDock`（`state.btwCards`）。
 - ⬜ 待办卡悬浮在输入框上方：`QuestionDock` / `WidgetDock` / `SecretDock`（现在塞在消息流里）。
+- 🟡 待办卡 dock（2026-11-08 第六轮）：输入框上方一道 dock，顺序照 DS Bot 的 `input.dock`
+  **提问 → 视图 → 审批**（DS Bot 把审批放在群成员条里，我们没有那一条，统一收进 dock）。
+  dock 已经是输入框 chrome 的一部分：整块高度被量出来、列表留白跟着走，卡片不压消息。
+  接上 DS Bot 自己的两条来源（之前完全没接）：`state.questions`（`ask_user` → `answer-question`）、
+  `state.views`（`show_view` → `view-reply` / `dismiss-view`）。
+  视图卡画 text / metric / progress / callout / table / sources + options / confirm / submit
+  （含 choice / toggle / number / slider 输入，`values.inputs` + `values.selected`）。
+  ⬜ 还差：`chart` / `html` 组件（显示"当前版本没画"）、公式 `{"=": …}` 联动、
+  密钥卡（`state.secretRequests` + `secret-set`）、`form` 的字段逐个渲染（现在只有提交键）。
 - ⬜ 已回答提问 `AnsweredReply` / `SettledQuestion`。
 - ⬜ 时间分隔 `TurnTailCell`（两轮间隔 ≥30 分钟）与定时任务触发卡 `TriggerCell`。
 - 🟡 「新消息」分隔：DS Bot 用 `TurnProcessCell` 的 visit 语义；我们按用户要求先删掉，未换新语义。

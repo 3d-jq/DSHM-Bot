@@ -383,49 +383,6 @@ fun BotChatScreen(
                     )
                 }
             }
-            // 审批卡片：Bot 要跑命令时，DSH 那边等着一个确认。
-            //
-            // 位置：贴在输入框**正上方**（输入框是浮在消息列表上的）。
-            // 之前没对齐，卡片跑到了屏幕顶部被顶栏盖住。
-            // 多条请求要竖着排：每张卡各自 align(BottomCenter) 会完全叠在一起，
-            // 群聊里两个成员同时等确认时就只看得到最上面那一张。
-            if (state.approvals.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(
-                            start = Dshm.spacing.lg,
-                            end = Dshm.spacing.lg,
-                            // 紧贴输入框的上沿 —— 输入框底边已经在 Box 底边了
-                            // （外层的 padding(bottom) 扣掉了输入法/系统栏），
-                            // 这里只要让开输入框自己的高度。
-                            bottom = bottomChromeHeight + Dshm.spacing.xs,
-                        ),
-                    verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
-                ) {
-                    state.approvals.forEach { approval ->
-                        ApprovalCard(
-                            approval = approval,
-                            busy = answeringApproval,
-                            onAnswer = { allow ->
-                                answeringApproval = true
-                                viewModel.answerApproval(approval, allow) { error ->
-                                    answeringApproval = false
-                                    if (error != null) chatError = error
-                                }
-                            },
-                            onAnswerQuestion = { selected ->
-                                answeringApproval = true
-                                viewModel.answerQuestion(approval, selected) { error ->
-                                    answeringApproval = false
-                                    if (error != null) chatError = error
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-            }
             if (state.error != null && state.entries.isNotEmpty()) {
                 Text(
                     text = stringResource(R.string.chat_send_failed, state.error.orEmpty()),
@@ -446,6 +403,50 @@ fun BotChatScreen(
                         .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.xs),
                 )
             }
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(
+                        start = Dshm.spacing.lg,
+                        end = Dshm.spacing.lg,
+                        bottom = composerBottomPadding,
+                    )
+                    // 放在 padding 内层，测到的是「待办 dock + 输入框」整块的自身高度
+                    // （不含下面那段留白）—— 列表留白要跟着它走，卡片才不会压住消息。
+                    .onSizeChanged { size -> composerHeight = with(density) { size.height.toDp() } },
+            ) {
+            // 待办 dock：提问 / 视图 / 审批（DS Bot 的 `conversation.input.dock`）。
+            PendingDock(
+                approvals = state.approvals,
+                questions = state.pendingQuestions,
+                views = state.pendingViews,
+                busy = answeringApproval || state.answeringPending,
+                onAnswerApproval = { approval, allow ->
+                    answeringApproval = true
+                    viewModel.answerApproval(approval, allow) { error ->
+                        answeringApproval = false
+                        if (error != null) chatError = error
+                    }
+                },
+                onAnswerQuestionApproval = { approval, selected ->
+                    answeringApproval = true
+                    viewModel.answerQuestion(approval, selected) { error ->
+                        answeringApproval = false
+                        if (error != null) chatError = error
+                    }
+                },
+                onAnswerQuestion = { card, selected, custom ->
+                    viewModel.answerChatQuestion(card, selected, custom) { error ->
+                        if (error != null) chatError = error
+                    }
+                },
+                onAnswerView = { card, action, values ->
+                    viewModel.answerChatView(card, action, values) { error ->
+                        if (error != null) chatError = error
+                    }
+                },
+                onDismissView = { card -> viewModel.dismissChatView(card) },
+            )
             ChatComposer(
                 value = draft,
                 onValueChange = { draft = it },
@@ -476,16 +477,8 @@ fun BotChatScreen(
                     stopError = null
                     viewModel.stopRunning { error -> stopError = error }
                 },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(
-                        start = Dshm.spacing.lg,
-                        end = Dshm.spacing.lg,
-                        bottom = composerBottomPadding,
-                    )
-                    // 放在 padding 内层，测到的才是输入框自身高度（不含下面那段留白）。
-                    .onSizeChanged { size -> composerHeight = with(density) { size.height.toDp() } },
             )
+            }
         }
     }
     if (quickSettings) {

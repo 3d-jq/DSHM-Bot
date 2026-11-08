@@ -148,6 +148,13 @@
     <string name="chat_event_some_bot">another Bot</string>
     <string name="exchange_empty">No messages yet</string>
     <string name="exchange_show_all">Show all · %1$d chars</string>
+    <string name="pending_custom_hint">Or type something…</string>
+    <string name="pending_answer">Answer</string>
+    <string name="pending_view">View</string>
+    <string name="pending_dismiss">Dismiss</string>
+    <string name="pending_view_unsupported">Not drawn in this version: %1$s</string>
+    <string name="pending_on">On</string>
+    <string name="pending_off">Off</string>
     <string name="chat_show_all">Show all · %1$s chars</string>
     <string name="chat_copied">Copied</string>
     <string name="question_submit">Submit</string>

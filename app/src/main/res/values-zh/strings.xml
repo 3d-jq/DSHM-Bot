@@ -148,6 +148,13 @@
     <string name="chat_event_some_bot">另一个 Bot</string>
     <string name="exchange_empty">还没有消息</string>
     <string name="exchange_show_all">显示全部 · %1$d 字</string>
+    <string name="pending_custom_hint">或者直接说点什么…</string>
+    <string name="pending_answer">回答</string>
+    <string name="pending_view">视图</string>
+    <string name="pending_dismiss">收起</string>
+    <string name="pending_view_unsupported">当前版本没画这种组件：%1$s</string>
+    <string name="pending_on">开</string>
+    <string name="pending_off">关</string>
     <string name="chat_show_all">显示全部 · %1$s 字</string>
     <string name="chat_copied">已复制</string>
     <string name="question_submit">提交</string>

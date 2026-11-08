@@ -109,6 +109,12 @@ data class BotChatUiState(
     val stopVisible: Boolean = false,
     /** 这个 Bot（或它所在的群）正在等的审批 / 提问。 */
     val approvals: List<ChatApproval> = emptyList(),
+    /** 输入框上方 dock 里的待办卡：DS Bot 的 `ask_user` 提问。 */
+    val pendingQuestions: List<ChatQuestionCard> = emptyList(),
+    /** 输入框上方 dock 里的待办卡：DS Bot 的 `show_view` 视图。 */
+    val pendingViews: List<ChatViewCard> = emptyList(),
+    /** 正在提交一张待办卡（按钮禁用，避免重复点）。 */
+    val answeringPending: Boolean = false,
     /** 还有更早的历史（游标非空）。 */
     val hasEarlier: Boolean = false,
     /** 正在往前翻一页。 */
@@ -952,6 +958,10 @@ class BotChatViewModel(
             )
             val team = DsBotParser.teamMembers(state)
             val rooms = DsBotParser.teamRooms(state)
+            // 输入框上方的待办卡：Bot 自己的提问 / 视图（群聊里 DS Bot 只允许在私聊用）。
+            val cardScope = sessionId?.takeIf { it.isNotEmpty() } ?: botId
+            val questions = if (isGroup) emptyList() else parseChatQuestions(state, cardScope)
+            val views = if (isGroup) emptyList() else parseChatViews(state, cardScope)
             val news = state.optJSONObject("memoryNews")?.optJSONObject(botId)
             val newsAt = news?.optLong("at", 0L) ?: 0L
             val recentNews = newsAt > 0L && System.currentTimeMillis() - newsAt < 5 * 60_000L
@@ -973,6 +983,8 @@ class BotChatViewModel(
                     activity = activity,
                     teamMembers = team,
                     teamRooms = rooms,
+                    pendingQuestions = questions,
+                    pendingViews = views,
                 )
             }
             recomputeApprovals()
@@ -1015,6 +1027,79 @@ class BotChatViewModel(
                 recomputeApprovals()
                 refreshBotStatus()
             }
+            onDone(error)
+        }
+    }
+
+    /**
+     * 回答 dock 里的提问卡（DS Bot `ask_user`）：`answer-question`。
+     *
+     * 答案是「用户下一条消息」——DS Bot 会把它作为 followup 发进会话。
+     */
+    fun answerChatQuestion(
+        card: ChatQuestionCard,
+        selected: List<String>,
+        custom: String = "",
+        onDone: (String?) -> Unit = {},
+    ) {
+        val answer = JSONObject()
+            .put("selected", JSONArray().apply { selected.forEach(::put) })
+            .also { if (custom.isNotBlank()) it.put("custom", custom.trim()) }
+        submitPendingCard(
+            endpoint = "answer-question",
+            payload = JSONObject()
+                .put("sessionId", sessionId ?: botId)
+                .put("questionId", card.id)
+                .put("answer", answer),
+            onDone = onDone,
+        )
+        // 提交成功就本地收卡，别等下一次 state。
+        _uiState.update { it.copy(pendingQuestions = it.pendingQuestions.filterNot { q -> q.id == card.id }) }
+    }
+
+    /** 提交一张视图卡：`view-reply {sessionId, viewId, action, values}`。 */
+    fun answerChatView(
+        card: ChatViewCard,
+        action: String,
+        values: JSONObject = JSONObject(),
+        onDone: (String?) -> Unit = {},
+    ) {
+        submitPendingCard(
+            endpoint = "view-reply",
+            payload = JSONObject()
+                .put("sessionId", sessionId ?: botId)
+                .put("viewId", card.id)
+                .put("action", action)
+                .put("values", values),
+            onDone = onDone,
+        )
+        _uiState.update { it.copy(pendingViews = it.pendingViews.filterNot { v -> v.id == card.id }) }
+    }
+
+    /** 关掉一张不用答的视图卡（DS Bot `dismiss-view`）。 */
+    fun dismissChatView(card: ChatViewCard) {
+        val connection = client ?: return
+        _uiState.update { it.copy(pendingViews = it.pendingViews.filterNot { v -> v.id == card.id }) }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot(
+                    "dismiss-view",
+                    JSONObject().put("sessionId", sessionId ?: botId),
+                )
+            }
+            refreshBotStatus()
+        }
+    }
+
+    private fun submitPendingCard(endpoint: String, payload: JSONObject, onDone: (String?) -> Unit) {
+        val connection = client ?: return
+        _uiState.update { it.copy(answeringPending = true) }
+        viewModelScope.launch {
+            val error = runCatching { connection.bot(endpoint, payload) }
+                .exceptionOrNull()
+                ?.let { describeChatError(it) }
+            _uiState.update { it.copy(answeringPending = false) }
+            refreshBotStatus()
             onDone(error)
         }
     }
