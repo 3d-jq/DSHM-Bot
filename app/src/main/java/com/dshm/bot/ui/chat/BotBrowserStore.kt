@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.dshm.bot.data.runtime.RuntimeInstaller
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -477,13 +478,19 @@ class BotBrowserStore internal constructor(private val context: Context) {
         return open
     }
 
-    /** 把一张截图落到应用自己的目录里，返回绝对路径。 */
+    /**
+     * 把一张截图存进 Bot 的工作区，返回**引擎里**的路径。
+     *
+     * 不能存应用私有目录：那是 rootfs 外面，引擎和 Bot 都读不到，拿到的路径等于废的。
+     * 存到团队工作区之后，Bot 能自己读，也能用 `present` 当产物交付。
+     */
     fun saveScreenshot(botId: String, bitmap: Bitmap): String? = runCatching {
-        val dir = java.io.File(context.getExternalFilesDir(null) ?: context.filesDir, "browser")
+        val dir = java.io.File(RuntimeInstaller(context).rootfsDir, "root/.dsh/bot/workspace/shots")
         if (!dir.isDirectory && !dir.mkdirs()) return null
-        val file = java.io.File(dir, "shot-$botId-${System.currentTimeMillis()}.png")
+        val name = "shot-$botId-${System.currentTimeMillis()}.png"
+        val file = java.io.File(dir, name)
         file.outputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 90, out) }
-        file.absolutePath
+        "/root/.dsh/bot/workspace/shots/$name"
     }.getOrNull()
 
     companion object {

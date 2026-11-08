@@ -733,9 +733,9 @@ private fun ChatMessages(
                 top = topPadding + Dshm.spacing.md,
                 bottom = Dshm.spacing.none,
             ),
-            // 气泡间距：同一个人的连续气泡 8dp；换人说话（用户→大模型）多留一点，
-            // 让「谁在说话」一眼能分出来。
-            verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+            // 间距全部由每条自己的 top padding 决定（同人 4dp / 换人 12dp），
+            // 这里不再叠加，否则两条规则会互相抵消。
+            verticalArrangement = Arrangement.spacedBy(Dshm.spacing.none),
         ) {
             // reverseLayout 下最先声明的 item 画在视觉最底部。这个 spacer 就是
             // 「最新气泡 → 输入框」之间的真实可滚动留白：scrollToItem(0) 会把它
@@ -746,20 +746,24 @@ private fun ChatMessages(
             // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
             if (typing) {
                 item(key = "typing") {
-                    ChatActivityRow(
-                        bot = bot,
-                        activity = requireNotNull(activity),
-                        fallbackStartedAtMs = lastSendAt,
-                    )
+                    Box(Modifier.padding(top = Dshm.spacing.sm)) {
+                        ChatActivityRow(
+                            bot = bot,
+                            activity = requireNotNull(activity),
+                            fallbackStartedAtMs = lastSendAt,
+                        )
+                    }
                 }
             }
             if (streaming.isNotEmpty()) {
                 item(key = "streaming") {
-                    BotBubble(
-                        text = streaming,
-                        author = null,
-                        fontScale = fontScale,
-                    )
+                    Box(Modifier.padding(top = Dshm.spacing.sm)) {
+                        BotBubble(
+                            text = streaming,
+                            author = null,
+                            fontScale = fontScale,
+                        )
+                    }
                 }
             }
             items(entries.size, key = { index -> entries[entries.size - 1 - index].id }) { index ->
@@ -767,9 +771,10 @@ private fun ChatMessages(
                 val entry = entries[chrono]
                 // 视觉相邻：older 在上面，newer 在下面（chronological 顺序）。
                 val older = entries.getOrNull(chrono - 1)
-                val newer = entries.getOrNull(chrono + 1)
-                val turnsChanged = newer != null && newer.kind != entry.kind &&
-                    (newer.kind == ChatEntryKind.USER || entry.kind == ChatEntryKind.USER)
+                // 换人：跟**上面**那条比 —— item 的 top padding 决定的正是它和上方气泡的距离。
+                // 用 newer 的话，用户上下各贴一个 Bot 时会一边 12dp、一边 4dp（之前就是这样）。
+                val turnsChanged = older != null && older.kind != entry.kind &&
+                    (older.kind == ChatEntryKind.USER || entry.kind == ChatEntryKind.USER)
                 // 群聊里同一 bot 连续的多条回复合成一组（对齐 DS Bot `stackReplies`）：
                 // 名字只在组首（视觉最上一条），头像只贴组尾（视觉最下一条）的气泡左侧。
                 val isBotEntry = entry.kind == ChatEntryKind.BOT
@@ -779,8 +784,9 @@ private fun ChatMessages(
                 Column(
                     modifier = Modifier.padding(
                         top = if (groupStart || turnsChanged || entry.kind == ChatEntryKind.ARTIFACTS) {
-                            Dshm.spacing.turnGap - Dshm.spacing.sm
+                            Dshm.spacing.turnGap
                         } else {
+                            // 同一个人接着说的气泡贴紧一点。
                             Dshm.spacing.xs
                         },
                     ),
