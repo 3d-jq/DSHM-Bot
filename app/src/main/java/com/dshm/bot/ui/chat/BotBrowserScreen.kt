@@ -7,6 +7,7 @@ import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.widget.FrameLayout
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.width
@@ -72,6 +73,36 @@ fun BotBrowserScreen(
     val context = LocalContext.current
     val store = remember { BotBrowserStore.of(context) }
     val session = remember(botId) { botId?.let { store.session(it) } }
+    // 浏览器自己的两个子页（历史 / 设置）：不新增导航路由，返回键先回浏览器。
+    var page by remember(botId) { mutableStateOf<BrowserPage?>(null) }
+
+    BackHandler(enabled = page != null) { page = null }
+
+    val activeTab = session?.activeTab()
+
+    // 子页自带 `SettingsPage` 顶栏（返回 + 标题），这里不能再套一层 BrowserTopBar，
+    // 否则屏幕上会出现两条顶栏、状态栏留白也会叠两次。
+    if (page != null && session != null) {
+        val current = requireNotNull(page)
+        Box(Modifier.fillMaxSize().navigationBarsPadding()) {
+            when (current) {
+                BrowserPage.History -> BrowserHistoryPage(
+                    session = session,
+                    onBack = { page = null },
+                    onOpen = { url ->
+                        if (session.activeTab() == null) session.newTab(url) else session.load(url)
+                        page = null
+                    },
+                )
+
+                BrowserPage.Settings -> BrowserSettingsPage(
+                    session = session,
+                    onBack = { page = null },
+                )
+            }
+        }
+        return
+    }
 
     Column(
         modifier = modifier
@@ -81,20 +112,27 @@ fun BotBrowserScreen(
             .navigationBarsPadding(),
     ) {
         BrowserTopBar(
-            title = session?.activeTab()?.title?.takeIf { it.isNotBlank() }
+            title = activeTab?.title?.takeIf { it.isNotBlank() }
                 ?: botName?.takeIf { it.isNotBlank() }
                 ?: stringResource(R.string.browser_title),
             onBack = onBack,
+            onHistory = { page = BrowserPage.History },
+            onSettings = { page = BrowserPage.Settings },
             onReload = session?.let { current -> { current.reload() } },
-            reloadEnabled = session?.activeTab() != null,
+            reloadEnabled = activeTab != null,
         )
         BotBrowserPanel(
             session = session,
             modifier = Modifier.weight(1f),
             botName = botName.orEmpty(),
+            onOpenHistory = { page = BrowserPage.History },
+            onOpenSettings = { page = BrowserPage.Settings },
         )
     }
 }
+
+/** 全屏浏览器里的两个子页。 */
+private enum class BrowserPage { History, Settings }
 
 /**
  * 浏览器本体：地址栏 + 页面 + 底栏（标签页在底栏的「n/6」里）。
@@ -108,6 +146,8 @@ internal fun BotBrowserPanel(
     session: BotBrowserSession?,
     modifier: Modifier = Modifier,
     onExpand: (() -> Unit)? = null,
+    onOpenHistory: (() -> Unit)? = null,
+    onOpenSettings: (() -> Unit)? = null,
     botName: String = "",
 ) {
     val context = LocalContext.current
@@ -300,6 +340,41 @@ internal fun BotBrowserPanel(
                         color = Dshm.colors.accent,
                     )
                 }
+                // 历史 / 设置：面板里不另开弹层，直接交给全屏页去展开。
+                listOfNotNull(
+                    onOpenHistory?.let {
+                        Triple(R.drawable.ic_lucide_history, R.string.browser_history, it)
+                    },
+                    onOpenSettings?.let {
+                        Triple(R.drawable.ic_lucide_settings, R.string.browser_settings, it)
+                    },
+                ).forEach { (icon, label, action) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(Dshm.radius.sm))
+                            .background(Dshm.colors.surface)
+                            .clickable {
+                                showTabs = false
+                                action()
+                            }
+                            .padding(Dshm.spacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            painter = painterResource(icon),
+                            contentDescription = null,
+                            tint = Dshm.colors.textSecondary,
+                            modifier = Modifier.size(Dshm.spacing.settingsRowIcon),
+                        )
+                        Spacer(Modifier.size(Dshm.spacing.sm))
+                        Text(
+                            text = stringResource(label),
+                            style = Dshm.typography.settingsRowTitle,
+                            color = Dshm.colors.textPrimary,
+                        )
+                    }
+                }
             }
         }
     }
@@ -309,6 +384,8 @@ internal fun BotBrowserPanel(
 private fun BrowserTopBar(
     title: String,
     onBack: () -> Unit,
+    onHistory: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
     onReload: (() -> Unit)? = null,
     reloadEnabled: Boolean = true,
 ) {
@@ -317,6 +394,7 @@ private fun BrowserTopBar(
             .fillMaxWidth()
             .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
     ) {
+        val actions = listOfNotNull(onHistory, onSettings, onReload)
         FloatingIconButton(
             icon = R.drawable.ic_lucide_arrow_left,
             contentDescription = stringResource(R.string.action_back),
@@ -333,16 +411,41 @@ private fun BrowserTopBar(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth()
-                .padding(horizontal = Dshm.spacing.iconButton + Dshm.spacing.lg),
+                .padding(
+                    start = Dshm.spacing.iconButton + Dshm.spacing.lg,
+                    // 右边几个圆钮各自占一格，标题别钻到它们下面。
+                    end = Dshm.spacing.iconButton + Dshm.spacing.lg +
+                        (Dshm.spacing.iconButton + Dshm.spacing.xs) * actions.size,
+                ),
         )
-        if (onReload != null) {
-            FloatingIconButton(
-                icon = R.drawable.ic_lucide_refresh_cw,
-                contentDescription = stringResource(R.string.browser_reload),
-                onClick = onReload,
-                enabled = reloadEnabled,
-                modifier = Modifier.align(Alignment.CenterEnd),
-            )
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            onHistory?.let {
+                FloatingIconButton(
+                    icon = R.drawable.ic_lucide_history,
+                    contentDescription = stringResource(R.string.browser_history),
+                    onClick = it,
+                )
+                Spacer(Modifier.size(Dshm.spacing.xs))
+            }
+            onSettings?.let {
+                FloatingIconButton(
+                    icon = R.drawable.ic_lucide_settings,
+                    contentDescription = stringResource(R.string.browser_settings),
+                    onClick = it,
+                )
+                Spacer(Modifier.size(Dshm.spacing.xs))
+            }
+            onReload?.let {
+                FloatingIconButton(
+                    icon = R.drawable.ic_lucide_refresh_cw,
+                    contentDescription = stringResource(R.string.browser_reload),
+                    onClick = it,
+                    enabled = reloadEnabled,
+                )
+            }
         }
     }
 }

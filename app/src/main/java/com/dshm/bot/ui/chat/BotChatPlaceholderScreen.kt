@@ -87,6 +87,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
@@ -149,6 +150,42 @@ fun BotChatScreen(
     val attachContext = LocalContext.current
     val attachScope = rememberCoroutineScope()
     var cameraFile by remember { mutableStateOf<File?>(null) }
+
+    // 一轮浏览器操作结束后，往对话里贴一张页面缩略图（这一轮只贴一张，抓不到就跳过）。
+    val browserStore = remember { BotBrowserStore.of(attachContext) }
+    var browserTurn by remember(bot.id) { mutableStateOf(false) }
+    LaunchedEffect(state.running) {
+        if (state.running) {
+            browserTurn = true
+            return@LaunchedEffect
+        }
+        if (!browserTurn) return@LaunchedEffect
+        browserTurn = false
+        val session = browserStore.existing(bot.id) ?: return@LaunchedEffect
+        if (!session.consumeAgentMark()) return@LaunchedEffect
+        val tab = session.activeTab() ?: return@LaunchedEffect
+        val bitmap = session.captureThumbnail() ?: return@LaunchedEffect
+        val file = withContext(Dispatchers.IO) {
+            runCatching {
+                val dir = File(attachContext.cacheDir, "browser-shots").apply { mkdirs() }
+                val target = File(dir, "shot-${System.currentTimeMillis()}.png")
+                target.outputStream().use { out ->
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 85, out)
+                }
+                target
+            }.getOrNull()
+        }
+        bitmap.recycle()
+        if (file == null) return@LaunchedEffect
+        viewModel.addBrowserShot(
+            ChatBrowserShot(
+                path = file.absolutePath,
+                url = tab.url,
+                title = tab.title,
+                timeMs = System.currentTimeMillis(),
+            ),
+        )
+    }
 
     fun displayName(uri: Uri): String {
         val fromResolver = runCatching {
@@ -380,6 +417,7 @@ fun BotChatScreen(
                         onLoadEarlier = viewModel::loadEarlier,
                         onOpenMember = onOpenMember,
                         onOpenExchange = { id -> exchangeWith = id },
+                        onOpenBrowser = onOpenBrowser,
                     )
                 }
             }
@@ -612,6 +650,7 @@ private fun ChatMessages(
     onOpenMember: (String) -> Unit = {},
     /** 点事件行打开「Bot 间对话」（DS Bot `openExchange`）。 */
     onOpenExchange: (String) -> Unit = {},
+    onOpenBrowser: () -> Unit = {},
     onLoadEarlier: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
@@ -841,6 +880,11 @@ private fun ChatMessages(
                         artifacts = entry.artifacts,
                         endpoint = endpoint,
                         sessionId = bot.id,
+                    )
+
+                    ChatEntryKind.BROWSER_SHOT -> BrowserShotCard(
+                        shot = entry.shot,
+                        onClick = onOpenBrowser,
                     )
                 }
                 }

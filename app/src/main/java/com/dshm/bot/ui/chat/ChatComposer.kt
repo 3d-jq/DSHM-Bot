@@ -3,6 +3,8 @@ package com.dshm.bot.ui.chat
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -11,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -18,6 +21,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -54,6 +58,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -61,6 +67,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.remote.SpeechRepository
@@ -107,7 +114,14 @@ fun ChatComposer(
 ) {
     val colors = Dshm.colors
     val spacing = Dshm.spacing
-    val shape = RoundedCornerShape(Dshm.radius.composer)
+    // 有附件时输入框从胶囊换成圆角方卡（照 DeepSearch 的 20dp），
+    // 否则胶囊的圆弧会把缩略图卡的四角裁掉。
+    val corner by animateDpAsState(
+        targetValue = if (attachments.isEmpty()) Dshm.radius.composer else Dshm.radius.lg,
+        animationSpec = tween(180),
+        label = "composer-corner",
+    )
+    val shape = RoundedCornerShape(corner)
     val context = LocalContext.current
     val scaledText = Dshm.typography.composerText.copy(
         fontSize = Dshm.typography.composerText.fontSize * textScale,
@@ -353,41 +367,9 @@ fun ChatComposer(
                 }
             }
         }
-        if (attachments.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(bottom = spacing.xs),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(spacing.xs),
-            ) {
-                attachments.forEachIndexed { index, attachment ->
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(spacing.sm))
-                            .background(colors.surfaceMuted)
-                            .padding(start = spacing.sm, end = spacing.xs, top = spacing.xxs, bottom = spacing.xxs),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = attachment.name,
-                            style = Dshm.typography.rowTime,
-                            color = colors.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 180.dp),
-                        )
-                        ComposerKey(
-                            icon = R.drawable.ic_lucide_x,
-                            contentDescription = stringResource(R.string.composer_attach_remove),
-                            onClick = { onRemoveAttachment(index) },
-                            size = 28.dp,
-                        )
-                    }
-                }
-            }
-        }
-        Row(
+        // 输入框本体：附件缩略图也在这块白卡**里面**（照 DeepSearch：缩略图行在
+        // 输入框的圆角容器内、文字行上方），不是浮在输入框外面的另一条。
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag(COMPOSER_TEST_TAG)
@@ -401,6 +383,25 @@ fun ChatComposer(
                 .background(colors.surface)
                 .border(spacing.hairline, colors.divider, shape)
                 .padding(spacing.composerKeyGap),
+        ) {
+        if (attachments.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = spacing.xs),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(spacing.xs),
+            ) {
+                attachments.forEachIndexed { index, attachment ->
+                    AttachmentChip(
+                        attachment = attachment,
+                        onRemove = { onRemoveAttachment(index) },
+                    )
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Bottom,
         ) {
         // 听写中：＋ → ✕（取消）。
@@ -488,6 +489,7 @@ fun ChatComposer(
             )
             ComposerTrailingAction.SEND -> SendKey(enabled = sendEnabled, onSend = onSend)
         }
+    }
     }
     }
 }
@@ -672,4 +674,94 @@ private fun StopRunKey(onStop: () -> Unit) {
             modifier = Modifier.size(Dshm.spacing.xxl * 0.5f),
         )
     }
+}
+
+/**
+ * 待发附件的小卡（照 DeepSearch `AttachmentChip`）：
+ * 图片显示缩略图，文件显示「图标 + 文件名」；右上角半个圆钮是移除。
+ *
+ * 外层 72×70 只是为了给移除圆钮留出溢出的位置，卡片本身固定 64dp。
+ */
+@Composable
+private fun AttachmentChip(
+    attachment: ChatAttachmentDraft,
+    onRemove: () -> Unit,
+) {
+    val shape = RoundedCornerShape(Dshm.spacing.sm)
+    val colors = Dshm.colors
+    Box(Modifier.size(width = 72.dp, height = 70.dp)) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .size(64.dp)
+                .clip(shape)
+                .background(colors.surfaceMuted)
+                .border(Dshm.spacing.hairline, colors.divider, shape),
+        ) {
+            val image = remember(attachment) {
+                if (attachment.isImage) decodeAttachmentThumbnail(attachment.bytes) else null
+            }
+            if (image != null) {
+                Image(
+                    bitmap = image.asImageBitmap(),
+                    contentDescription = attachment.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize(),
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .padding(Dshm.spacing.xxs),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_lucide_file_text),
+                        contentDescription = null,
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(Dshm.spacing.lg),
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = attachment.name,
+                        style = Dshm.typography.rowTime.copy(fontSize = 9.sp),
+                        color = colors.textSecondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(20.dp)
+                .background(colors.surface, CircleShape)
+                .border(Dshm.spacing.hairline, colors.divider, CircleShape)
+                .clip(CircleShape)
+                .clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_lucide_x),
+                contentDescription = stringResource(R.string.composer_attach_remove),
+                tint = colors.textTertiary,
+                modifier = Modifier.size(13.dp),
+            )
+        }
+    }
+}
+
+/** 附件字节 → 缩略图（按 256px 上采样，避免几 MB 的原图整张解码）。 */
+private fun decodeAttachmentThumbnail(bytes: ByteArray, max: Int = 256): Bitmap? {
+    if (bytes.isEmpty()) return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    var sample = 1
+    while (bounds.outWidth > 0 && bounds.outWidth / sample > max * 2) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }.getOrNull()
 }

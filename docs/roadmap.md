@@ -240,7 +240,7 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   每个 Bot 一套标签（`MAX_TABS = 6`），支持开/关/切换、地址栏、后退/前进/刷新、系统浏览器打开、
   下载（落到应用自己的 Downloads 目录）。面板的 `browser` 分类显示标签卡（`BrowserTabsCard`）。
   ⚠️ Android WebView 的 cookie 是进程级共享的，做不到桌面版「每个 Bot 独立 storage partition」。
-- ☑️ 全屏浏览器顶栏统一成项目标准的悬浮圆钮：返回（左）+ 居中标题 + 刷新（右），
+- ☑️ 全屏浏览器顶栏统一成项目标准的悬浮圆钮：返回（左）+ 居中标题 + 历史 / 设置 / 刷新（右），
   跟 `SettingsPage` / 对话页顶栏同一套 `FloatingIconButton`，不再用自绘的扁平顶栏。
 - ☑️ **浏览器控制（`read_browser`）**：`BrowserReadBridge` 长轮询 `browser-wait {clientId, open}`，
   收到读页请求后在 WebView 里跑 `READ_PAGE_SCRIPT`（可见文本 → Markdown，链接/控件标 `[#n]`，
@@ -268,8 +268,19 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - ☑️ 下载进度横幅：`DownloadManager.enqueue` 之后每 0.5s 查一次，完成/失败留 2.5s。
 - ☑️ 对话里**不再画**浏览器动作行和「更新记忆」行（每读一次、滚一下都来一行会把时间线冲乱），
   只在活动状态栏显示（`ChatActivity`：`browser_*` → 「正在操作浏览器」、`read_browser` → 「正在读网页」）。
-- ⬜ 还差：浏览历史（按 Bot 记录可回访）、浏览器设置页（UA / 视口 / cookie / 清除数据入口）、
-  对话里的页面缩略图（与「不要每步一行」冲突，得换一种展示方式，比如操作结束后的一张卡）。
+- ☑️ **浏览历史（2026-11-08，第十五轮）**：`BotBrowserSession.history` 在页面装载完成时记录
+  （同一 URL 去重、最新在前、最多 200 条），按 Bot 存在自己的 SharedPreferences 里，重开 App 还在。
+  全屏浏览器顶栏「历史」进入 `BrowserHistoryPage`：标题 / URL / 时间，点一条在当前标签打开，
+  底部「清空浏览历史」带确认。
+- ☑️ **浏览器设置页**：`BrowserSettingsPage`（全屏顶栏的齿轮进入）：
+  - UA：默认 / 移动 Chrome / 桌面 Chrome / 自定义（自定义带输入框 + 应用），写进这个 Bot 的偏好；
+  - 视口：跟随设备 / 360 / 414 / 768 + 自定义 CSS 宽度；
+  - Cookie：按历史里出现过的域名逐个列出（`CookieManager.getCookie`），可单域名清除 / 全部清除；
+  - 站点数据：清缓存、清站点数据（cookie + WebStorage + cache）和清历史，都带确认。
+- ☑️ **对话里的页面缩略图卡**：不再每步一行。一轮结束（`state.running` true→false）且这一轮
+  Bot 确实操作过浏览器（`lastAgentAt` / `consumeAgentMark`）时，抓一张当前标签的缩略图，
+  存到应用缓存 `cacheDir/browser-shots/`，作为 `ChatEntryKind.BROWSER_SHOT` 贴在最新消息下面：
+  图 + 标题 + URL，点卡片打开这个 Bot 的浏览器。缩略图整张只有一两种颜色（合成失败）时直接跳过。
 - ☑️ **BrowserGuard（第十二轮）**：`type` 前先 `inspect` 目标元素 —— `type=password`、
   `autocomplete=*password*|one-time-code`、名字/占位符命中「密码/验证码/口令/OTP」直接拒绝，
   回给模型「用 browser_hand_over 交给用户」；`click` 前看按钮文案（pay/send/delete/支付/删除…）

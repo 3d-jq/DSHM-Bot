@@ -5,10 +5,13 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.os.Environment
 import android.os.Message
+import android.view.View
 import android.webkit.CookieManager
+import android.webkit.WebStorage
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -37,6 +40,13 @@ data class BotDownload(
     val progress: Float,
     val done: Boolean,
     val failed: Boolean = false,
+)
+
+/** 浏览历史的一条（同一个 URL 只留最新一次，按 Bot 持久化）。 */
+data class BotBrowserHistory(
+    val url: String,
+    val title: String,
+    val visitedAt: Long,
 )
 
 /**
@@ -84,8 +94,30 @@ class BotBrowserSession internal constructor(
     var download by mutableStateOf<BotDownload?>(null)
         private set
 
+    /** 浏览历史：最新的在前，最多 [MAX_HISTORY] 条。 */
+    val history = mutableStateListOf<BotBrowserHistory>()
+
+    /** 自定义 UA；null 表示用系统默认。 */
+    var userAgentOverride by mutableStateOf<String?>(null)
+        private set
+
+    /** 自定义视口宽度（CSS px）；null 表示跟随设备。 */
+    var viewportWidth by mutableStateOf<Int?>(null)
+        private set
+
+    /** 最近一次 Bot 操作浏览器的时间；聊天页据此决定这一轮要不要贴一张缩略图卡。 */
+    var lastAgentAt by mutableStateOf(0L)
+        private set
+
     private val views = mutableMapOf<Long, WebView>()
     private var nextId = 1L
+    private val prefs = context.getSharedPreferences("bot-browser:$botId", Context.MODE_PRIVATE)
+
+    init {
+        userAgentOverride = prefs.getString(KEY_UA, null)?.takeIf { it.isNotBlank() }
+        viewportWidth = prefs.getInt(KEY_VIEWPORT, 0).takeIf { it > 0 }
+        loadHistory()
+    }
 
     fun activeTab(): BotBrowserTab? = tabs.firstOrNull { it.id == activeId }
 
@@ -189,11 +221,19 @@ class BotBrowserSession internal constructor(
         agentCancelled = false
         agentAction = action
         agentBusy = true
+        lastAgentAt = System.currentTimeMillis()
     }
 
     fun endAgent() {
         agentBusy = false
         agentAction = null
+    }
+
+    /** 取走「这一轮操作过浏览器」的标记；一轮只贴一张缩略图。 */
+    fun consumeAgentMark(): Boolean {
+        val had = lastAgentAt > 0L
+        lastAgentAt = 0L
+        return had
     }
 
     /** 用户点「接管」：打断当前的等待，动作尽快回执。 */
@@ -282,8 +322,13 @@ class BotBrowserSession internal constructor(
 
     /** [value] 为空表示恢复默认 UA。 */
     fun setUserAgent(value: String?) {
+        val clean = value?.trim()?.takeIf { it.isNotEmpty() }
+        userAgentOverride = clean
+        prefs.edit().apply {
+            if (clean == null) remove(KEY_UA) else putString(KEY_UA, clean)
+        }.apply()
         views.values.forEach { view ->
-            view.settings.userAgentString = value
+            view.settings.userAgentString = clean
         }
         activeWebView()?.reload()
     }
@@ -294,7 +339,29 @@ class BotBrowserSession internal constructor(
      * WebView 没有真正的 viewport 覆写，这是最接近的做法（DeepSearch 的 `set_viewport` 同理）。
      */
     fun setViewportWidth(width: Int) {
+        val clean = width.takeIf { it in 200..2400 }
+        viewportWidth = clean
+        prefs.edit().apply {
+            if (clean == null) remove(KEY_VIEWPORT) else putInt(KEY_VIEWPORT, clean)
+        }.apply()
         val view = activeWebView() ?: return
+        applyViewport(view)
+        view.reload()
+    }
+
+    /** 恢复「跟随设备」视口。 */
+    fun resetViewport() {
+        viewportWidth = null
+        prefs.edit().remove(KEY_VIEWPORT).apply()
+        val view = activeWebView() ?: return
+        view.setInitialScale(0)
+        view.settings.useWideViewPort = true
+        view.settings.loadWithOverviewMode = true
+        view.reload()
+    }
+
+    private fun applyViewport(view: WebView) {
+        val width = viewportWidth ?: return
         val metrics = context.resources.displayMetrics
         val deviceWidth = (view.width.takeIf { it > 0 } ?: metrics.widthPixels).toFloat()
         val target = width.coerceIn(200, 2400) * metrics.density
@@ -302,7 +369,159 @@ class BotBrowserSession internal constructor(
         view.settings.useWideViewPort = true
         view.settings.loadWithOverviewMode = true
         view.setInitialScale(scale)
-        view.reload()
+    }
+
+    // ---- 浏览历史 -----------------------------------------------------------
+
+    /** 记一条访问（http/https 才算），同一 URL 去重并挪到最前。 */
+    private fun rememberVisit(url: String?, title: String?) {
+        val clean = url?.trim().orEmpty()
+        if (!clean.startsWith("http://") && !clean.startsWith("https://")) return
+        val existing = history.indexOfFirst { it.url == clean }
+        val entry = BotBrowserHistory(
+            url = clean,
+            title = title?.trim().orEmpty().ifEmpty {
+                if (existing >= 0) history[existing].title else clean
+            },
+            visitedAt = System.currentTimeMillis(),
+        )
+        if (existing >= 0) history.removeAt(existing)
+        history.add(0, entry)
+        while (history.size > MAX_HISTORY) history.removeAt(history.lastIndex)
+        saveHistory()
+    }
+
+    fun clearHistory() {
+        history.clear()
+        prefs.edit().remove(KEY_HISTORY).apply()
+    }
+
+    private fun saveHistory() {
+        val array = JSONArray()
+        history.forEach { entry ->
+            array.put(
+                JSONObject()
+                    .put("url", entry.url)
+                    .put("title", entry.title)
+                    .put("time", entry.visitedAt),
+            )
+        }
+        prefs.edit().putString(KEY_HISTORY, array.toString()).apply()
+    }
+
+    private fun loadHistory() {
+        val raw = prefs.getString(KEY_HISTORY, null) ?: return
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val url = item.optString("url")
+            if (url.isEmpty()) continue
+            history.add(
+                BotBrowserHistory(
+                    url = url,
+                    title = item.optString("title").ifEmpty { url },
+                    visitedAt = item.optLong("time", 0L),
+                ),
+            )
+        }
+    }
+
+    // ---- Cookie / 站点数据 --------------------------------------------------
+
+    /** 历史里出现过的域名（设置页按域名清 cookie 用）。 */
+    fun cookieDomains(): List<String> = buildList {
+        listOfNotNull(currentPage()?.first, activeWebView()?.url)
+            .plus(history.map { it.url })
+            .forEach { link ->
+                val host = runCatching { Uri.parse(link).host }.getOrNull()
+                if (!host.isNullOrBlank() && host !in this) add(host)
+            }
+    }.take(MAX_COOKIE_DOMAINS)
+
+    fun cookiesFor(domain: String): String? =
+        CookieManager.getInstance().getCookie("https://$domain")
+
+    fun clearCookiesFor(domain: String) {
+        val raw = cookiesFor(domain).orEmpty()
+        if (raw.isEmpty()) return
+        raw.split(';').forEach { pair ->
+            val name = pair.substringBefore('=', "").trim()
+            if (name.isNotEmpty()) {
+                CookieManager.getInstance().setCookie("https://$domain", "$name=; Max-Age=0; Path=/")
+            }
+        }
+        CookieManager.getInstance().flush()
+    }
+
+    fun clearAllCookies() {
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+    }
+
+    fun clearCache() {
+        views.values.forEach { view -> runCatching { view.clearCache(true) } }
+    }
+
+    /** 「清除数据」：cookie + WebStorage + 缓存。 */
+    fun clearSiteData() {
+        clearAllCookies()
+        runCatching { WebStorage.getInstance().deleteAllData() }
+        clearCache()
+    }
+
+    // ---- 缩略图 -------------------------------------------------------------
+
+    /**
+     * 给聊天页的页面缩略图：当前标签按 [maxWidth] 等比缩放。
+     *
+     * 面板没开着时 WebView 没有尺寸，先按 1080×1920 量一次再画（与
+     * `browser_screenshot` 的做法一致）。整张图几乎只有一种颜色时（常见于合成失败）
+     * 返回 null，宁可不贴卡也不贴一张白图。
+     */
+    fun captureThumbnail(maxWidth: Int = 520): Bitmap? {
+        val view = activeWebView() ?: return null
+        var width = view.width
+        var height = view.height
+        if (width <= 0 || height <= 0) {
+            width = 1080
+            height = 1920
+            view.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+            )
+            view.layout(0, 0, width, height)
+        }
+        val full = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(full))
+        if (isFlat(full)) {
+            full.recycle()
+            return null
+        }
+        val scale = (maxWidth.toFloat() / width).coerceAtMost(1f)
+        val scaled = Bitmap.createScaledBitmap(
+            full,
+            (width * scale).toInt().coerceAtLeast(1),
+            (height * scale).toInt().coerceAtLeast(1),
+            true,
+        )
+        if (scaled !== full) full.recycle()
+        return scaled
+    }
+
+    /** 抽样看颜色种类：页面缩略图不可能整张只有一两种颜色。 */
+    private fun isFlat(bitmap: Bitmap): Boolean {
+        val colors = HashSet<Int>()
+        var x = 0
+        while (x < bitmap.width) {
+            var y = 0
+            while (y < bitmap.height) {
+                colors += bitmap.getPixel(x, y)
+                if (colors.size > 12) return false
+                y += 24
+            }
+            x += 24
+        }
+        return true
     }
 
     /**
@@ -339,6 +558,8 @@ class BotBrowserSession internal constructor(
             useWideViewPort = true
             loadWithOverviewMode = true
         }
+        userAgentOverride?.let { view.settings.userAgentString = it }
+        applyViewport(view)
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(view, true)
@@ -350,11 +571,13 @@ class BotBrowserSession internal constructor(
                     loading = false
                 }
                 update(id) { it.copy(url = view.url.orEmpty(), title = view.title.orEmpty()) }
+                rememberVisit(url, view.title)
                 if (id == activeId) syncNavigation()
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 update(id) { it.copy(url = url.orEmpty(), title = view.title.orEmpty()) }
+                rememberVisit(url, view.title)
                 if (id == activeId) syncNavigation()
             }
 
@@ -453,6 +676,14 @@ class BotBrowserSession internal constructor(
     companion object {
         /** 每个 Bot 最多同时开几张标签（DOM/内存的折中）。 */
         const val MAX_TABS = 6
+
+        /** 每个 Bot 留多少条浏览历史。 */
+        const val MAX_HISTORY = 200
+
+        private const val MAX_COOKIE_DOMAINS = 30
+        private const val KEY_UA = "ua"
+        private const val KEY_VIEWPORT = "viewport"
+        private const val KEY_HISTORY = "history"
     }
 }
 

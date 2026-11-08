@@ -42,8 +42,20 @@ import org.json.JSONObject
 import org.json.JSONArray
 import java.util.UUID
 
-/** 对话里的一行：用户消息、Bot 消息、或系统事件。 */
-enum class ChatEntryKind { USER, BOT, EVENT, ARTIFACTS }
+/** 对话里的一行：用户消息、Bot 消息、系统事件、产物卡或浏览器缩略图卡。 */
+enum class ChatEntryKind { USER, BOT, EVENT, ARTIFACTS, BROWSER_SHOT }
+
+/**
+ * 一轮浏览器操作结束后贴在对话里的页面缩略图。
+ *
+ * [path] 是应用私有目录里的 PNG（聊天页自己画的），不是引擎工作区里那份。
+ */
+data class ChatBrowserShot(
+    val path: String,
+    val url: String,
+    val title: String,
+    val timeMs: Long,
+)
 
 data class ChatEntry(
     val id: String,
@@ -68,6 +80,8 @@ data class ChatEntry(
     val target: String? = null,
     /** 产生这条事件的 DS Bot 工具名（`message_bot` / `remember`…），界面据此选图标。 */
     val tool: String? = null,
+    /** 浏览器缩略图卡的内容（[ChatEntryKind.BROWSER_SHOT]）。 */
+    val shot: ChatBrowserShot? = null,
 )
 
 /** 待发送的本地附件。 */
@@ -226,6 +240,8 @@ class BotChatViewModel(
     private var streamingAttempt: String? = null
     private var streamingText = ""
     private var loadedOnce = false
+    /** 这一轮浏览器操作结束后贴的缩略图卡（只活在本次对话里）。 */
+    private val browserShots = mutableListOf<ChatEntry>()
     /** 本屏发出的用户气泡；服务端回显用 `requestId` 认出同一条，不画第二条。 */
     private val localUserEntries = LinkedHashMap<String, ChatEntry>()
 
@@ -405,10 +421,31 @@ class BotChatViewModel(
         turnEndSeq.clear()
     }
 
+    /**
+     * 一轮浏览器操作结束后，把页面缩略图贴进对话。
+     *
+     * 只在内存里留最近 [MAX_BROWSER_SHOTS] 张：它不是历史内容，重新进对话就不该再出现。
+     */
+    fun addBrowserShot(shot: ChatBrowserShot) {
+        browserShots += ChatEntry(
+            id = "shot:${shot.timeMs}",
+            kind = ChatEntryKind.BROWSER_SHOT,
+            text = "",
+            timeMs = shot.timeMs,
+            shot = shot,
+        )
+        while (browserShots.size > MAX_BROWSER_SHOTS) browserShots.removeAt(0)
+        mergeSessionEvents()
+    }
+
     private fun mergeSessionEvents() {
-        if (toolEvents.isEmpty() && presentedByTurn.isEmpty()) return
+        if (toolEvents.isEmpty() && presentedByTurn.isEmpty() && browserShots.isEmpty()) return
         _uiState.update { state ->
-            val base = state.entries.filterNot { it.id.startsWith("tool:") || it.id.startsWith("present:") }
+            val base = state.entries.filterNot {
+                it.id.startsWith("tool:") ||
+                    it.id.startsWith("present:") ||
+                    it.id.startsWith("shot:")
+            }
             // follow 的快照覆盖整个会话；只把「已经加载出来的这段历史」里的事件并进去，
             // 否则列表顶部会堆一堆比最早一条消息还老的事件行。
             val oldest = base.mapNotNull { it.seq }.minOrNull()
@@ -418,7 +455,9 @@ class BotChatViewModel(
             // 倒序列表里就是最下面，表现成「大模型的回复跑到了问题上面」。
             // 所以只把事件插进「有 seq 的那段历史」的正确位置，插不进去就放末尾。
             val incoming = (toolEvents.values + presentedEntries()).filter(::loaded)
-            state.copy(entries = mergeTimeline(base, incoming))
+            // 缩略图卡不属于历史事件（没有 seq），一律排在当前时间线之后：
+            // 一张「刚看完的页面」贴在最新一条消息下面才对。
+            state.copy(entries = mergeTimeline(base, incoming) + browserShots)
         }
     }
 
@@ -1355,6 +1394,8 @@ class BotChatViewModel(
     companion object {
         /** 事件流缓存的上限：同时等应答的提问一般就一个对话，多出来的一定是漏掉的 cancel。 */
         private const val HOST_PENDING_CAP = 32
+        /** 对话里最多留几张浏览器缩略图卡（只活在本次对话）。 */
+        private const val MAX_BROWSER_SHOTS = 30
         private const val STOP_GRACE_NS = 2_000_000_000L
         /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
         /** 群聊里刚发出消息后，等 round 建起来的最长时间（超过就不再乐观显示）。 */
