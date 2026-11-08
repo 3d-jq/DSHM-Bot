@@ -33,6 +33,15 @@ enum class ResetKeep {
     DELETE_ALL,
 }
 
+/**
+ * 让 DS Bot 认为「这个宿主有浏览器窗口」。
+ *
+ * 插件只在 DSH Desktop 或 `DS_BOT_APP=1` 时才注册 `read_browser`、打开 `browser-wait`
+ * 通道（`src/host/browser.js` 的 `install`）。手机端那个窗口就是我们的 WebView，
+ * 由 `BrowserReadBridge` 应答读页请求。
+ */
+private val BROWSER_GUEST_ENV = listOf("DS_BOT_APP=1")
+
 /** 本机引擎页状态层：安装/状态交给 RuntimeManager，启动/停止交给 RuntimeLauncher。 */
 class EngineViewModel(
     private val appContext: Context,
@@ -71,7 +80,7 @@ class EngineViewModel(
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
                         .onFailure { EngineLog.log("ds-bot install failed: ${it.message}") }
-                    launcher.start(manifest)
+                    launcher.start(manifest, BROWSER_GUEST_ENV)
                 }
             }
                 .onSuccess { _state.value = RuntimeState.Running(it) }
@@ -87,7 +96,7 @@ class EngineViewModel(
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
                         .onFailure { EngineLog.log("ds-bot install failed: ${it.message}") }
-                    launcher.start(manifest)
+                    launcher.start(manifest, BROWSER_GUEST_ENV)
                 }
             }
                 .onSuccess { _state.value = RuntimeState.Running(it) }

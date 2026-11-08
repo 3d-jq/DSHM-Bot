@@ -21,7 +21,39 @@ data class BotModelOption(val ref: String, val name: String)
 
 data class BotPermissionOption(val ref: String, val name: String, val hint: String? = null)
 
-data class BotMemoryEntry(val scope: String, val topic: String?, val text: String)
+data class BotMemoryEntry(
+    val scope: String,
+    val topic: String?,
+    val text: String,
+    val added: String? = null,
+    val by: String? = null,
+    val source: String? = null,
+)
+
+/** DS Bot `run-stats`：DSH 状态栏那一行的原始数字。 */
+data class BotRunStats(
+    val turns: Int = 0,
+    val tokensPerSecond: Double? = null,
+    val cacheHit: Float? = null,
+    val contextPercent: Int? = null,
+    val contextUsed: Long = 0L,
+    val contextWindow: Long = 0L,
+) {
+    val empty: Boolean
+        get() = turns <= 0 && tokensPerSecond == null && cacheHit == null && contextPercent == null
+}
+
+/** 一个可选的工作目录（`folders` 接口给的已知目录）。 */
+data class BotFolder(val path: String, val title: String)
+
+/** `folder-list` 的一层目录。 */
+data class BotFolderListing(
+    val path: String,
+    val home: String?,
+    val crumbs: List<Pair<String, String>>,
+    val entries: List<BotFolder>,
+    val truncated: Boolean,
+)
 
 data class BotScheduleTask(
     val id: String,
@@ -53,6 +85,17 @@ data class BotDetailsUiState(
     val schedules: List<BotScheduleTask> = emptyList(),
     val usageTokens: Long = 0L,
     val cacheHit: Float? = null,
+    val runStats: BotRunStats? = null,
+    /** 记忆正文按 scope 的字符数（`memory-view.sizes`）。 */
+    val memorySizes: Map<String, String> = emptyMap(),
+    val memorySummary: String? = null,
+    val memorySummarizing: Boolean = false,
+    /** 摘要是否跟当前条目对得上；false 时是旧摘要。 */
+    val memoryFresh: Boolean = true,
+    /** `folders` 接口已知的目录 + 这个 DSH 提供哪种选择方式。 */
+    val folders: List<BotFolder> = emptyList(),
+    val teamFolder: String? = null,
+    val folderPicker: String? = null,
     val mainBotIds: Set<String> = emptySet(),
     val memoryEnabled: Boolean = true,
     val error: String? = null,
@@ -157,25 +200,9 @@ class BotDetailsViewModel(
     }
 
     private suspend fun loadExtras(connection: DshRemoteApi) {
-        val memory = runCatching {
+        runCatching {
             connection.bot("memory-view", JSONObject().put("botId", botId))
-        }.getOrNull()?.optJSONArray("entries")?.let { array ->
-            buildList {
-                for (index in 0 until array.length()) {
-                    val item = array.optJSONObject(index) ?: continue
-                    val text = item.optString("text")
-                    if (text.isNotEmpty()) {
-                        add(
-                            BotMemoryEntry(
-                                scope = item.optString("scope", "own"),
-                                topic = item.optString("topic").takeIf { it.isNotEmpty() },
-                                text = text,
-                            ),
-                        )
-                    }
-                }
-            }
-        }.orEmpty()
+        }.getOrNull()?.let { applyMemoryView(it) }
 
         val schedules = runCatching { connection.bot("schedules") }.getOrNull()
             ?.optJSONArray("tasks")?.let { array ->
@@ -195,7 +222,13 @@ class BotDetailsViewModel(
                 }
             }.orEmpty()
 
-        _ui.update { it.copy(memory = memory, schedules = schedules) }
+        _ui.update { it.copy(schedules = schedules) }
+
+        // DS Bot 的 `run-stats`：DSH 状态栏那一行的原始数字（轮数 / 速度 / 缓存 / 上下文）。
+        val stats = runCatching {
+            connection.bot("run-stats", JSONObject().put("botId", botId))
+        }.getOrNull()
+        _ui.update { it.copy(runStats = parseRunStats(stats)) }
 
         val usage = runCatching {
             connection.bot(
@@ -218,6 +251,78 @@ class BotDetailsViewModel(
             }
             _ui.update { it.copy(usageTokens = tokens, cacheHit = hit) }
         }
+    }
+
+    /** 把一份 `memory-view` 回执写进状态（`memory-view` / `memory-add` / `memory-edit` 同一个形状）。 */
+    private fun applyMemoryView(view: JSONObject) {
+        val memory = view.optJSONArray("entries")?.let { array ->
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val text = item.optString("text")
+                    if (text.isNotEmpty()) {
+                        add(
+                            BotMemoryEntry(
+                                scope = item.optString("scope", "own"),
+                                topic = item.optString("topic").takeIf { it.isNotEmpty() },
+                                text = text,
+                                added = item.optString("added").takeIf { it.isNotEmpty() },
+                                by = item.optString("by").takeIf { it.isNotEmpty() },
+                                source = item.optString("source").takeIf { it.isNotEmpty() },
+                            ),
+                        )
+                    }
+                }
+            }
+        }.orEmpty()
+        val sizes = view.optJSONObject("sizes")?.let { json ->
+            buildMap {
+                json.keys().forEach { key -> put(key, json.opt(key)?.toString().orEmpty()) }
+            }
+        }.orEmpty()
+        val summary = view.optJSONObject("summary")?.optString("text")?.takeIf { it.isNotEmpty() }
+        _ui.update {
+            it.copy(
+                memory = memory,
+                memorySizes = sizes,
+                memorySummary = summary,
+                memorySummarizing = view.optBoolean("summarizing", false),
+                memoryFresh = view.optBoolean("fresh", true),
+            )
+        }
+    }
+
+    private fun parseRunStats(values: JSONObject?): BotRunStats {
+        if (values == null) return BotRunStats()
+        val stats = values.optJSONObject("sessionStats")
+        val usage = values.optJSONObject("tokenUsage")
+        val pressure = values.optJSONObject("contextPressure")
+        val turns = stats?.optInt("turns", 0) ?: 0
+        val decodeMs = stats?.optDouble("decodeMs", 0.0) ?: 0.0
+        val decodeTokens = stats?.optDouble("decodeTokens", 0.0) ?: 0.0
+        val speed = if (decodeMs > 0 && decodeTokens > 0) decodeTokens / (decodeMs / 1000.0) else null
+        val cacheRead = usage?.optLong("cacheReadTokens", 0L) ?: 0L
+        val prompt = cacheRead +
+            (usage?.optLong("uncachedInputTokens", 0L) ?: 0L) +
+            (usage?.optLong("cacheWriteTokens", 0L) ?: 0L)
+        val hit = if (prompt > 0) cacheRead.toFloat() / prompt else null
+        val used = pressure?.let { entry ->
+            if (entry.has("projectedTokens")) entry.optLong("projectedTokens") else entry.optLong("pressureTokens", 0L)
+        } ?: 0L
+        val window = pressure?.optLong("contextWindow", 0L) ?: 0L
+        val percent = if (window > 0) {
+            ((used.toDouble() / window) * 100).toInt().coerceIn(0, 100)
+        } else {
+            null
+        }
+        return BotRunStats(
+            turns = turns,
+            tokensPerSecond = speed,
+            cacheHit = hit,
+            contextPercent = percent,
+            contextUsed = used,
+            contextWindow = window,
+        )
     }
 
     fun update(
@@ -380,6 +485,149 @@ class BotDetailsViewModel(
             }.onFailure {
                 onDone(it.message ?: "删除记忆失败")
             }
+        }
+    }
+
+    /** 加一条记忆：`memory-add {botId, scope, topic?, text}`。 */
+    fun addMemory(scope: String, topic: String?, text: String, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) {
+            onDone("先写一条要记住的内容")
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                val body = JSONObject()
+                    .put("botId", botId)
+                    .put("scope", scope)
+                    .put("text", trimmed)
+                topic?.trim()?.takeIf { it.isNotEmpty() }?.let { body.put("topic", it) }
+                connection.bot("memory-add", body)
+            }.onSuccess { view ->
+                applyMemoryView(view)
+                onDone(null)
+            }.onFailure {
+                onDone(it.message ?: "保存记忆失败")
+            }
+        }
+    }
+
+    /**
+     * 改一条记忆：`memory-edit {botId, scope, topic, text, next}`。
+     *
+     * `text` 是要替换的那条原文，`next` 是新内容（DS Bot `replaceEntry` 按原文匹配）。
+     */
+    fun editMemory(
+        entry: BotMemoryEntry,
+        next: String,
+        topic: String? = entry.topic,
+        onDone: (String?) -> Unit = {},
+    ) {
+        val connection = client ?: return
+        val trimmed = next.trim()
+        if (trimmed.isEmpty()) {
+            onDone("内容不能为空")
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot(
+                    "memory-edit",
+                    JSONObject()
+                        .put("botId", botId)
+                        .put("scope", entry.scope)
+                        .put("topic", topic.orEmpty())
+                        .put("text", entry.text)
+                        .put("next", trimmed),
+                )
+            }.onSuccess { view ->
+                applyMemoryView(view)
+                onDone(null)
+            }.onFailure {
+                onDone(it.message ?: "修改记忆失败")
+            }
+        }
+    }
+
+    /** 读已知目录 + 这个 DSH 提供哪种目录选择方式（`folders`）。 */
+    fun loadFolders(onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching { connection.bot("folders") }
+                .onSuccess { view ->
+                    val folders = view.optJSONArray("folders")?.let { array ->
+                        buildList {
+                            for (index in 0 until array.length()) {
+                                val item = array.optJSONObject(index) ?: continue
+                                val path = item.optString("path")
+                                if (path.isNotEmpty()) {
+                                    add(BotFolder(path, item.optString("title").ifEmpty { path }))
+                                }
+                            }
+                        }
+                    }.orEmpty()
+                    _ui.update {
+                        it.copy(
+                            folders = folders,
+                            teamFolder = view.optString("team").takeIf { team -> team.isNotEmpty() },
+                            folderPicker = view.optString("picker").takeIf { kind -> kind.isNotEmpty() },
+                        )
+                    }
+                    onDone(null)
+                }
+                .onFailure { onDone(it.message ?: "读取目录失败") }
+        }
+    }
+
+    /** 列一层目录（`folder-list`，只有 `picker == "browse"` 的 DSH 支持）。 */
+    fun listFolders(path: String?, onDone: (BotFolderListing?) -> Unit) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching {
+                connection.bot("folder-list", JSONObject().put("path", path.orEmpty()))
+            }.onSuccess { view ->
+                val crumbs = view.optJSONArray("crumbs")?.let { array ->
+                    buildList {
+                        for (index in 0 until array.length()) {
+                            val item = array.optJSONObject(index) ?: continue
+                            add(item.optString("name") to item.optString("path"))
+                        }
+                    }
+                }.orEmpty()
+                val entries = view.optJSONArray("entries")?.let { array ->
+                    buildList {
+                        for (index in 0 until array.length()) {
+                            val item = array.optJSONObject(index) ?: continue
+                            if (item.optBoolean("hidden", false)) continue
+                            val entryPath = item.optString("path")
+                            if (entryPath.isNotEmpty()) {
+                                add(BotFolder(entryPath, item.optString("name").ifEmpty { entryPath }))
+                            }
+                        }
+                    }
+                }.orEmpty()
+                onDone(
+                    BotFolderListing(
+                        path = view.optString("path"),
+                        home = view.optString("home").takeIf { it.isNotEmpty() },
+                        crumbs = crumbs,
+                        entries = entries,
+                        truncated = view.optBoolean("truncated", false),
+                    ),
+                )
+            }.onFailure {
+                onDone(null)
+            }
+        }
+    }
+
+    /** 系统目录选择器（`folder-pick`，只有 `picker == "native"` 的 DSH 支持）。 */
+    fun pickFolder(onDone: (String?) -> Unit) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            val path = runCatching { connection.botValue("folder-pick") }.getOrNull() as? String
+            onDone(path?.takeIf { it.isNotEmpty() })
         }
     }
 

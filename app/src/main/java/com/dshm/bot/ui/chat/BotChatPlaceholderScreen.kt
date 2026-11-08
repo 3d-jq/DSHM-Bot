@@ -417,9 +417,11 @@ fun BotChatScreen(
             ) {
             // 待办 dock：提问 / 视图 / 审批（DS Bot 的 `conversation.input.dock`）。
             PendingDock(
+                botName = bot.name,
                 approvals = state.approvals,
                 questions = state.pendingQuestions,
                 views = state.pendingViews,
+                secrets = state.pendingSecrets,
                 busy = answeringApproval || state.answeringPending,
                 onAnswerApproval = { approval, allow ->
                     answeringApproval = true
@@ -446,6 +448,21 @@ fun BotChatScreen(
                     }
                 },
                 onDismissView = { card -> viewModel.dismissChatView(card) },
+                onSecretSubmit = { request, value, onlyThisBot ->
+                    viewModel.submitChatSecret(request, value, onlyThisBot) { error ->
+                        if (error != null) chatError = error
+                    }
+                },
+                onSecretAllow = { request ->
+                    viewModel.allowChatSecret(request) { error ->
+                        if (error != null) chatError = error
+                    }
+                },
+                onSecretCancel = { request ->
+                    viewModel.cancelChatSecret(request) { error ->
+                        if (error != null) chatError = error
+                    }
+                },
             )
             ChatComposer(
                 value = draft,
@@ -502,7 +519,7 @@ fun BotChatScreen(
                     quickSettings = false
                     onDetails()
                 },
-                onBrowser = {},
+                onBrowser = onOpenBrowser,
             )
         }
     }

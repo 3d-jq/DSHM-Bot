@@ -234,16 +234,24 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - 以后做浏览器要按 DS Bot `DetailsDrawer` / `BotPanel` 的「Bot 专属浏览器标签页」口径，
   不是把当前 `WebHostScreen` 的 general DSH Web 当浏览器入口。
 
-### 底部面板待做清单（⬜ 暂不处理）
+### 底部面板接线（2026-11-08，第九轮，全部完成）
 
-- ⬜ **浏览器标签页**：做 Bot 专属标签页状态（打开/关闭/切换、当前页、恢复上次标签），按 DS Bot
-  `DetailsDrawer` 的 `browser` tab 与 `browsers.tabs` 口径；不要复用现在整页 DSH Web 的 `onOpenBrowser`。
-- ⬜ **记忆新增 / 编辑**：接 `memory-add` / `memory-edit`，补新增、修改、scope/topic 选择和失败提示；
-  现在只有 `memory-view` 查看与 `memory-forget` 删除。
-- ⬜ **文件夹选择器**：接 `folder-list` / `folder-pick`，用目录列表选工作文件夹；
-  现在是手填 `workDir` 文本，走 `update-bot` 时由 DS Bot 校验。
-- ⬜ **运行统计**：接 `run-stats`，在面板顶部或详情卡显示本轮耗时/模型用量摘要；
-  现在只有 `usage-summary` 的当天总量。
+- ☑️ **浏览器标签页**：`BotBrowserStore` + `BotBrowserScreen` 换掉原来整页 DSH Web 的占位。
+  每个 Bot 一套标签（`MAX_TABS = 6`），支持开/关/切换、地址栏、后退/前进/刷新、系统浏览器打开、
+  下载（落到应用自己的 Downloads 目录）。面板的 `browser` 分类显示标签卡（`BrowserTabsCard`）。
+  ⚠️ Android WebView 的 cookie 是进程级共享的，做不到桌面版「每个 Bot 独立 storage partition」。
+- ☑️ **浏览器控制（`read_browser`）**：`BrowserReadBridge` 长轮询 `browser-wait {clientId, open}`，
+  收到读页请求后在 WebView 里跑 `READ_PAGE_SCRIPT`（可见文本 → Markdown，链接/控件标 `[#n]`，
+  带 `items[{role,name,href,value,checked,disabled}]`），再回 `browser-result {id, ok, page}`。
+  插件侧只在「有窗口」时才注册这个工具 —— 启动引擎时给 guest 加 `DS_BOT_APP=1`（`EngineViewModel`）。
+  ⚠️ 同一开关会让插件的 `update` / `dsh-update` 认为「整个 App 一起更新」，不再自己检查 npm 版本；
+  对我们反而更安全（避免插件把 npm 包覆盖到打包副本上），但面板里的「可更新到 x.y.z」会消失。
+- ☑️ **记忆新增 / 编辑**：`memory-add` / `memory-edit`，Bot 有 `own` / `team` 两个 scope，
+  群只有 `group`；带 topic、按原文匹配替换，还显示 `memory-view` 的 sizes / 摘要 / 是否过时。
+- ☑️ **文件夹选择器**：`folders`（已知目录 + `picker` 类型）、`folder-list`（浏览，本机是 `browse`）、
+  `folder-pick`（原生选择器，本机没有）。手动输入路径保留为最后一个选项。
+- ☑️ **运行统计**：`run-stats` → `N turns · xx tok/s · Cache hit xx% · Context xx%`，
+  显示在详情页用量区块（DS Bot `runStatsOf` 同一套算法）。
 
 ### Bot 完整设置页接线审计（2026-11-07）
 
@@ -341,7 +349,8 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   DS Bot 网页版的群消息也不画产物卡，本轮不做。
 - ⬜ **没有 `present` 的轮次**：官方还有「这一轮生成的文件」兜底（按文件变更事件推），未做。
 - ⬜ **`show_view` 视图卡**：DS Bot `chat` 会返回 `kind: "view"` 条目（`show_view` 工具），
-  我们仍然丢掉；要做需要画视图蓝图（text/metric/table/chart/progress/callout/sources/html）。
+  我们仍然丢掉。蓝图渲染器已经有了（见「待办卡 dock」，`PendingDock.kt` + `ChatFormula.kt`），
+  ⬜ 还差把它接进消息流：答过的卡要按 `callId` 留在对话里。
 
 ### 运行状态与事件行（2026-11-08，第二轮）
 
@@ -388,16 +397,26 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   是可交互卡片；`read_group_chat` / `remember` / `forget` 有专属样式。
 - ⬜ `group_relay` 进行中的「正在发言的成员 + 当前工具」行（`GroupReplies` 的 pending）。
 - ⬜ 旁路任务卡 `BtwCardView` + `BtwDock`（`state.btwCards`）。
-- ⬜ 待办卡悬浮在输入框上方：`QuestionDock` / `WidgetDock` / `SecretDock`（现在塞在消息流里）。
-- 🟡 待办卡 dock（2026-11-08 第六轮）：输入框上方一道 dock，顺序照 DS Bot 的 `input.dock`
-  **提问 → 视图 → 审批**（DS Bot 把审批放在群成员条里，我们没有那一条，统一收进 dock）。
+- ☑️ 待办卡 dock（2026-11-08 第六、七轮）：输入框上方一道 dock，顺序照 DS Bot 的 `input.dock`
+  **提问 → 视图 → 密钥 → 审批**（DS Bot 把审批放在群成员条里，我们没有那一条，统一收进 dock）。
   dock 已经是输入框 chrome 的一部分：整块高度被量出来、列表留白跟着走，卡片不压消息。
-  接上 DS Bot 自己的两条来源（之前完全没接）：`state.questions`（`ask_user` → `answer-question`）、
-  `state.views`（`show_view` → `view-reply` / `dismiss-view`）。
-  视图卡画 text / metric / progress / callout / table / sources + options / confirm / submit
-  （含 choice / toggle / number / slider 输入，`values.inputs` + `values.selected`）。
-  ⬜ 还差：`chart` / `html` 组件（显示"当前版本没画"）、公式 `{"=": …}` 联动、
-  密钥卡（`state.secretRequests` + `secret-set`）、`form` 的字段逐个渲染（现在只有提交键）。
+  接上 DS Bot 自己的三条来源（之前完全没接）：`state.questions`（`ask_user` → `answer-question`）、
+  `state.views`（`show_view` → `view-reply` / `dismiss-view`）、
+  `state.secretRequests`（`request_secret` → `secret-set` / `secret-allow` / `secret-cancel`；
+  答过的卡在 dock 里多留 20 秒，对齐 DS Bot 的 `SettledSecret`）。
+  视图卡按蓝图**顺序递归**渲染（`stack` / `row` 各自成形），画 text / metric / progress / callout /
+  table / chart / sources / html + options / confirm / form / submit，输入有 choice / toggle /
+  number / slider；每次作答都按 DS Bot 带上全部 `values.inputs`。
+  公式 `{"=": …}` 按 DS Bot `src/shared/formula.js` 移植（`ChatFormula.kt`：二元/三元、比较、
+  12 个函数），`let` 名字 + 输入联动就地重算，`table` 单元格、`chart` 数值、`metric.value`、
+  `progress.percent` 都吃公式。
+  `chart` 自己画 bar / hbar / line / area / donut。
+  `html` 真渲染（2026-11-08 第八轮，`ChatHtmlCard.kt`）：WebView 沙箱，禁网 / 禁文件访问 /
+  禁跳转 / 只加载 `loadDataWithBaseURL(null, …)`，并照 `deep-view` 的 `frameDocument` 注入
+  `--view-*` 与旧的 `--bt-*` 主题变量、CSP、JS 高度上报（默认 120，上限 640）。
+  模型在 provider 改写数组参数时常用纯 CSS 的 `html` 画图，只显示 `summary` 等于看不见，所以这条必须真渲染。
+  ⬜ 还差：回答过的提问卡 `AnsweredReply` / `SettledQuestion`，以及视图卡进消息流
+  （DS Bot 把答过的卡留在对话里；我们答完就从 dock 收走）。
 - ⬜ 已回答提问 `AnsweredReply` / `SettledQuestion`。
 - ⬜ 时间分隔 `TurnTailCell`（两轮间隔 ≥30 分钟）与定时任务触发卡 `TriggerCell`。
 - 🟡 「新消息」分隔：DS Bot 用 `TurnProcessCell` 的 visit 语义；我们按用户要求先删掉，未换新语义。
@@ -446,6 +465,12 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - 🟡 群详情成员列表缺实时状态（working / approval）。
 
 **其它**
-- ⬜ `request_secret` 密钥卡 + 设置里的 Secrets 页（Bot 只拿到变量名）。
+- 🟡 `request_secret`：密钥卡已进 dock（`secret-set` / `secret-allow` / `secret-cancel`，
+  2026-11-08 第七轮）；⬜ 还差设置里的 Secrets 页（列表 / `secret-update` / `secret-delete`）。
+- ☑️ 上游版本核对（2026-11-08）：本地插件 `0.2.5`，npm 最新 `0.3.1`
+  （中间还有 `0.2.6` / `0.2.7` / `0.3.0`）。`0.3.1` 把视图/公式抽成 `deep-view@0.1.2`，
+  它的 `normalizeView` 和 `0.2.5` 是同一套（`{item:[…]}` 递归解包 + 数字字符串归一），
+  只多了「表单字段的 `value` 不当数字转」这一处 → provider 的数组编码**不是**「上游修了我们没拉」。
+  ⬜ 升到 `0.3.x` 是大动作（新依赖 `deep-view`，还多了 `skills` / `goals` / `office` / `im` 等模块），单独排期。
 - ⬜ `/side` 侧聊。
 - ⬜ 会话搜索（`session/search`）与命令面板 `CommandPalette`。

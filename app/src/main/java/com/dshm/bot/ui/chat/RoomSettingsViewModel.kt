@@ -48,9 +48,15 @@ class RoomSettingsViewModel(
     }
 
     private suspend fun loadMemory(connection: DshRemoteApi) {
-        val memory = runCatching {
+        val view = runCatching {
             connection.bot("memory-view", JSONObject().put("roomId", roomId))
-        }.getOrNull()?.optJSONArray("entries")?.let { array ->
+        }.getOrNull() ?: return
+        applyMemoryView(view)
+    }
+
+    /** `memory-view` / `memory-add` / `memory-edit` 回执都长这样。 */
+    private fun applyMemoryView(view: JSONObject) {
+        val memory = view.optJSONArray("entries")?.let { array ->
             buildList {
                 for (index in 0 until array.length()) {
                     val item = array.optJSONObject(index) ?: continue
@@ -61,12 +67,26 @@ class RoomSettingsViewModel(
                             scope = item.optString("scope", "group"),
                             topic = item.optString("topic").takeIf { it.isNotEmpty() },
                             text = text,
+                            added = item.optString("added").takeIf { it.isNotEmpty() },
+                            by = item.optString("by").takeIf { it.isNotEmpty() },
+                            source = item.optString("source").takeIf { it.isNotEmpty() },
                         ),
                     )
                 }
             }
         }.orEmpty()
-        _ui.update { it.copy(memory = memory) }
+        val sizes = view.optJSONObject("sizes")?.let { json ->
+            buildMap { json.keys().forEach { key -> put(key, json.opt(key)?.toString().orEmpty()) } }
+        }.orEmpty()
+        _ui.update {
+            it.copy(
+                memory = memory,
+                memorySizes = sizes,
+                memorySummary = view.optJSONObject("summary")?.optString("text")?.takeIf { text -> text.isNotEmpty() },
+                memorySummarizing = view.optBoolean("summarizing", false),
+                memoryFresh = view.optBoolean("fresh", true),
+            )
+        }
     }
 
     private suspend fun loadUsage(connection: DshRemoteApi) {
@@ -182,6 +202,60 @@ class RoomSettingsViewModel(
                 loadMemory(connection)
                 onDone(null)
             }.onFailure { failure -> onDone(failure.message ?: "删除群记忆失败") }
+        }
+    }
+
+    /** 加一条群记忆：`memory-add {roomId, scope, topic?, text}`。 */
+    fun addMemory(scope: String, topic: String?, text: String, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) {
+            onDone("先写一条要记住的内容")
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                val body = JSONObject()
+                    .put("roomId", roomId)
+                    .put("scope", scope)
+                    .put("text", trimmed)
+                topic?.trim()?.takeIf { it.isNotEmpty() }?.let { body.put("topic", it) }
+                connection.bot("memory-add", body)
+            }.onSuccess { view ->
+                applyMemoryView(view)
+                onDone(null)
+            }.onFailure { onDone(it.message ?: "保存群记忆失败") }
+        }
+    }
+
+    /** 改一条群记忆：`memory-edit {roomId, scope, topic, text, next}`。 */
+    fun editMemory(
+        entry: BotMemoryEntry,
+        next: String,
+        topic: String? = entry.topic,
+        onDone: (String?) -> Unit = {},
+    ) {
+        val connection = client ?: return
+        val trimmed = next.trim()
+        if (trimmed.isEmpty()) {
+            onDone("内容不能为空")
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot(
+                    "memory-edit",
+                    JSONObject()
+                        .put("roomId", roomId)
+                        .put("scope", entry.scope)
+                        .put("topic", topic.orEmpty())
+                        .put("text", entry.text)
+                        .put("next", trimmed),
+                )
+            }.onSuccess { view ->
+                applyMemoryView(view)
+                onDone(null)
+            }.onFailure { onDone(it.message ?: "修改群记忆失败") }
         }
     }
 

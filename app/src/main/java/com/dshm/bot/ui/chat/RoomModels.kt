@@ -59,6 +59,10 @@ data class RoomSettingsUi(
     val permissions: List<BotPermissionOption> = emptyList(),
     val memory: List<BotMemoryEntry> = emptyList(),
     val memoryEnabled: Boolean = true,
+    val memorySizes: Map<String, String> = emptyMap(),
+    val memorySummary: String? = null,
+    val memorySummarizing: Boolean = false,
+    val memoryFresh: Boolean = true,
     val usageTokens: Long = 0L,
     val cacheHit: Float? = null,
 )

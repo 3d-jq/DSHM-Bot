@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -83,6 +84,8 @@ fun BotDetailsScreen(
     var memoryOpen by rememberSaveable { mutableStateOf(false) }
     var newSchedule by rememberSaveable { mutableStateOf(false) }
     var instructions by remember(info?.instructions) { mutableStateOf(info?.instructions.orEmpty()) }
+    // 这一行要在 LazyColumn 的 item 里用，所以在可组合上下文里先算好。
+    val runStatsLine = runStatsLabel(state.runStats)
 
     SettingsPage(
         title = stringResource(R.string.bot_settings_page_title),
@@ -233,6 +236,15 @@ fun BotDetailsScreen(
                     value = usageLabel(state.usageTokens, state.cacheHit),
                     enabled = false,
                 )
+            }
+        }
+
+        // 缓存命中 / 上下文占用单独一张卡：跟「用量」一样有自己的标题，才对得齐。
+        runStatsLine?.let { label ->
+            item {
+                SettingsSection(title = stringResource(R.string.bot_settings_context)) {
+                    SettingsRow(title = label, enabled = false)
+                }
             }
         }
 
@@ -412,58 +424,37 @@ fun BotDetailsScreen(
         )
     }
     if (editWorkdir && info != null) {
-        TextEditDialog(
-            title = stringResource(R.string.bot_settings_workdir),
-            initial = info.workDir.orEmpty(),
-            onDismiss = { editWorkdir = false },
-            onSave = { value ->
+        FolderPickerDialog(
+            value = info.workDir,
+            fallback = stringResource(R.string.bot_settings_workdir_default),
+            folders = state.folders,
+            picker = state.folderPicker,
+            onList = { path, then -> viewModel.listFolders(path, then) },
+            onPickNative = { then -> viewModel.pickFolder(then) },
+            onChoose = { path ->
                 editWorkdir = false
                 viewModel.update(
-                    patch = JSONObject().put("workDir", value),
-                    optimistic = { it.copy(workDir = value) },
+                    patch = JSONObject().put("workDir", path.orEmpty()),
+                    optimistic = { it.copy(workDir = path) },
                 )
             },
+            onDismiss = { editWorkdir = false },
+            onLoad = { viewModel.loadFolders() },
         )
     }
     if (memoryOpen) {
-        AlertDialog(
-            onDismissRequest = { memoryOpen = false },
-            containerColor = Dshm.colors.surface,
-            title = { Text(stringResource(R.string.bot_settings_memory)) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (state.memory.isEmpty()) {
-                        Text(stringResource(R.string.bot_settings_memory_empty))
-                    } else {
-                        state.memory.forEach { entry ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = Dshm.spacing.xs),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = entry.text,
-                                    style = Dshm.typography.rowPreview,
-                                    color = Dshm.colors.textPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(onClick = { viewModel.forgetMemory(entry) }) {
-                                    Text(
-                                        text = stringResource(R.string.bot_settings_delete),
-                                        color = Dshm.colors.danger,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { memoryOpen = false }) {
-                    Text(stringResource(android.R.string.ok))
-                }
-            },
+        MemoryPanelDialog(
+            ownerName = info?.name ?: bot.name,
+            group = false,
+            entries = state.memory,
+            sizes = state.memorySizes,
+            summary = state.memorySummary,
+            summarizing = state.memorySummarizing,
+            fresh = state.memoryFresh,
+            onAdd = { scope, topic, text -> viewModel.addMemory(scope, topic, text) },
+            onEdit = { entry, next, topic -> viewModel.editMemory(entry, next, topic) },
+            onForget = { entry -> viewModel.forgetMemory(entry) },
+            onDismiss = { memoryOpen = false },
         )
     }
     if (newSchedule) {
@@ -666,6 +657,9 @@ fun BotSettingsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // 面板占屏幕 86%：内容撑到这个高度，ModalBottomSheet 贴底显示，上面留出聊天。
     val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.86f
+    // 浏览器分类直接在面板里显示页面（不是「打开浏览器」按钮）。
+    val browserContext = LocalContext.current
+    val browserSession = remember(bot.id) { BotBrowserStore.of(browserContext).session(bot.id) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -679,44 +673,17 @@ fun BotSettingsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(sheetHeight)
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = Dshm.spacing.lg)
-                .padding(bottom = Dshm.spacing.xl),
+                .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // 身份卡：只放头像、名字、标签；分类栏和设置入口不挤在白卡里。
-            SettingsSection {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = Dshm.spacing.lg),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    BotAvatar(
-                        inkId = bot.inkId,
-                        glyph = bot.glyph,
-                        avatarImage = bot.avatarImage,
-                        avatarShape = info?.shape ?: bot.avatarShape,
-                        size = Dshm.spacing.settingsAvatar,
-                    )
-                    Spacer(Modifier.height(Dshm.spacing.sm))
-                    Text(
-                        text = info?.name ?: bot.name,
-                        style = Dshm.typography.sheetTitle,
-                        color = Dshm.colors.textPrimary,
-                    )
-                    info?.role?.takeIf { it.isNotBlank() }?.let { role ->
-                        Spacer(Modifier.height(Dshm.spacing.xxs))
-                        Text(
-                            text = role,
-                            style = Dshm.typography.rowPreview,
-                            color = Dshm.colors.textSecondary,
-                        )
-                    }
-                }
-            }
-
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Dshm.spacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+            // 身份卡不放了：这一页是从 Bot 名字胶囊点进来的，头像和名字上方就有，
+            // 面板里再占一块，浏览器和设置就只剩一点点空间。
             Spacer(Modifier.height(Dshm.spacing.md))
             val tabLabels = listOf(
                 stringResource(R.string.bot_settings_details),
@@ -727,12 +694,8 @@ fun BotSettingsSheet(
                 selected = tabLabels[selectedTab],
                 onSelect = { label ->
                     val next = tabLabels.indexOf(label)
-                    if (next == BROWSER_TAB) {
-                        sheetNotice = "浏览器功能当前版本未做"
-                    } else {
-                        selectedTab = next
-                        sheetNotice = null
-                    }
+                    selectedTab = next
+                    sheetNotice = null
                 },
             )
             sheetNotice?.let { notice ->
@@ -743,7 +706,26 @@ fun BotSettingsSheet(
                     color = Dshm.colors.textTertiary,
                 )
             }
+            }
             Spacer(Modifier.height(Dshm.spacing.md))
+            if (selectedTab == BROWSER_TAB) {
+                BotBrowserPanel(
+                    session = browserSession,
+                    modifier = Modifier.weight(1f),
+                    onExpand = {
+                        onDismiss()
+                        onBrowser()
+                    },
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = Dshm.spacing.lg)
+                        .padding(bottom = Dshm.spacing.xl),
+                ) {
             SettingsSection(title = stringResource(R.string.bot_settings_page_title)) {
                 SettingsRow(
                     title = stringResource(R.string.bot_settings_details),
@@ -819,6 +801,14 @@ fun BotSettingsSheet(
                 )
             }
 
+            // 缓存命中 / 上下文占用单独一张卡：跟「用量」一样有自己的标题，才对得齐。
+            runStatsLabel(state.runStats)?.let { label ->
+                Spacer(Modifier.height(Dshm.spacing.xxl))
+                SettingsSection(title = stringResource(R.string.bot_settings_context)) {
+                    SettingsRow(title = label, enabled = false)
+                }
+            }
+
             Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_schedules)) {
                 SettingsRow(
@@ -842,21 +832,28 @@ fun BotSettingsSheet(
                     onClick = { editInstructions = true },
                 )
             }
+                }
+            }
         }
     }
 
     if (editFolder && info != null) {
-        TextEditDialog(
-            title = stringResource(R.string.bot_settings_workdir),
-            initial = info.workDir.orEmpty(),
-            onDismiss = { editFolder = false },
-            onSave = { value ->
+        FolderPickerDialog(
+            value = info.workDir,
+            fallback = stringResource(R.string.bot_settings_workdir_default),
+            folders = state.folders,
+            picker = state.folderPicker,
+            onList = { path, then -> viewModel.listFolders(path, then) },
+            onPickNative = { then -> viewModel.pickFolder(then) },
+            onChoose = { path ->
                 editFolder = false
                 viewModel.update(
-                    patch = JSONObject().put("workDir", value),
-                    optimistic = { it.copy(workDir = value) },
+                    patch = JSONObject().put("workDir", path.orEmpty()),
+                    optimistic = { it.copy(workDir = path) },
                 )
             },
+            onDismiss = { editFolder = false },
+            onLoad = { viewModel.loadFolders() },
         )
     }
     if (editInstructions && info != null) {
@@ -876,44 +873,18 @@ fun BotSettingsSheet(
         )
     }
     if (showMemory) {
-        AlertDialog(
-            onDismissRequest = { showMemory = false },
-            containerColor = Dshm.colors.surface,
-            title = { Text(stringResource(R.string.bot_settings_memory)) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (state.memory.isEmpty()) {
-                        Text(stringResource(R.string.bot_settings_memory_empty))
-                    } else {
-                        state.memory.forEach { entry ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = Dshm.spacing.xs),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = entry.text,
-                                    style = Dshm.typography.rowPreview,
-                                    color = Dshm.colors.textPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(onClick = { viewModel.forgetMemory(entry) }) {
-                                    Text(
-                                        text = stringResource(R.string.bot_settings_delete),
-                                        color = Dshm.colors.danger,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showMemory = false }) {
-                    Text(stringResource(android.R.string.ok))
-                }
-            },
+        MemoryPanelDialog(
+            ownerName = info?.name ?: bot.name,
+            group = false,
+            entries = state.memory,
+            sizes = state.memorySizes,
+            summary = state.memorySummary,
+            summarizing = state.memorySummarizing,
+            fresh = state.memoryFresh,
+            onAdd = { scope, topic, text -> viewModel.addMemory(scope, topic, text) },
+            onEdit = { entry, next, topic -> viewModel.editMemory(entry, next, topic) },
+            onForget = { entry -> viewModel.forgetMemory(entry) },
+            onDismiss = { showMemory = false },
         )
     }
     if (showSchedules) {

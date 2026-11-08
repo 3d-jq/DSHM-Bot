@@ -435,9 +435,19 @@ fun RoomSettingsScreen(
         )
     }
     if (memoryOpen) {
-        MemoryDialog(entries = state.memory, onDismiss = { memoryOpen = false }) { entry ->
-            viewModel.forgetMemory(entry)
-        }
+        MemoryPanelDialog(
+            ownerName = info?.name ?: row.name,
+            group = true,
+            entries = state.memory,
+            sizes = state.memorySizes,
+            summary = state.memorySummary,
+            summarizing = state.memorySummarizing,
+            fresh = state.memoryFresh,
+            onAdd = { scope, topic, text -> viewModel.addMemory(scope, topic, text) },
+            onEdit = { entry, next, topic -> viewModel.editMemory(entry, next, topic) },
+            onForget = { entry -> viewModel.forgetMemory(entry) },
+            onDismiss = { memoryOpen = false },
+        )
     }
     if (confirmDelete) {
         AlertDialog(
@@ -497,46 +507,6 @@ private fun ListPickDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
-        },
-    )
-}
-
-@Composable
-private fun MemoryDialog(
-    entries: List<BotMemoryEntry>,
-    onDismiss: () -> Unit,
-    onDelete: (BotMemoryEntry) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.bot_settings_memory)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                if (entries.isEmpty()) {
-                    Text(stringResource(R.string.bot_settings_memory_empty))
-                } else {
-                    entries.forEach { entry ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = Dshm.spacing.xs),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = entry.text,
-                                style = Dshm.typography.rowPreview,
-                                modifier = Modifier.weight(1f),
-                            )
-                            TextButton(onClick = { onDelete(entry) }) {
-                                Text(stringResource(R.string.bot_settings_delete), color = Dshm.colors.danger)
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) }
         },
     )
 }

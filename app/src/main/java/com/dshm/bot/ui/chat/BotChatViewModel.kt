@@ -84,6 +84,12 @@ private val FOLLOW_TOOLS = setOf(
     "list_bots", "list_secrets",
 )
 
+/** 密钥卡答完后在 dock 里多留一会儿，让「已保存 / 已允许 / 已取消」看得见。 */
+private const val secretCardLingerMs = 20_000L
+
+/** DS Bot `secrets.js` 的 `MIN_VALUE`：一把钥匙至少 4 个字符。 */
+private const val SECRET_MIN_LENGTH = 4
+
 data class BotChatUiState(
     val loading: Boolean = true,
     val engineOff: Boolean = false,
@@ -113,6 +119,8 @@ data class BotChatUiState(
     val pendingQuestions: List<ChatQuestionCard> = emptyList(),
     /** 输入框上方 dock 里的待办卡：DS Bot 的 `show_view` 视图。 */
     val pendingViews: List<ChatViewCard> = emptyList(),
+    /** 输入框上方 dock 里的密钥卡：DS Bot 的 `request_secret`（答过的只多留一小会儿）。 */
+    val pendingSecrets: List<ChatSecretRequest> = emptyList(),
     /** 正在提交一张待办卡（按钮禁用，避免重复点）。 */
     val answeringPending: Boolean = false,
     /** 还有更早的历史（游标非空）。 */
@@ -962,6 +970,16 @@ class BotChatViewModel(
             val cardScope = sessionId?.takeIf { it.isNotEmpty() } ?: botId
             val questions = if (isGroup) emptyList() else parseChatQuestions(state, cardScope)
             val views = if (isGroup) emptyList() else parseChatViews(state, cardScope)
+            // 密钥卡只在 Bot 自己的对话里出现（DS Bot：只有私聊能弹这张卡）。
+            // 答过的留在 dock 里一小会儿，让「保存了 / 允许了 / 取消了」有个落点。
+            val secrets = if (isGroup) {
+                emptyList()
+            } else {
+                val now = System.currentTimeMillis()
+                parseChatSecrets(state, botId).filter { request ->
+                    request.pending || (request.settledAt > 0L && now - request.settledAt < secretCardLingerMs)
+                }
+            }
             val news = state.optJSONObject("memoryNews")?.optJSONObject(botId)
             val newsAt = news?.optLong("at", 0L) ?: 0L
             val recentNews = newsAt > 0L && System.currentTimeMillis() - newsAt < 5 * 60_000L
@@ -985,6 +1003,7 @@ class BotChatViewModel(
                     teamRooms = rooms,
                     pendingQuestions = questions,
                     pendingViews = views,
+                    pendingSecrets = secrets,
                 )
             }
             recomputeApprovals()
@@ -1088,6 +1107,69 @@ class BotChatViewModel(
                 )
             }
             refreshBotStatus()
+        }
+    }
+
+    /**
+     * 填一把密钥：`secret-set {requestId, value, scope}`。
+     *
+     * 值只往引擎送一次，界面上不留、也不回显（DS Bot 连模型都看不到）。
+     * [onlyThisBot] 对应 DS Bot 的 `scope: 'bot'`，否则是 `'all'`。
+     */
+    fun submitChatSecret(
+        request: ChatSecretRequest,
+        value: String,
+        onlyThisBot: Boolean,
+        onDone: (String?) -> Unit = {},
+    ) {
+        val trimmed = value.trim()
+        if (trimmed.length < SECRET_MIN_LENGTH) {
+            onDone("密钥至少 $SECRET_MIN_LENGTH 个字符")
+            return
+        }
+        val connection = client ?: return
+        _uiState.update { it.copy(answeringPending = true) }
+        viewModelScope.launch {
+            val error = runCatching {
+                connection.bot(
+                    "secret-set",
+                    JSONObject()
+                        .put("requestId", request.id)
+                        .put("value", trimmed)
+                        .put("scope", if (onlyThisBot) "bot" else "all"),
+                )
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            _uiState.update { it.copy(answeringPending = false) }
+            refreshBotStatus()
+            onDone(error)
+        }
+    }
+
+    /** 允许这个 Bot 用已经存过的密钥：`secret-allow {requestId}`。 */
+    fun allowChatSecret(request: ChatSecretRequest, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        _uiState.update { it.copy(answeringPending = true) }
+        viewModelScope.launch {
+            val error = runCatching {
+                connection.bot("secret-allow", JSONObject().put("requestId", request.id))
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            _uiState.update { it.copy(answeringPending = false) }
+            refreshBotStatus()
+            onDone(error)
+        }
+    }
+
+    /** 撤回一张密钥卡：`secret-cancel {requestId}`（Bot 会收到一条「用户取消了」）。 */
+    fun cancelChatSecret(request: ChatSecretRequest, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        _uiState.update { it.copy(answeringPending = true) }
+        viewModelScope.launch {
+            val error = runCatching {
+                connection.bot("secret-cancel", JSONObject().put("requestId", request.id))
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            _uiState.update { it.copy(answeringPending = false) }
+            refreshBotStatus()
+            onDone(error)
         }
     }
 

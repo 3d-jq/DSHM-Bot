@@ -35,6 +35,8 @@ import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.account.AccountScreen
 import com.dshm.bot.ui.account.AccountViewModel
 import com.dshm.bot.ui.chat.BotBrowserScreen
+import com.dshm.bot.ui.chat.BotBrowserStore
+import com.dshm.bot.ui.chat.BrowserReadBridge
 import com.dshm.bot.ui.chat.BotChatScreen
 import com.dshm.bot.ui.chat.BotDetailsScreen
 import com.dshm.bot.ui.chat.NewGroupDialog
@@ -138,6 +140,12 @@ fun DshmBotApp(
         pluginMarketViewModel.setEndpoint(endpoint)
         engineSettingsViewModel.setEndpoint(endpoint)
         homeViewModel.setEndpoint(endpoint)
+    }
+    // Bot 浏览器的读页通道：桌面版是「窗口长轮询」，手机这边由我们自己的 WebView 应答。
+    val browserEndpoint = (engineState as? RuntimeState.Running)?.endpoint
+    LaunchedEffect(browserEndpoint) {
+        val endpoint = browserEndpoint ?: return@LaunchedEffect
+        BrowserReadBridge.loop(endpoint, BotBrowserStore.of(appContext))
     }
     val engineStatusText = when (engineState) {
         is RuntimeState.Running -> stringResource(R.string.engine_value_running)
@@ -347,7 +355,8 @@ fun DshmBotApp(
             )
 
             key == SCREEN_BOT_BROWSER -> BotBrowserScreen(
-                endpoint = (engineState as? RuntimeState.Running)?.endpoint,
+                botId = openBotId,
+                botName = uiState.rows.firstOrNull { it.id == openBotId }?.name,
                 onBack = {
                     navForward = false
                     botBrowserOpen = false
