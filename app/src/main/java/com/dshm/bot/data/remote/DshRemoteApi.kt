@@ -11,6 +11,8 @@ import org.json.JSONObject
  */
 interface DshRemoteApi {
     suspend fun bot(endpoint: String, payload: JSONObject = JSONObject()): JSONObject
+    /** 同 [bot]，但保留原始 `value`（`room-progress` / `exchange` 这类返回数组的端点）。 */
+    suspend fun botValue(endpoint: String, payload: JSONObject = JSONObject()): Any?
     suspend fun rpc(method: String, args: JSONObject = JSONObject(), timeoutMs: Int = 30_000): JSONObject
     fun feed(): Flow<BotFeedEvent>
 }
@@ -19,6 +21,9 @@ interface DshRemoteApi {
 class RemoteDshApi(private val client: DshClient) : DshRemoteApi {
     override suspend fun bot(endpoint: String, payload: JSONObject): JSONObject =
         client.bot(endpoint, payload)
+
+    override suspend fun botValue(endpoint: String, payload: JSONObject): Any? =
+        client.botValue(endpoint, payload)
 
     override suspend fun rpc(method: String, args: JSONObject, timeoutMs: Int): JSONObject =
         client.rpc(method, args, timeoutMs)

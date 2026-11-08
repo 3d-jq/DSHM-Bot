@@ -3,7 +3,9 @@ package com.dshm.bot.ui.chat
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** 对齐 DS Bot `ActivityIndicator` 的状态行解析。 */
@@ -29,6 +31,73 @@ class ChatActivityTest {
         isGroup = false,
         running = running,
     )
+
+    @Test
+    fun groupRunningFollowsTheRoundAndStopsWhenItIsOver() {
+        // round 在跑 → 显示
+        assertTrue(groupRunIsRunning(optimistic = false, roundRunning = true))
+        // 刚发出消息、还没等到回执 → 先乐观显示
+        assertTrue(groupRunIsRunning(optimistic = true, roundRunning = false))
+        // 回执到了、round 结束 → 立刻收（乐观状态按回执回收，不是等超时）
+        assertFalse(groupRunIsRunning(optimistic = false, roundRunning = false))
+    }
+
+    @Test
+    fun botRunningPrefersTheHostOverLocalGuesses() {
+        // 乐观 → 先显示
+        assertTrue(botRunIsRunning(optimistic = true, sessionStatus = null, lastTurnEnded = false, workRunning = false))
+        // 会话状态是权威：说停就停，哪怕本地乐观还在
+        assertFalse(botRunIsRunning(optimistic = true, sessionStatus = false, lastTurnEnded = false, workRunning = true))
+        assertTrue(botRunIsRunning(optimistic = false, sessionStatus = true, lastTurnEnded = true, workRunning = false))
+        // 没有会话状态时：回合边界说结束就不算在跑，否则看 work
+        assertFalse(botRunIsRunning(optimistic = false, sessionStatus = null, lastTurnEnded = true, workRunning = true))
+        assertTrue(botRunIsRunning(optimistic = false, sessionStatus = null, lastTurnEnded = false, workRunning = true))
+    }
+
+    @Test
+    fun groupFallsBackToTheSpeakingMemberReportedByRoomChat() {
+        // `work.rooms` 里没有发言记录时（round 刚开始 / 刚结束），用 `room-chat` 报的发言人，
+        // 这样状态行不会退回群头像。
+        val raw = JSONObject().put(
+            "work",
+            JSONObject().put("rooms", JSONObject().put("room-1", JSONArray())),
+        )
+        val parsed = parseChatActivity(
+            state = raw,
+            botId = "room-1",
+            sessionId = null,
+            isGroup = true,
+            running = true,
+            groupSpeakingId = "bot-2",
+        )
+        assertEquals("bot-2", parsed?.memberId)
+        assertEquals(ChatActivityKind.THINKING, parsed?.kind)
+    }
+
+    @Test
+    fun groupPrefersTheMemberThatIsActuallySpeaking() {
+        val raw = JSONObject().put(
+            "work",
+            JSONObject().put(
+                "rooms",
+                JSONObject().put(
+                    "room-1",
+                    JSONArray()
+                        .put(JSONObject().put("botId", "bot-1"))
+                        .put(JSONObject().put("botId", "bot-2").put("speaking", true)),
+                ),
+            ),
+        )
+        val parsed = parseChatActivity(
+            state = raw,
+            botId = "room-1",
+            sessionId = null,
+            isGroup = true,
+            running = true,
+            groupSpeakingId = "bot-1",
+        )
+        assertEquals("bot-2", parsed?.memberId)
+    }
 
     @Test
     fun idleTurnHasNoActivityRow() {

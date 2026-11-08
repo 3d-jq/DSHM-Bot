@@ -29,6 +29,35 @@ data class ChatActivity(
 /** DS Bot `ActivityIndicator` 的状态行文案与最短换词间隔。 */
 const val CHAT_ACTIVITY_PHRASE_HOLD_MS = 800L
 
+/**
+ * 单聊这一轮在跑吗（按优先级，顺序就是几年前踩过的坑）：
+ *
+ * 1. [sessionStatus]：引擎的会话状态（`api-session/status`），权威 —— 主机说了算；
+ * 2. [optimistic]：还没收到过会话状态时的本地乐观（刚发出消息、等回执）；
+ * 3. [lastTurnEnded]：会话事件里最后一条回合边界是 `turn/end`；
+ * 4. [workRunning]：DS Bot 的 `state.work`（兜底）。
+ */
+fun botRunIsRunning(
+    optimistic: Boolean,
+    sessionStatus: Boolean?,
+    lastTurnEnded: Boolean,
+    workRunning: Boolean,
+): Boolean = when {
+    sessionStatus != null -> sessionStatus
+    optimistic -> true
+    lastTurnEnded -> false
+    else -> workRunning
+}
+
+/**
+ * 群聊这一轮在跑吗：本地乐观 或 引擎的 round 状态（`room-progress` / `room-chat.running`）。
+ *
+ * 群会话的 `api-session/status` 和 `state.work.rooms` 都出现过没清干净、把停止键和
+ * 状态行钉在界面上的情况，所以都不看。
+ */
+fun groupRunIsRunning(optimistic: Boolean, roundRunning: Boolean): Boolean =
+    optimistic || roundRunning
+
 private val THINKING_PHRASES = listOf(
     "想一想",
     "权衡一下",
@@ -112,6 +141,8 @@ fun parseChatActivity(
     sessionId: String?,
     isGroup: Boolean,
     running: Boolean,
+    /** 群聊里 `room-chat` 报的当前发言人：`work.rooms` 里没有时用它认人。 */
+    groupSpeakingId: String? = null,
 ): ChatActivity? {
     if (!running) return null
     val work = state.optJSONObject("work") ?: JSONObject()
@@ -150,7 +181,7 @@ fun parseChatActivity(
         startedAtMs = startedAt,
         waitingForApproval = waiting,
         memberId = if (isGroup) {
-            doing?.optString("botId")?.takeIf { it.isNotEmpty() }
+            doing?.optString("botId")?.takeIf { it.isNotEmpty() } ?: groupSpeakingId
         } else {
             null
         },

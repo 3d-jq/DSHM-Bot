@@ -605,8 +605,10 @@ private fun ChatMessages(
     onLoadEarlier: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
-    val typing = activity != null
     val streamingNow = streaming.isNotEmpty()
+    // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
+    // 但如果这一刻有工具在跑（写入/搜索…），活动行仍然留着。
+    val typing = activity != null && (!streamingNow || activity.kind != ChatActivityKind.THINKING)
 
     // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
     // 显示在底部。Compose 的 reverseLayout 原生就会把底部锚住 ——

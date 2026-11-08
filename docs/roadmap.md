@@ -392,7 +392,28 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - ⬜ 已回答提问 `AnsweredReply` / `SettledQuestion`。
 - ⬜ 时间分隔 `TurnTailCell`（两轮间隔 ≥30 分钟）与定时任务触发卡 `TriggerCell`。
 - 🟡 「新消息」分隔：DS Bot 用 `TurnProcessCell` 的 visit 语义；我们按用户要求先删掉，未换新语义。
-- 🟡 活动行时机：DS Bot `rowVisible` 要求「没有文字流式输出」才显示；我们现在流式时也显示。
+- ☑️ 活动行时机（2026-11-08 第五轮）：按 DS Bot `rowVisible` —— 正在写文字时不显示活动行
+  （文字气泡自己就是「在做」），但这一刻有工具在跑（写入 / 搜索 / 派发）时仍然保留。
+- ☑️ 修时间线排序（同轮）：`session/follow` 修通后事件合并开始真的生效，而它是**整表按 seq 排序**的 ——
+  本地刚发出的用户气泡还没有真 seq（服务端回显被 `seen` 去重，要等下一次重载才有），
+  会被排到列表末尾，倒序列表里就是最下面，表现成「大模型的回复跑到问题上面」。
+  改成只把事件行插进有 seq 的那段历史（`TimelineMerge.kt` + `TimelineMergeTest`），不动其余顺序。
+- ☑️ 群聊的一轮状态（同轮，改了两版才对）：之前群聊只看 `state.work.rooms`，
+  round 完了还挂着停止键 + 状态行，`work.rooms` 里没有发言记录时状态行还会退回**群头像**。
+  第一版只在 `room-chat`（加载 / `room` 事件）时刷新，round 结束后没人再读 → 还是卡。
+  最终按 DS Bot 自己 `GroupReplies` 的做法：**每秒轮询 `room-progress`**
+  （`[{callId,replies,speaking}]`，空数组就是权威的「没在跑」），
+  群聊的 `running` / 发言人只认它（外加打开时的 `room-chat.running` 与刚发送的乐观窗口），
+  不再读群会话的 `api-session/status` 和 `work.rooms`（两者都出现过没清干净）。
+  轮询由「发送」「打开时发现 round 在跑」「feed 的 room 事件」启动，round 结束后自己收。
+- ☑️ 乐观状态不再用时间窗口（同轮，照 dsh-Go）：dsh-Go 也做乐观更新，但都是**等主机回执就撤**
+  （`PendingPrompt` 按 `requestId` 等 `UserChatItem`、`_dropEchoed`、`sessions_state` 的
+  "never optimistically"），没有超时窗口。我们原来的 `RUNNING_OPTIMISTIC_NS`（30 秒）和
+  刚加的 `GROUP_ROUND_GRACE_NS`（5 秒）都删了，改成 `optimisticRun` 标记：
+  发送时置位，**收到任一主机回执就清**（单聊 `api-session/status`、群聊读到 `room-progress`、
+  回合轮询的结论、手动停止）。判定顺序抽成 `botRunIsRunning` / `groupRunIsRunning` 两个纯函数
+  并配单测（`ChatActivityTest`），顺序就是之前踩过的坑：会话状态 > 本地乐观 > 回合边界 > `work`。
+  群聊轮询也瘦身：每秒只读 `room-progress`，重的 `state` 最多 3 秒一次。
 - 🟡 群聊 `paused` + 「继续」（`room-continue`）未接。
 - 🟡 长文折叠：DS Bot 单聊也折叠（`FOLD_HUGE`），按用户要求目前只在群聊折叠。
 

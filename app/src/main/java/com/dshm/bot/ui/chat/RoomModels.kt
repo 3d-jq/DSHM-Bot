@@ -8,6 +8,22 @@ import com.dshm.bot.ui.home.RoomMemberUi
 
 data class RoomMemberOption(val id: String, val name: String)
 
+/**
+ * `room-progress` 的结果 → 「有 round 在跑吗」+「当前发言人」。
+ *
+ * 形状对齐 `ds-bot/src/host/channel.js`：`[{callId, replies, speaking}]`；
+ * 空数组就是权威的「这一轮没在跑」。形状不对时返回 null（别拿它当「没在跑」）。
+ */
+fun parseGroupProgress(value: Any?): Pair<Boolean, String?>? {
+    val rounds = value as? JSONArray ?: return null
+    val speaking = (0 until rounds.length())
+        .mapNotNull { rounds.optJSONObject(it) }
+        .lastOrNull()
+        ?.optString("speaking")
+        ?.takeIf { it.isNotEmpty() }
+    return (rounds.length() > 0) to speaking
+}
+
 data class RoomBotOption(
     val id: String,
     val name: String,

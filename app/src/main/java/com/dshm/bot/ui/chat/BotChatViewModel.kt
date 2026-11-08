@@ -177,6 +177,19 @@ class BotChatViewModel(
      * 会在它没清干净时把停止键和活动行一直挂在界面上。
      */
     private val sessionRunningById = HashMap<String, Boolean>()
+    /** 群聊这一轮：有活跃 round 吗、当前谁在发言（`room-chat` 的 `running` / `speaking`）。 */
+    private var groupRoundRunning = false
+    private var groupSpeakingId: String? = null
+    /** `room-progress` 连续读失败的次数（读不到时别一直抱着上一次的「在跑」）。 */
+    private var groupProgressMisses = 0
+    /**
+     * 本地乐观：刚发出消息、还没等到主机回执。
+     *
+     * 对齐 dsh-Go（`PendingPrompt` / `_dropEchoed`）：乐观状态**等主机的回执就撤**，
+     * 不用时间窗口 —— 单聊的会话状态事件、群聊读到 `room-progress`、回合轮询的结论，
+     * 任何一个到了就撤掉它，界面才不会「模型早答完了还挂着状态行」。
+     */
+    private var optimisticRun = false
     /** 会话事件里最近一次 `turn/start` / `turn/end` 的 seq：最后的边界是哪一边。 */
     private var lastTurnStartSeq = 0L
     private var lastTurnEndSeq = 0L
@@ -197,8 +210,6 @@ class BotChatViewModel(
     private var memoryNoticeJob: Job? = null
     private var streamingAttempt: String? = null
     private var streamingText = ""
-    private var runStartedAt = 0L
-    private var runFinishedAt = 0L
     private var loadedOnce = false
     /** 本屏发出的用户气泡；服务端回显用 `requestId` 认出同一条，不画第二条。 */
     private val localUserEntries = LinkedHashMap<String, ChatEntry>()
@@ -387,9 +398,12 @@ class BotChatViewModel(
             // 否则列表顶部会堆一堆比最早一条消息还老的事件行。
             val oldest = base.mapNotNull { it.seq }.minOrNull()
             fun loaded(entry: ChatEntry) = oldest == null || (entry.seq ?: Long.MIN_VALUE) >= oldest
-            val merged = (base + toolEvents.values.filter(::loaded) + presentedEntries().filter(::loaded))
-                .sortedWith(compareBy<ChatEntry> { it.seq ?: Long.MAX_VALUE })
-            state.copy(entries = merged)
+            // 不能整表排序：本地刚发出的用户气泡还没有 seq（服务端回显会被 `seen` 去重，
+            // 要等下一次重载才有真 seq），按 seq 排序会把它甩到列表最后 ——
+            // 倒序列表里就是最下面，表现成「大模型的回复跑到了问题上面」。
+            // 所以只把事件插进「有 seq 的那段历史」的正确位置，插不进去就放末尾。
+            val incoming = (toolEvents.values + presentedEntries()).filter(::loaded)
+            state.copy(entries = mergeTimeline(base, incoming))
         }
     }
 
@@ -444,6 +458,9 @@ class BotChatViewModel(
                 if (id.isEmpty()) return
                 val running = args.optBoolean(1, false)
                 sessionRunningById[id] = running
+                // 主机说话了：本地乐观到此为止，之后以会话状态为准。
+                val mine = sessionId?.takeIf { it.isNotEmpty() } ?: botId
+                if (id == mine) optimisticRun = false
                 if (id == sessionId) applySessionRunning(running)
             }
 
@@ -464,7 +481,6 @@ class BotChatViewModel(
             refreshBotStatus()
             return
         }
-        runFinishedAt = System.nanoTime()
         runningWatchJob?.cancel()
         clearStreaming()
         _uiState.update {
@@ -574,7 +590,7 @@ class BotChatViewModel(
         val text = raw.trim()
         if ((text.isEmpty() && attachments.isEmpty()) || _uiState.value.sending) return
         val requestId = UUID.randomUUID().toString()
-        runStartedAt = System.nanoTime()
+        optimisticRun = true
         val bubble = ChatEntry(
             id = "user:$requestId",
             kind = ChatEntryKind.USER,
@@ -615,7 +631,6 @@ class BotChatViewModel(
                     )
                 }
             }.onSuccess {
-                runStartedAt = System.nanoTime()
                 _uiState.update {
                     it.copy(
                         sending = false,
@@ -626,7 +641,6 @@ class BotChatViewModel(
                 }
                 watchForRunEnd()
             }.onFailure { failure ->
-                runFinishedAt = System.nanoTime()
                 localUserEntries.remove(requestId)
                 seen.remove(bubble.id)
                 _uiState.update { state ->
@@ -655,6 +669,13 @@ class BotChatViewModel(
                 value.optString("sessionId").takeIf { it.isNotEmpty() }?.let {
                     sessionId = it
                     ensureFollow(it)
+                }
+                // 群聊的 `room-chat` 直接给这一轮的状态：在跑吗、谁在发言
+                // （`mobile.js roomChat`：`running` 有活跃 round，`speaking` 是当前发言人）。
+                if (isGroup) {
+                    applyGroupRound(value)
+                    // 打开时这一轮在跑：开启轮询，round 结束后停止键和状态行要自己收。
+                    if (groupRoundRunning) watchForRunEnd()
                 }
                 val items = value.optJSONArray("items")
                 val scope = sessionId ?: botId
@@ -783,7 +804,6 @@ class BotChatViewModel(
                     "start" -> {
                         streamingAttempt = data.optString("attemptId").ifEmpty { "stream" }
                         streamingText = ""
-                        runStartedAt = System.nanoTime()
                         _uiState.update {
                             it.copy(
                                 streaming = "",
@@ -816,7 +836,6 @@ class BotChatViewModel(
                         val chunk = data.optString("text")
                         if (chunk.isNotEmpty()) {
                             streamingText += chunk
-                            runStartedAt = System.nanoTime()
                             _uiState.update {
                                 it.copy(
                                     streaming = streamingText,
@@ -853,6 +872,41 @@ class BotChatViewModel(
     }
 
     /** 读活动/记忆新闻，给名字胶囊下面那行状态用。 */
+    /** 记下群聊这一轮的状态（`room-chat` 每次刷新都会带上）。 */
+    private fun applyGroupRound(value: JSONObject) {
+        groupRoundRunning = value.optBoolean("running", false)
+        groupSpeakingId = value.optString("speaking").takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * 群聊这一轮的实时状态：`room-progress`（DS Bot 自己的 `GroupReplies` 也每秒读它）。
+     *
+     * 返回「有 round 在跑吗」。空数组是权威的「没有」——`room-chat` 的 `running` 和它同源，
+     * 但只在加载/`room` 事件时才刷新，round 结束后没人再读，界面就会一直停在停止键。
+     */
+    private suspend fun refreshGroupProgress(connection: DshRemoteApi): Boolean {
+        val value = runCatching {
+            connection.botValue("room-progress", JSONObject().put("roomId", botId))
+        }.getOrNull()
+        val parsed = value?.let(::parseGroupProgress)
+        if (parsed == null) {
+            // 读不到就别一直抱着上一次的「在跑」：连读三次拿不到，按「没在跑」处理。
+            groupProgressMisses += 1
+            if (groupProgressMisses >= 3) {
+                groupRoundRunning = false
+                optimisticRun = false
+            }
+            return groupRoundRunning
+        }
+        groupProgressMisses = 0
+        // 读到引擎的 round 状态了：本地乐观到此为止，之后以它为准。
+        optimisticRun = false
+        val (running, speaking) = parsed
+        groupRoundRunning = running
+        groupSpeakingId = speaking ?: groupSpeakingId
+        return groupRoundRunning
+    }
+
     private fun refreshBotStatus() {
         val connection = client ?: return
         statusJob?.cancel()
@@ -875,18 +929,26 @@ class BotChatViewModel(
             val isMain = botId in mainIds
             val work = state.optJSONObject("work")
             val workRunning = if (isGroup) {
-                val rooms = work?.optJSONObject("rooms")
-                (rooms?.optJSONArray(botId)?.length() ?: 0) > 0
+                // 群聊只认 `room-progress` / `room-chat.running`（两者同源），
+                // `work.rooms` 曾经没清干净，会把停止键钉在界面上。
+                groupRoundRunning
             } else {
                 work?.optJSONObject("bots")?.has(botId) == true
             }
             val running = runningNow(workRunning)
+            // 审批：DS Bot 的 state 就是卡片身份；引擎事件流只补提问。
+            botApprovals = parseBotApprovals(state).filter { entry ->
+                if (isGroup) entry.roomId == botId else entry.botId == botId
+            }
+            // 群聊等审批时 `room-progress.speaking` 是空的：用等审批的那个成员认头像。
+            val groupSpeaker = groupSpeakingId ?: botApprovals.firstOrNull()?.botId
             val activity = parseChatActivity(
                 state = state,
                 botId = botId,
                 sessionId = sessionId,
                 isGroup = isGroup,
                 running = running,
+                groupSpeakingId = groupSpeaker,
             )
             val team = DsBotParser.teamMembers(state)
             val rooms = DsBotParser.teamRooms(state)
@@ -900,10 +962,6 @@ class BotChatViewModel(
                     delay(3_200)
                     _uiState.update { it.copy(memoryNotice = false) }
                 }
-            }
-            // 审批：DS Bot 的 state 就是卡片身份；引擎事件流只补提问。
-            botApprovals = parseBotApprovals(state).filter { entry ->
-                if (isGroup) entry.roomId == botId else entry.botId == botId
             }
             _uiState.update {
                 it.copy(
@@ -928,14 +986,16 @@ class BotChatViewModel(
      * 刚发出消息的一小段时间内本地的乐观状态压过一切（别让按钮闪）。
      */
     private fun runningNow(workRunning: Boolean): Boolean {
-        val optimistic = runStartedAt > runFinishedAt &&
-            System.nanoTime() - runStartedAt < RUNNING_OPTIMISTIC_NS
-        if (optimistic) return true
-        sessionId?.let { id -> sessionRunningById[id] }?.let { return it }
-        // 会话事件里最后一条回合边界是 turn/end → 这一轮已经结束：
-        // DS Bot 的 `work` 偶尔没清干净，用它压住（重启/断线漏掉状态事件时靠这条兜底）。
-        if (lastTurnEndSeq > lastTurnStartSeq) return false
-        return workRunning
+        if (isGroup) return groupRunIsRunning(optimisticRun, groupRoundRunning)
+        val key = sessionId?.takeIf { it.isNotEmpty() } ?: botId
+        return botRunIsRunning(
+            optimistic = optimisticRun,
+            // 群聊没有单独的 sessionId（群的会话 id 就是 room id）。
+            sessionStatus = sessionRunningById[key],
+            // 会话事件里最后一条回合边界是 turn/end → 这一轮已经结束。
+            lastTurnEnded = lastTurnEndSeq > lastTurnStartSeq,
+            workRunning = workRunning,
+        )
     }
 
     /** 应答一条审批：允许一次 / 拒绝。统一走 DS Bot 的 `approval-answer`。 */
@@ -990,7 +1050,7 @@ class BotChatViewModel(
     /** 停止当前对话正在执行的回合：按钮点下去立刻收起，再让引擎取消。 */
     fun stopRunning(onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
-        runFinishedAt = System.nanoTime()
+        optimisticRun = false
         // 本地先认「已经停下」：引擎的会话状态事件随后会确认，不让停止键闪回来。
         sessionId?.let { sessionRunningById[it] = false }
         clearStreaming()
@@ -1021,24 +1081,32 @@ class BotChatViewModel(
         runningWatchJob?.cancel()
         runningWatchJob = viewModelScope.launch {
             var idlePolls = 0
+            var lastRunning: Boolean? = null
+            var lastStatusAt = 0L
             while (idlePolls < 2) {
                 delay(1_000)
-                val state = runCatching { connection.bot("state") }.getOrNull() ?: continue
-                val work = state.optJSONObject("work")
-                val workRunning = if (isGroup) {
-                    (work?.optJSONObject("rooms")?.optJSONArray(botId)?.length() ?: 0) > 0
+                // 群聊只读 `room-progress`（很小）；`state` 太重，不能每秒拉 ——
+                // 手机上的引擎被高频轮询拖垮过，round 反而推不动。
+                val running = if (isGroup) {
+                    refreshGroupProgress(connection)
                 } else {
-                    work?.optJSONObject("bots")?.has(botId) == true
+                    val state = runCatching { connection.bot("state") }.getOrNull() ?: continue
+                    runningNow(state.optJSONObject("work")?.optJSONObject("bots")?.has(botId) == true)
                 }
-                val running = runningNow(workRunning)
                 if (running) {
                     idlePolls = 0
-                    refreshBotStatus()
+                    // 状态行（工具文案/计时）不需要每秒刷；3 秒一次够了。
+                    val now = System.currentTimeMillis()
+                    if (lastRunning != true || now - lastStatusAt >= 3_000L) {
+                        lastStatusAt = now
+                        refreshBotStatus()
+                    }
                 } else {
                     idlePolls += 1
                 }
+                lastRunning = running
             }
-            runFinishedAt = System.nanoTime()
+            optimisticRun = false
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
         }
     }
@@ -1121,7 +1189,7 @@ class BotChatViewModel(
         private const val HOST_PENDING_CAP = 32
         private const val STOP_GRACE_NS = 2_000_000_000L
         /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
-        private const val RUNNING_OPTIMISTIC_NS = 30_000_000_000L
+        /** 群聊里刚发出消息后，等 round 建起来的最长时间（超过就不再乐观显示）。 */
 
         fun factory(
             botId: String,

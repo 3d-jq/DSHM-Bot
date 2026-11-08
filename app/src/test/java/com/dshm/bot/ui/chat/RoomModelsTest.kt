@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -71,5 +72,25 @@ class RoomModelsTest {
     fun stringListKeepsOnlyNonEmptyValues() {
         val array = JSONArray().put("a").put("").put("b")
         assertEquals(listOf("a", "b"), array.toStringList())
+    }
+
+    @Test
+    fun groupProgressReadsRunningAndTheSpeakingMember() {
+        val idle = parseGroupProgress(JSONArray())
+        assertEquals(false to null, idle)
+
+        val running = parseGroupProgress(
+            JSONArray()
+                .put(JSONObject().put("callId", "call-1").put("speaking", "bot-2"))
+                .put(JSONObject().put("callId", "call-2").put("speaking", "bot-3")),
+        )
+        assertEquals(true to "bot-3", running)
+
+        val noSpeaker = parseGroupProgress(JSONArray().put(JSONObject().put("callId", "call-1")))
+        assertEquals(true to null, noSpeaker)
+
+        // 形状不对时给 null：调用方要保留上一次的判断，而不是当成「没在跑」。
+        assertNull(parseGroupProgress(JSONObject()))
+        assertNull(parseGroupProgress(null))
     }
 }
