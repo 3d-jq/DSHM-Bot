@@ -18,8 +18,8 @@
 // where the member that asked for it answers.
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { readFile, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readFile, readdir, rm, stat } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { GROUP_LINE_READ, ROOM_REPLY_TIMEOUT_MS, ROOM_STEP_GAP_MS, ROOM_WORK_GRACE_MS, SOURCE_KIND, TEAM_TOOLS, TEXT_KEPT } from './constants.js'
@@ -945,6 +945,98 @@ export function install(rt) {
     await ctx.sessions.flush(agent.session)
   }
   rt.continueRoom = continueRoom
+
+  // What a group round delivered. Each member's turn runs in its own Session, so a
+  // member's `present` lands there, not in the room's chat; a window that draws the
+  // group itself has to collect them from the member Sessions. Files the round wrote
+  // without presenting anything are the fallback (`changed`), read off the workspace.
+  const PRESENTED_EVENT = 'deliverables/presented'
+  const ARTIFACT_WALK_MAX = 4000
+  const ARTIFACT_DEPTH_MAX = 3
+  const ARTIFACT_SKIP = new Set(['node_modules', '__pycache__', 'dist', 'build', 'target'])
+
+  async function memberPresented(sessionId, since, errors) {
+    const agent = await rt.resolveAgent(sessionId).catch(error => {
+      errors.push(`session ${sessionId}: ${error?.message ?? error}`)
+      return undefined
+    })
+    if (agent?.session === undefined) return []
+    const page = await ctx.sessionController.page({
+      address: { kind: 'session', sessionId },
+      throughSeq: Number(agent.session.seq) - 1,
+      maxMessages: 200,
+    }, AbortSignal.timeout(8000)).catch(error => {
+      errors.push(`page ${sessionId}: ${error?.message ?? error}`)
+      return undefined
+    })
+    if (page === undefined) return []
+    const base = rt.sessionFolder(agent.session)
+    const out = []
+    for (const record of page.records) {
+      const event = record?.event
+      if (event?.type !== PRESENTED_EVENT) continue
+      if (since > 0 && typeof event.time === 'number' && event.time < since) continue
+      const files = Array.isArray(event.data?.files) ? event.data.files : []
+      for (const file of files) {
+        if (typeof file?.path !== 'string' || file.path.trim() === '') continue
+        const path = file.path.startsWith('/') ? file.path : join(base, file.path)
+        out.push({ path, description: typeof file.description === 'string' ? file.description : null })
+      }
+    }
+    return out
+  }
+
+  async function recentFiles(dir, since) {
+    const out = []
+    const walk = async (at, depth) => {
+      if (depth > ARTIFACT_DEPTH_MAX || out.length >= ARTIFACT_WALK_MAX) return
+      const entries = await readdir(at, { withFileTypes: true }).catch(() => [])
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || ARTIFACT_SKIP.has(entry.name)) continue
+        const path = join(at, entry.name)
+        if (entry.isDirectory()) {
+          await walk(path, depth + 1)
+        } else if (entry.isFile()) {
+          const info = await stat(path).catch(() => undefined)
+          if (info !== undefined && info.mtimeMs >= since) out.push({ path, at: info.mtimeMs })
+        }
+        if (out.length >= ARTIFACT_WALK_MAX) return
+      }
+    }
+    await walk(dir, 0)
+    return out
+  }
+
+  async function roomArtifacts(roomId, sinceMs) {
+    const room = rt.roomOf(roomId)
+    if (room === undefined) throw new Error('Unknown group chat')
+    const since = Number.isFinite(sinceMs) && sinceMs > 0 ? sinceMs : 0
+    const files = []
+    const seen = new Set()
+    const errors = []
+    for (const memberId of room.members ?? []) {
+      const sessionId = room.sessions?.[memberId]
+      if (sessionId === undefined) continue
+      const found = await memberPresented(sessionId, since, errors)
+      if (found.length === 0) continue
+      const member = rt.botOf(memberId)
+      for (const file of found) {
+        if (!seen.add(file.path)) continue
+        files.push({ botId: memberId, name: member?.name ?? memberId, ...file })
+      }
+    }
+    // 群自己的 Session 就落在这一轮成员写文件的目录：问它拿最准
+    // （`workDirOf` 没有配置时会退回队伍工作区，这里不走那条猜的路）。
+    const roomAgent = await rt.resolveAgent(room.id).catch(() => undefined)
+    const dir = roomAgent?.session === undefined ? undefined : rt.sessionFolder(roomAgent.session)
+    const changed = dir === undefined
+      ? []
+      : (await recentFiles(dir, since))
+        .filter(file => !seen.has(file.path))
+        .map(file => ({ path: file.path, name: basename(file.path), at: file.at }))
+    return { since, files, changed, ...(errors.length > 0 ? { errors } : {}) }
+  }
+  rt.roomArtifacts = roomArtifacts
 
   async function reportRound(room, post, round) {
     const lines = round.replies.filter(reply => reply.kind === undefined).map(reply => `${reply.name}: ${reply.text}`)

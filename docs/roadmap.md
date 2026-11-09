@@ -537,10 +537,15 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - ☑️ 群聊 `paused` + 「继续」（`room-continue`）：输入框上方出「群聊暂停了…」卡片 + 「继续」，
   数据取 `state.rooms[].paused`（2026-11-09）。
 - ☑️ 群详情成员的实时状态（`state.work` → 等你批准 / 正在干活），页面开着时 3 秒轻量轮询（2026-11-09）。
+- ☑️ 群聊产物兜底（2026-11-09）：成员的 `present` 落在各自会话里，插件新增 `room-artifacts`
+  按成员会话翻 `deliverables/presented`，本轮没人声明时退回群工作区里被改动的文件；
+  结果贴成一张产物卡（重载后按固定 id 补回末尾）。
 - 🟡 长文折叠：DS Bot 单聊也折叠（`FOLD_HUGE`），按用户要求目前只在群聊折叠。
 
 **输入区**
-- ⬜ 成员 dock（群聊成员在输入框上方，`MemberDock`）。
+- ☑️ 成员 dock（群聊成员在输入框上方，`MemberDock`）：成员头像堆叠 + 「X 等你批准」/
+  「X · 正在写…」，数据取 `state.work`（`parseMemberStatus` 的 `here` / `speaking`，正在本群发言的人
+  不画），点开进群详情（2026-11-09）。
 - ☑️ 模型选择 dock（输入框上方，`ModelChoiceDock`）：Bot 没模型 / 模型没了时出卡 + 模型 chip
   （`update-bot {model}`）—— 之前新建的 Bot 没选模型会直接卡住（2026-11-09）。
 - ⬜ 输入框上方的 usage dock / btw dock（DS Bot 里 activity/usage 两个 dock 被隐藏，btw 显示）。

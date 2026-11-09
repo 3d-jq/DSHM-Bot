@@ -271,6 +271,12 @@ export function install(rt) {
           await rt.continueRoom(body.roomId)
           return ok(view())
         }
+        // What a group round delivered: members' `present` declarations (they live in
+        // the member Sessions) plus files the round wrote without presenting anything.
+        case 'room-artifacts': {
+          await rt.load()
+          return ok(await rt.roomArtifacts(String(body.roomId ?? ''), Number(body.since ?? 0)))
+        }
         case 'folders':
         case 'folder-pick':
         case 'folder-list':

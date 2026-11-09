@@ -202,6 +202,9 @@ private val FOLLOW_TOOLS = setOf(
 /** 密钥卡答完后在 dock 里多留一会儿，让「已保存 / 已允许 / 已取消」看得见。 */
 private const val secretCardLingerMs = 20_000L
 
+/** 群产物卡在时间线里的固定 id（重载后按它替换，不重复贴）。 */
+private const val ROOM_ARTIFACTS_ID = "room-artifacts"
+
 /** DS Bot `secrets.js` 的 `MIN_VALUE`：一把钥匙至少 4 个字符。 */
 private const val SECRET_MIN_LENGTH = 4
 
@@ -253,6 +256,8 @@ data class BotChatUiState(
     val teamRooms: List<TeamRoomUi> = emptyList(),
     /** 群聊被中转上限暂停：等用户点「继续」（`state.rooms[].paused`）。 */
     val roomPaused: List<ChatPausedMember> = emptyList(),
+    /** 群成员的实时状态（`state.work`）：输入框上方的成员 dock 和成员行用它。 */
+    val memberStatus: Map<String, RoomMemberStatus> = emptyMap(),
     /** 正在提交「继续」：按钮禁用，避免重复点。 */
     val roomContinuing: Boolean = false,
     /** 需要用户先选模型（`ModelChoiceDock`）；不需要时为 null。 */
@@ -316,6 +321,10 @@ class BotChatViewModel(
     /** 群聊这一轮：有活跃 round 吗、当前谁在发言（`room-chat` 的 `running` / `speaking`）。 */
     private var groupRoundRunning = false
     private var groupSpeakingId: String? = null
+    /** 这一轮是什么时候开始的：群产物只收这之后声明的（`room-artifacts`）。 */
+    private var groupRoundStartedAt = 0L
+    /** 群里交付过的文件（成员会话里的 `present` + 本轮被改动的文件）。 */
+    private val roomArtifacts = mutableListOf<ChatArtifact>()
     /** `room-progress` 连续读失败的次数（读不到时别一直抱着上一次的「在跑」）。 */
     private var groupProgressMisses = 0
     /**
@@ -883,6 +892,8 @@ class BotChatViewModel(
                 clearStreaming()
                 loadedOnce = true
                 mergeSessionEvents()
+                // 群产物不属于 `room-chat` 的历史（它在成员会话里），重载后补回末尾。
+                if (isGroup) showRoomArtifacts()
                 // 刚学到这个 Bot 当前用的 DSH 会话 id：事件流里的请求靠它认领。
                 recomputeApprovals()
                 refreshBotStatus()
@@ -1060,8 +1071,20 @@ class BotChatViewModel(
     /** 读活动/记忆新闻，给名字胶囊下面那行状态用。 */
     /** 记下群聊这一轮的状态（`room-chat` 每次刷新都会带上）。 */
     private fun applyGroupRound(value: JSONObject) {
-        groupRoundRunning = value.optBoolean("running", false)
+        noteGroupRound(value.optBoolean("running", false))
         groupSpeakingId = value.optString("speaking").takeIf { it.isNotEmpty() }
+    }
+
+    /** 记下这一轮什么时候开始的：群产物只收这之后声明的文件。 */
+    private fun noteGroupRound(running: Boolean) {
+        val started = running && !groupRoundRunning
+        groupRoundRunning = running
+        if (started) {
+            // 刚打开界面时这一轮可能早就在跑了：第一次往前多收一分钟，
+            // 免得声明刚好落在我们打开之前。
+            val warm = if (groupRoundStartedAt == 0L) 60_000L else 0L
+            groupRoundStartedAt = System.currentTimeMillis() - warm
+        }
     }
 
     /**
@@ -1088,7 +1111,7 @@ class BotChatViewModel(
         // 读到引擎的 round 状态了：本地乐观到此为止，之后以它为准。
         optimisticRun = false
         val (running, speaking) = parsed
-        groupRoundRunning = running
+        noteGroupRound(running)
         groupSpeakingId = speaking ?: groupSpeakingId
         return groupRoundRunning
     }
@@ -1179,6 +1202,7 @@ class BotChatViewModel(
                     pendingViews = views,
                     pendingSecrets = secrets,
                     roomPaused = paused,
+                    memberStatus = if (isGroup) parseMemberStatus(state, botId) else emptyMap(),
                     modelPrompt = if (isGroup) null else modelPromptOf(state, bot),
                 )
             }
@@ -1488,10 +1512,74 @@ class BotChatViewModel(
             }
             optimisticRun = false
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
+            // 群成员跑在自己会话里，产物（`present`）也就落在那边：这一轮结束后
+            // 去插件收一次，没人 `present` 时就退回「本轮被改动的文件」。
+            if (isGroup) {
+                refreshGroupArtifacts(connection, groupRoundStartedAt.takeIf { it > 0 } ?: watchStartedAt)
+            }
             // 一轮结束却一个字都没产出：多半是模型调用失败（DS Bot 只写诊断不写 chat），
             // 查一次诊断，找到就把失败贴成一行，别让「失败」和「正常做完」长得一样。
             val produced = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT } > botEntriesAtStart
             if (!produced) reportTurnFailure(connection, watchStartedAt)
+        }
+    }
+
+    /**
+     * 群聊这一轮的产物：插件从成员会话里翻 `deliverables/presented`，
+     * 没有声明时退回本轮被改动过的文件（`room-artifacts`）。
+     */
+    private suspend fun refreshGroupArtifacts(connection: DshRemoteApi, since: Long) {
+        val value = runCatching {
+            connection.bot(
+                "room-artifacts",
+                JSONObject().put("roomId", botId).put("since", since),
+            )
+        }.getOrNull() ?: return
+        val found = buildList {
+            value.optJSONArray("files")?.let { array ->
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val path = item.optString("path").takeIf { it.isNotEmpty() } ?: continue
+                    add(ChatArtifact(path = path, description = item.optString("description").takeIf { it.isNotEmpty() }))
+                }
+            }
+            value.optJSONArray("changed")?.let { array ->
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val path = item.optString("path").takeIf { it.isNotEmpty() } ?: continue
+                    add(ChatArtifact(path = path, description = null))
+                }
+            }
+        }
+        if (found.isEmpty()) return
+        var added = false
+        found.forEach { artifact ->
+            if (roomArtifacts.none { it.path == artifact.path }) {
+                roomArtifacts += artifact
+                added = true
+            }
+        }
+        if (added) showRoomArtifacts()
+    }
+
+    /** 把群里收上来的产物贴成一张卡（贴在时间线末尾，重载后也补回来）。 */
+    private fun showRoomArtifacts() {
+        if (roomArtifacts.isEmpty()) return
+        val entry = ChatEntry(
+            id = ROOM_ARTIFACTS_ID,
+            kind = ChatEntryKind.ARTIFACTS,
+            text = "",
+            seq = Long.MAX_VALUE,
+            artifacts = roomArtifacts.toList(),
+        )
+        _uiState.update { state ->
+            state.copy(
+                entries = if (state.entries.any { it.id == ROOM_ARTIFACTS_ID }) {
+                    state.entries.map { if (it.id == ROOM_ARTIFACTS_ID) entry else it }
+                } else {
+                    state.entries + entry
+                },
+            )
         }
     }
 

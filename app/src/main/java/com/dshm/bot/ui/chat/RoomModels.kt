@@ -83,6 +83,10 @@ data class RoomMemberStatus(
     val state: String,
     /** 正在干什么（DS Bot 的 `workPhrase(doing)`）。 */
     val doing: String? = null,
+    /** 活是**这个群**里的（`work.rooms[roomId]`），而不是它自己会话里的。 */
+    val here: Boolean = false,
+    /** 正在这个群里发言（网页版 dock 会把这条藏掉，因为对话里已经看得到）。 */
+    val speaking: Boolean = false,
 )
 
 /** DS Bot `state.rooms[]` + `state.permissions`。 */
@@ -187,6 +191,8 @@ internal fun parseMemberStatus(state: JSONObject, roomId: String): Map<String, R
             return RoomMemberStatus(
                 state = "work",
                 doing = toolLabel(doing)?.takeIf { it.isNotBlank() } ?: "正在干活",
+                here = local != null,
+                speaking = local?.optBoolean("speaking") == true,
             )
         }
         return RoomMemberStatus(state = "idle")

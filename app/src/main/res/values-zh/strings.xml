@@ -175,6 +175,10 @@
     <string name="chat_room_continue">继续</string>
     <string name="room_member_waiting_approval">等你批准</string>
     <string name="room_member_working">%1$s…</string>
+    <string name="chat_member_dock_waiting_one">%1$s 等你批准</string>
+    <string name="chat_member_dock_waiting_two">%1$s、%2$s 等你批准</string>
+    <string name="chat_member_dock_waiting_more">%1$s、%2$s 等 %3$d 人等你批准</string>
+    <string name="chat_member_dock_doing">%1$s · %2$s…</string>
     <string name="chat_copy_transcript">复制整段对话</string>
     <string name="chat_user_images">%1$d 张图片</string>
     <string name="chat_whole_show_all">显示全部 · %1$s</string>

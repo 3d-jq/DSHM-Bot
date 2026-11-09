@@ -175,6 +175,10 @@
     <string name="chat_room_continue">Continue</string>
     <string name="room_member_waiting_approval">Waiting for your approval</string>
     <string name="room_member_working">%1$s…</string>
+    <string name="chat_member_dock_waiting_one">%1$s is waiting for your approval</string>
+    <string name="chat_member_dock_waiting_two">%1$s and %2$s are waiting for your approval</string>
+    <string name="chat_member_dock_waiting_more">%1$s, %2$s and %3$d more are waiting for your approval</string>
+    <string name="chat_member_dock_doing">%1$s · %2$s…</string>
     <string name="chat_copy_transcript">Copy conversation</string>
     <string name="chat_user_images">%1$d images</string>
     <string name="chat_whole_show_all">Show all · %1$s</string>

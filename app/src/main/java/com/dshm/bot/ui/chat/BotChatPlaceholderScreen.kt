@@ -543,6 +543,14 @@ fun BotChatScreen(
                     },
                 )
             }
+            // 群成员 dock：谁在忙、谁在等你批准（网页版 `MemberDock`）。点开是群详情。
+            if (bot.isGroup) {
+                MemberDockCard(
+                    members = bot.roomMembers,
+                    status = state.memberStatus,
+                    onOpen = { quickSettings = true },
+                )
+            }
             // 群聊跑到中转上限会停下等用户：这一行 + 「继续」走 `room-continue`。
             RoomPausedCard(
                 paused = state.roomPaused,
