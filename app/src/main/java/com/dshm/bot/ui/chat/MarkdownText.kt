@@ -28,7 +28,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,12 +41,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
@@ -193,6 +198,105 @@ internal fun parseMarkdown(source: String): List<MarkdownBlock> {
     return blocks
 }
 
+/** 当前正在渲染的消息 id（选区按消息 + 片段定位）。 */
+internal val LocalMarkdownMessageId = compositionLocalOf { "" }
+
+/**
+ * 同一条 markdown 里每个 `ShardText` 的稳定子序号。
+ *
+ * 照 DeepSearch `ShardSubIndexAllocator`：一条消息里可能有多个 Text 节点，
+ * 只用 `块号:类型` 会撞 id，注册表里后画的把先画的覆盖掉 —— 表现为「有的段落选不中」。
+ */
+internal class ShardSubIndexAllocator {
+    private var counter = 0
+    fun next(): Int = counter++
+}
+
+internal val LocalShardSubIndex = compositionLocalOf<ShardSubIndexAllocator?> { null }
+
+/**
+ * 一段参与选择的文字。
+ *
+ * 严格照 DeepSearch `StreamingMarkdownText.kt` 的 `MdText`：
+ * - 基础 id 是完整 `TextShardId(messageId, 块id)`，子序号由 [LocalShardSubIndex]
+ *   在 `remember(baseId)` 里分配一次，拼成 `块id#序号`；
+ * - `register`/`unregister` 走 [RegisterSelectionShard]；
+ * - `drawBehind` **无条件**挂，选区状态在 draw 阶段读（不重组 Text）；
+ * - Text 的 `onGloballyPositioned` 只更新一个普通数组，不写 snapshot state。
+ */
+@Composable
+internal fun ShardText(
+    text: AnnotatedString,
+    style: TextStyle,
+    shardId: String,
+    modifier: Modifier = Modifier,
+    softWrap: Boolean = true,
+    /** true = 长按整段选中（表格单元格用）；false = 按词选中。 */
+    isAtomicUnit: Boolean = false,
+    /**
+     * Text 是否占满可用宽度。
+     *
+     * DeepSearch 的 `MdText` 由调用方把 `weight(1f)` / `width(120.dp)` 直接挂到
+     * Text 上，命中矩形因此覆盖整行/整格。我们之前把 weight 挂在外层 Box，
+     * Text 只包住字面宽度 —— 点在 `.md` / `.docx` 后面的空白处就命中不到。
+     * 代码块要 `softWrap=false` + 横向滚动，不能撑满，故单独关掉。
+     */
+    fillWidth: Boolean = true,
+) {
+    val messageId = LocalMarkdownMessageId.current
+    val controller = LocalMinisSelectionController.current
+    val allocator = LocalShardSubIndex.current
+    // 基础 id 同 `LocalShardId`；remember key 只用 baseId，和 DeepSearch 一致
+    // （用具体 shardId 当 key 会在块内容变化时重新分配序号，注册表抖动）。
+    val baseId = remember(messageId, shardId) { TextShardId(messageId, shardId) }
+    val subIndex = remember(baseId) { allocator?.next() ?: 0 }
+    // `shardOrderKey` 取最后一个冒号后的整数当文档顺序（DeepSearch 的
+    // `mdblock:<parent>:<index>` 约定）。用 `#index` 会解析失败，退回按
+    // 窗口 y 比较；反序列表里 y 顺序与文档顺序相反，同消息的其它片段
+    // 会被判"不在选区内" → 不画高亮（但复制仍可用，正是用户看到的现象）。
+    val id = remember(baseId, subIndex, allocator) {
+        if (allocator == null) baseId.copy(shardId = "$shardId:$subIndex")
+        else baseId.copy(shardId = "$shardId:$subIndex")
+    }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    // `inlineMarkdown` 每次重组都新建 AnnotatedString，用纯文本当 key 避免 shard 重建。
+    val plainText = text.text
+    val shard = remember(id, layoutResult, plainText, isAtomicUnit) {
+        val result = layoutResult
+        if (result == null) null else buildTextShard(
+            id = id,
+            plainText = plainText,
+            layoutResult = result,
+            coordinatesProvider = { coordinates[0] },
+            isAtomicUnit = isAtomicUnit,
+        )
+    }
+    RegisterSelectionShard(shard)
+    val selectionState = controller?.selection
+    val highlight = Dshm.colors.accent.copy(alpha = 0.28f)
+    Text(
+        text = text,
+        style = style,
+        softWrap = softWrap,
+        modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier)
+            .then(modifier)
+            .onGloballyPositioned { coordinates[0] = it }
+            .drawBehind {
+                val result = layoutResult ?: return@drawBehind
+                val selection = selectionState?.value ?: return@drawBehind
+                drawSelectionForShard(
+                    shardId = id,
+                    result = result,
+                    selection = selection,
+                    controller = controller,
+                    color = highlight,
+                )
+            },
+        onTextLayout = { layoutResult = it },
+    )
+}
+
 /**
  * 轻量 Markdown 渲染：块级由 [MarkdownText] 排版，行内支持 **粗体**、*斜体*、`行内代码`、
  * ~~删除线~~ 和 [链接](url)。聊天回复里常见的标题/列表/代码块都能正常显示。
@@ -203,6 +307,8 @@ fun MarkdownText(
     fontScale: Float,
     modifier: Modifier = Modifier,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
+    /** 这条消息的 id：选区按 (消息, 片段) 记位置，滚动回来还能续上。 */
+    messageId: String = "",
 ) {
     val colors = Dshm.colors
     val blocks = remember(markdown) { parseMarkdown(markdown) }
@@ -212,24 +318,32 @@ fun MarkdownText(
         color = colors.textPrimary,
     )
 
+    val allocator = remember(messageId) { ShardSubIndexAllocator() }
+    CompositionLocalProvider(
+        LocalMarkdownMessageId provides messageId,
+        LocalShardSubIndex provides allocator,
+    ) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
     ) {
-        blocks.forEach { block ->
+        blocks.forEachIndexed { index, block ->
+            val baseId = "b$index"
             when (block) {
-                is MarkdownBlock.Paragraph -> Text(
+                is MarkdownBlock.Paragraph -> ShardText(
                     text = inlineMarkdown(block.text, colors, base, mentionMembers),
                     style = base,
+                    shardId = "$baseId:p",
                 )
 
-                is MarkdownBlock.Heading -> Text(
+                is MarkdownBlock.Heading -> ShardText(
                     text = inlineMarkdown(block.text, colors, base, mentionMembers),
                     style = base.copy(
                         fontSize = base.fontSize * if (block.level <= 2) 1.18f else 1.08f,
                         lineHeight = base.lineHeight * if (block.level <= 2) 1.18f else 1.08f,
                         fontWeight = FontWeight.Bold,
                     ),
+                    shardId = "$baseId:h",
                 )
 
                 is MarkdownBlock.ListItem -> ListLine(
@@ -239,14 +353,16 @@ fun MarkdownText(
                     colors = colors,
                     base = base,
                     mentionMembers = mentionMembers,
+                    shardId = "$baseId:l",
                 )
 
-                is MarkdownBlock.Quote -> Text(
+                is MarkdownBlock.Quote -> ShardText(
                     text = inlineMarkdown(block.text, colors, base, mentionMembers),
                     style = base.copy(
                         color = colors.textSecondary,
                         fontStyle = FontStyle.Italic,
                     ),
+                    shardId = "$baseId:q",
                     // 左边一条强调色竖线：引用块不靠缩进硬猜，一眼能认出来。
                     modifier = Modifier
                         .drawBehind {
@@ -264,6 +380,7 @@ fun MarkdownText(
                     language = block.language,
                     base = base,
                     colors = colors,
+                    shardId = "$baseId:c",
                 )
 
                 MarkdownBlock.Divider -> HorizontalDivider(
@@ -277,9 +394,11 @@ fun MarkdownText(
                     rows = block.rows,
                     colors = colors,
                     base = base,
+                    shardBase = "$baseId:t",
                 )
             }
         }
+    }
     }
 }
 
@@ -294,6 +413,7 @@ private fun CodeBlockView(
     language: String,
     base: TextStyle,
     colors: DshmColors,
+    shardId: String,
 ) {
     val context = LocalContext.current
     var copied by remember(code) { mutableStateOf(false) }
@@ -354,14 +474,16 @@ private fun CodeBlockView(
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xs),
         ) {
-            Text(
+            ShardText(
                 text = highlighted,
                 style = base.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = base.fontSize * 0.9f,
                     lineHeight = base.lineHeight * 0.95f,
                 ),
+                shardId = shardId,
                 softWrap = false,
+                fillWidth = false,
             )
         }
     }
@@ -381,6 +503,7 @@ private fun MarkdownTable(
     rows: List<List<String>>,
     colors: DshmColors,
     base: TextStyle,
+    shardBase: String = "table",
 ) {
     if (header.isEmpty()) return
     // 照 DeepSearch `TableView`：只画外框 + 每行横线，**不画竖线**（竖线会把
@@ -410,6 +533,7 @@ private fun MarkdownTable(
                         base = base,
                         bold = true,
                         modifier = Modifier.weight(1f),
+                        shardId = "$shardBase:h$column",
                     )
                     if (column < header.lastIndex) {
                         VerticalDivider(
@@ -422,7 +546,7 @@ private fun MarkdownTable(
             }
             HorizontalDivider(thickness = 0.5.dp, color = borderColor)
             // 数据行
-            rows.forEach { row ->
+            rows.forEachIndexed { rowIndex, row ->
                 Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     header.indices.forEach { column ->
                         TableCell(
@@ -432,6 +556,7 @@ private fun MarkdownTable(
                             base = base,
                             bold = false,
                             modifier = Modifier.weight(1f),
+                            shardId = "$shardBase:r$rowIndex$column",
                         )
                         if (column < header.lastIndex) {
                             VerticalDivider(
@@ -457,6 +582,7 @@ private fun TableCell(
     base: TextStyle,
     bold: Boolean,
     modifier: Modifier = Modifier,
+    shardId: String = "",
 ) {
     Box(
         // 列宽均分气泡宽度：手机上不会出现「第三列被切掉、要横向拖」的情况。
@@ -467,12 +593,14 @@ private fun TableCell(
             MarkdownTables.Alignment.LEFT -> Alignment.CenterStart
         },
     ) {
-        Text(
+        ShardText(
             text = inlineMarkdown(text, colors, base),
             style = base.copy(
                 fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
                 color = colors.textPrimary,
             ),
+            shardId = shardId,
+            isAtomicUnit = true,
         )
     }
 }
@@ -485,6 +613,7 @@ private fun ListLine(
     colors: DshmColors,
     base: TextStyle,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
+    shardId: String = "",
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Text(
@@ -504,9 +633,10 @@ private fun ListLine(
         // 注意：weight 放在外层 Box 上，Text 本身保持普通测量 ——
         // 直接把 weight 挂在 Text 上时，它在 Compose 的选择注册里会漏掉（长按选不中）。
         Box(modifier = Modifier.weight(1f)) {
-            Text(
+            ShardText(
                 text = inlineMarkdown(text, colors, base, mentionMembers),
                 style = base,
+                shardId = shardId,
             )
         }
     }
@@ -577,7 +707,10 @@ internal fun inlineMarkdown(
                     withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            background = colors.surfaceMuted,
+                            // 不能用 SpanStyle(background)：它会画在文字层，
+                            // 盖住 drawBehind 里的选区高亮（能复制却看不到高亮）。
+                            // 对齐 DeepSearch：底色改由 drawBehind 按 annotation 画。
+                            color = colors.textPrimary,
                             fontSize = base.fontSize * 0.92f,
                         ),
                     ) {

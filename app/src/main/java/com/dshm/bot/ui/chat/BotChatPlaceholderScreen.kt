@@ -61,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -448,6 +449,9 @@ fun BotChatScreen(
                         onOpenExchange = { id -> exchangeWith = id },
                         onOpenBrowser = onOpenBrowser,
                         onEditMessage = { text -> draft = text },
+                        onAddToInput = { text ->
+                            draft = if (draft.isBlank()) text else draft.trimEnd() + "\n" + text
+                        },
                     )
                 }
             }
@@ -717,7 +721,13 @@ private fun ChatMessages(
     onLoadEarlier: () -> Unit = {},
     /** 长按用户气泡 → 编辑：把内容填回输入框。 */
     onEditMessage: (String) -> Unit = {},
+    /** 选中文字浮条 → 加入输入框。 */
+    onAddToInput: (String) -> Unit = {},
 ) {
+    val selectionController = remember { SelectionController() }
+    var selectionRootCoords by remember {
+        mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null)
+    }
     val listState = rememberLazyListState()
     val streamingNow = streaming.isNotEmpty()
     // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
@@ -837,11 +847,21 @@ private fun ChatMessages(
         isGroup = bot.isGroup,
     )
 
+    CompositionLocalProvider(LocalSelectionAddToInput provides onAddToInput) {
+    ProvideSelectionController(selectionController) {
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             reverseLayout = true,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { selectionRootCoords = it }
+                .minisTextKitSelectionGesture(
+                    controller = selectionController,
+                    listState = listState,
+                    rootCoordinates = { selectionRootCoords },
+                    reverseLayout = true,
+                ),
             userScrollEnabled = true,
             contentPadding = PaddingValues(
                 start = Dshm.spacing.lg,
@@ -886,6 +906,7 @@ private fun ChatMessages(
                             members = bot.roomMembers,
                             adminId = bot.roomAdmin,
                             onOpenMember = onOpenMember,
+                            messageId = "streaming",
                         )
                     }
                 }
@@ -931,6 +952,7 @@ private fun ChatMessages(
                         durationMs = null,
                         whole = entry.whole,
                         endpoint = endpoint,
+                        messageId = entry.id,
                     )
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
@@ -990,6 +1012,18 @@ private fun ChatMessages(
                 }
             }
         }
+        SelectionDragTracker(
+            controller = selectionController,
+            listState = listState,
+            listRootCoordinates = { selectionRootCoords },
+            reverseLayout = true,
+        )
+        MinisSelectionHandlesHost(
+            controller = selectionController,
+            listState = listState,
+            reverseLayout = true,
+        )
+        MinisSelectionToolbarHost(controller = selectionController)
         // 普通高斯模糊 + 渐变遮罩（B 方案）：`Modifier.blur` 底层就是 Android
         // RenderEffect 的高斯模糊，只作用在这层渐变上；不录消息层、不做 DstIn /
         // 混合采样，也就不会把液态玻璃那套带进来导致渲染一闪一闪。
@@ -1044,6 +1078,8 @@ private fun ChatMessages(
                 )
             }
         }
+    }
+    }
     }
 }
 
@@ -1439,6 +1475,8 @@ private fun BotBubble(
     /** 长文消息：正文折起，完整内容在附件里（网页版「显示全部」）。 */
     whole: ChatWholePost? = null,
     endpoint: RuntimeEndpoint? = null,
+    /** 时间线条目 id：选区按消息定位，也是「复制全文」的键。 */
+    messageId: String = "",
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
@@ -1449,6 +1487,10 @@ private fun BotBubble(
     val collapsible = isGroup && text.length > 600
 
     val bubble: @Composable () -> Unit = {
+        val selectionController = LocalMinisSelectionController.current
+        LaunchedEffect(selectionController, messageId, text) {
+            if (messageId.isNotEmpty()) selectionController?.rememberMessageMarkdown(messageId, text)
+        }
         Column(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
@@ -1466,11 +1508,13 @@ private fun BotBubble(
                         )
                         .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
                 ) {
-                    // 长按 = 选中文字（系统选择工具栏：复制 / 全选 / 朗读 / 搜索）。
-                    // 容器放在气泡里，别包到整张列表外面。
-                    androidx.compose.foundation.text.selection.SelectionContainer {
-                        MarkdownText(markdown = text, fontScale = fontScale, mentionMembers = members)
-                    }
+                    // 长按 = 选中文字（MinisTextKit 选区：代码块 / 表格 / 列表都能选）。
+                    MarkdownText(
+                        markdown = text,
+                        fontScale = fontScale,
+                        mentionMembers = members,
+                        messageId = messageId,
+                    )
                 }
                 if (collapsible) {
                     androidx.compose.material3.HorizontalDivider(color = Dshm.colors.divider)
