@@ -84,6 +84,36 @@ class EngineSettingsViewModelTest {
         assertTrue(result!!.startsWith("渠道 ID"))
     }
 
+    @Test
+    fun discoveringModelsReportsErrorWhenEngineIsNotRunning() {
+        val viewModel = EngineSettingsViewModel()
+        var error: String? = NOT_CALLED
+
+        viewModel.discoverModels(
+            baseUrl = "https://api.example.com/v1",
+            api = "openai-completions",
+            apiKey = "",
+            route = "custom",
+        ) { _, failure, _ -> error = failure }
+
+        assertEquals("本机引擎未运行", error)
+    }
+
+    @Test
+    fun discoveringModelsRejectsInvalidBaseUrlBeforeEngineCheck() {
+        val viewModel = EngineSettingsViewModel()
+        var error: String? = NOT_CALLED
+
+        viewModel.discoverModels(
+            baseUrl = "api.example.com/v1",
+            api = "openai-completions",
+            apiKey = "",
+            route = null,
+        ) { _, failure, _ -> error = failure }
+
+        assertEquals("请填写正确的服务地址", error)
+    }
+
     private companion object {
         const val NOT_CALLED = "<not-called>"
     }

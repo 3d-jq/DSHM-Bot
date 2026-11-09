@@ -174,7 +174,12 @@ fun ProviderDetailPage(
                         testPassed = null
                         testFailed = null
                         // 明文 Key 不存在 App 侧，交给引擎用它已保存的凭据去读模型列表。
-                        viewModel.discoverModels(profile.baseUrl.orEmpty(), profile.api.orEmpty(), "") { ids, failure ->
+                        viewModel.discoverModels(
+                            baseUrl = profile.baseUrl.orEmpty(),
+                            api = profile.api.orEmpty(),
+                            apiKey = "",
+                            route = profile.route,
+                        ) { ids, failure, _ ->
                             testing = false
                             if (failure != null) {
                                 testFailed = failure

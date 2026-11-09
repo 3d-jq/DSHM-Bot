@@ -44,6 +44,7 @@ import com.dshm.bot.domain.model.ThemeMode
 fun SettingsScreen(
     uiState: SettingsUiState,
     engineSettings: EngineSettingsViewModel,
+    botPrefs: BotPrefsViewModel,
     onBack: () -> Unit,
     onOpenEngine: () -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
@@ -62,8 +63,8 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val engineState by engineSettings.ui.collectAsStateWithLifecycle()
+    val prefsState by botPrefs.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
-    val annotations = rememberAgentsSummary(context, engineState.description?.namespaces?.size)
     val providers = engineSettings.providers()
     val permission = engineSettings.permissionDefault()
     val permissionName = permission?.let { SettingsCopy.permissionLabel(it, language) }
@@ -87,7 +88,14 @@ fun SettingsScreen(
     val modelValue = if (providerCount == 0) null else {
         stringResource(R.string.settings_model_channels, providerCount)
     }
-    val personalizationValue = annotations ?: stringResource(R.string.settings_value_not_set)
+    val personalizationValue = stringResource(
+        when (prefsState.prefs.theme) {
+            "mono" -> R.string.bot_prefs_theme_mono
+            "paper" -> R.string.bot_prefs_theme_paper
+            "moonlight" -> R.string.bot_prefs_theme_moonlight
+            else -> R.string.bot_prefs_theme_deepseek
+        },
+    )
     val webValue = when {
         !webServed -> null
         webApi -> stringResource(R.string.settings_web_search_api_short)

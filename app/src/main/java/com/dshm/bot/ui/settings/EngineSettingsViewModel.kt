@@ -30,6 +30,7 @@ import com.dshm.bot.data.remote.SettingsNamespace
 import com.dshm.bot.data.remote.SettingsOp
 import com.dshm.bot.data.remote.SpeechCatalog
 import com.dshm.bot.data.remote.deriveProviderKeyRef
+import com.dshm.bot.data.remote.isValidProviderBaseUrl
 import com.dshm.bot.data.remote.jsonEquals
 import com.dshm.bot.data.remote.pathKey
 import com.dshm.bot.data.remote.providerRoutePattern
@@ -519,19 +520,31 @@ class EngineSettingsViewModel : ViewModel() {
         baseUrl: String,
         api: String,
         apiKey: String,
-        onDone: (List<String>?, String?) -> Unit,
+        /** 编辑已有渠道时传 route：引擎按它解析已存凭据，App 不再回显明文 Key。 */
+        route: String? = null,
+        onDone: (List<String>?, String?, String?) -> Unit,
     ) {
+        if (!isValidProviderBaseUrl(baseUrl)) {
+            onDone(null, "请填写正确的服务地址", null)
+            return
+        }
         val repo = repository
         if (repo == null) {
-            onDone(null, "本机引擎未运行")
+            onDone(null, "本机引擎未运行", null)
             return
         }
         viewModelScope.launch {
-            runCatching { repo.discoverModels(baseUrl.trim(), api, apiKey.trim()) }
-                .onSuccess { models ->
-                    if (models.isEmpty()) onDone(null, "端点没有返回模型") else onDone(models, null)
+            runCatching {
+                repo.discoverModels(baseUrl, api, apiKey, route)
+            }
+                .onSuccess { result ->
+                    if (result.ids.isEmpty()) {
+                        onDone(null, "端点没有返回模型", result.baseUrl)
+                    } else {
+                        onDone(result.ids, null, result.baseUrl)
+                    }
                 }
-                .onFailure { onDone(null, describeSettingsError(it)) }
+                .onFailure { onDone(null, describeSettingsError(it), null) }
         }
     }
 

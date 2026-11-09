@@ -1,159 +1,251 @@
 package com.dshm.bot.ui.settings
 
-import android.content.Context
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
-import com.dshm.bot.data.settings.PersonalizationStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
-/** 设置首页用：读个人偏好第一行（IO 线程，不阻塞首帧）。 */
-@Composable
-fun rememberAgentsSummary(context: Context, refreshKey: Any? = Unit): String? {
-    val store = remember(context) { PersonalizationStore(context) }
-    var summary by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(store, refreshKey) {
-        summary = withContext(Dispatchers.IO) { store.summary() }
-    }
-    return summary
-}
-
-// 个性化：个人偏好、可视化回复、Agent 预设，对齐 dsh-Go PersonalizationPage。
+/**
+ * 个性化：DS Bot 团队级 `set-prefs` 面板（主题 / 强调色 / 布局 / 宽度 / 思考行 / 动效）
+ * + Agent 预设入口。
+ *
+ * 不再编辑本机 `AGENTS.md`（那是引擎级指令，不属于 DS Bot 个性化），也没有
+ * 「可视化回复」——它只是往 AGENTS.md 里塞一段 dsh-ui 提示词，而我们用的是 DS Bot 视图卡。
+ */
 @Composable
 fun PersonalizationScreen(
+    viewModel: BotPrefsViewModel,
     onBack: () -> Unit,
     onOpenAgentPresets: () -> Unit = {},
 ) {
-    val context = LocalContext.current
-    val store = remember(context) { PersonalizationStore(context) }
-    val scope = rememberCoroutineScope()
-    val rootfsAvailable = remember(store) { store.rootfsAvailable() }
-    var text by remember { mutableStateOf("") }
-    var original by remember { mutableStateOf("") }
-    var loaded by remember { mutableStateOf(false) }
-    var saving by remember { mutableStateOf(false) }
-    var saved by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    fun reload() {
-        scope.launch {
-            val value = withContext(Dispatchers.IO) { store.read().orEmpty() }
-            text = value
-            original = value
-            loaded = true
-            saved = false
-            error = null
-        }
-    }
-
-    LaunchedEffect(store) { reload() }
+    val state by viewModel.ui.collectAsStateWithLifecycle()
+    val prefs = state.prefs
+    val enabled = !state.loading && state.error == null && !state.saving
 
     SettingsPage(
         title = stringResource(R.string.settings_personalization),
         onBack = onBack,
-        actions = {
-            SettingsRefreshButton(onClick = { reload() })
-        },
+        actions = { SettingsRefreshButton(onClick = viewModel::load) },
     ) {
-        if (!loaded) {
-            item { SettingsLoading() }
-        } else {
-            item {
-                SettingsSection(
-                    title = stringResource(R.string.settings_personal_preference),
-                    footer = stringResource(R.string.personalization_hint),
-                ) {
-                    androidx.compose.foundation.layout.Column(
-                        modifier = Modifier.padding(Dshm.spacing.lg),
+        when {
+            state.loading -> item { SettingsLoading() }
+            state.error != null -> item { SettingsError(state.error.orEmpty(), onRetry = viewModel::load) }
+            else -> {
+                item {
+                    SettingsSection(
+                        title = stringResource(R.string.bot_prefs_appearance),
+                        footer = stringResource(R.string.bot_prefs_team_hint),
                     ) {
-                        SettingsInput(
-                            value = text,
-                            onValueChange = {
-                                text = it.take(PersonalizationStore.MAX_CHARS)
-                                saved = false
-                                error = null
-                            },
-                            modifier = Modifier.heightIn(min = 280.dp),
-                            placeholder = stringResource(R.string.personalization_placeholder),
-                            singleLine = false,
+                        ChoiceRow(
+                            title = stringResource(R.string.bot_prefs_theme),
+                            options = BOT_THEMES,
+                            selected = prefs.theme,
+                            enabled = enabled,
+                            onSelect = { viewModel.set(JSONObject().put("theme", it)) },
                         )
-                        Text(
-                            text = "${text.length} / ${PersonalizationStore.MAX_CHARS}",
-                            style = Dshm.typography.rowTime,
-                            color = Dshm.colors.textTertiary,
-                            modifier = Modifier.padding(top = Dshm.spacing.xs),
+                        SettingsRowDivider()
+                        Column(Modifier.padding(Dshm.spacing.lg)) {
+                            Text(
+                                text = stringResource(R.string.bot_prefs_accent),
+                                style = Dshm.typography.settingsRowTitle,
+                                color = Dshm.colors.textPrimary,
+                            )
+                            Text(
+                                text = stringResource(R.string.bot_prefs_accent_hint),
+                                style = Dshm.typography.settingsRowSubtitle,
+                                color = Dshm.colors.textSecondary,
+                                modifier = Modifier.padding(top = Dshm.spacing.xxs),
+                            )
+                            Row(
+                                modifier = Modifier.padding(top = Dshm.spacing.md),
+                                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                AccentSwatch(
+                                    color = null,
+                                    label = stringResource(R.string.bot_prefs_accent_default),
+                                    selected = prefs.accent == null,
+                                    enabled = enabled,
+                                    onClick = { viewModel.set(JSONObject().put("accent", JSONObject.NULL)) },
+                                )
+                                BOT_ACCENTS.forEach { (id, color) ->
+                                    AccentSwatch(
+                                        color = color,
+                                        label = id,
+                                        selected = prefs.accent.equals(color, ignoreCase = true),
+                                        enabled = enabled,
+                                        onClick = { viewModel.set(JSONObject().put("accent", color)) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    SettingsSection(title = stringResource(R.string.bot_prefs_chat)) {
+                        SettingsSwitchRow(
+                            title = stringResource(R.string.bot_prefs_thinking),
+                            subtitle = stringResource(R.string.bot_prefs_thinking_hint),
+                            checked = prefs.thinking,
+                            enabled = enabled,
+                            onCheckedChange = { viewModel.set(JSONObject().put("thinking", it)) },
+                        )
+                    }
+                }
+
+                item {
+                    SettingsSection(title = stringResource(R.string.bot_prefs_motion)) {
+                        ChoiceRow(
+                            title = stringResource(R.string.bot_prefs_motion_level),
+                            options = BOT_MOTIONS,
+                            selected = prefs.motion,
+                            enabled = enabled,
+                            onSelect = { value ->
+                                viewModel.set(
+                                    JSONObject().put(
+                                        "motion",
+                                        if (value == "normal") JSONObject.NULL else value,
+                                    ),
+                                )
+                            },
                         )
                     }
                 }
             }
-
-            if (!rootfsAvailable) {
-                item { SettingsHint(stringResource(R.string.info_engine_required)) }
-            }
-            if (error != null) {
-                item { SettingsError(error.orEmpty()) }
-            }
-            if (saved) {
-                item { SettingsHint(stringResource(R.string.personalization_saved_hint)) }
-            }
-
-            item {
-                SettingsPrimaryButton(
-                    text = if (saving) {
-                        stringResource(R.string.action_saving)
-                    } else {
-                        stringResource(R.string.action_save)
-                    },
-                    enabled = rootfsAvailable && !saving && text != original,
-                    onClick = {
-                        saving = true
-                        error = null
-                        scope.launch {
-                            val ok = withContext(Dispatchers.IO) { store.save(text) }
-                            saving = false
-                            if (ok) {
-                                original = text
-                                saved = true
-                            } else {
-                                error = context.getString(R.string.personalization_save_failed)
-                            }
-                        }
-                    },
-                )
-            }
         }
-        // 可视化回复（尚未接入）；Agent 预设是引擎侧的功能页。
+
         item {
-            SettingsSection {
-                SettingsRow(
-                    title = stringResource(R.string.settings_visual_replies),
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                    enabled = false,
-                )
-                SettingsRowDivider()
+            SettingsSection(title = stringResource(R.string.bot_prefs_work_style)) {
                 SettingsRow(
                     title = stringResource(R.string.settings_agent_presets),
                     subtitle = stringResource(R.string.presets_subtitle),
                     onClick = onOpenAgentPresets,
                 )
             }
+        }
+        if (state.saving) {
+            item { SettingsRow(title = stringResource(R.string.bot_settings_saving), enabled = false) }
+        }
+    }
+}
+private data class Choice(val id: String, val labelRes: Int)
+
+private val BOT_THEMES = listOf(
+    Choice("deepseek", R.string.bot_prefs_theme_deepseek),
+    Choice("mono", R.string.bot_prefs_theme_mono),
+    Choice("paper", R.string.bot_prefs_theme_paper),
+    Choice("moonlight", R.string.bot_prefs_theme_moonlight),
+)
+private val BOT_MOTIONS = listOf(
+    Choice("normal", R.string.bot_prefs_motion_normal),
+    Choice("quiet", R.string.bot_prefs_motion_quiet),
+    Choice("lively", R.string.bot_prefs_motion_lively),
+)
+private val BOT_ACCENTS = listOf(
+    "deepseek" to "#4D6BFE",
+    "charcoal" to "#2F3437",
+    "graphite" to "#6B7280",
+    "rose" to "#E8688A",
+    "sky" to "#2C9CD6",
+    "tangerine" to "#E88A3C",
+    "cobalt" to "#3A5FD9",
+)
+
+@Composable
+private fun ChoiceRow(
+    title: String,
+    options: List<Choice>,
+    selected: String,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    Column(Modifier.padding(Dshm.spacing.lg)) {
+        Text(
+            text = title,
+            style = Dshm.typography.settingsRowTitle,
+            color = Dshm.colors.textPrimary,
+        )
+        Row(
+            modifier = Modifier
+                .padding(top = Dshm.spacing.md)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Dshm.radius.md))
+                .background(Dshm.colors.surfaceMuted)
+                .padding(Dshm.spacing.xxs),
+        ) {
+            options.forEach { option ->
+                val active = option.id == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(Dshm.radius.sm))
+                        .background(if (active) Dshm.colors.surface else Color.Transparent)
+                        .clickable(enabled = enabled) { onSelect(option.id) }
+                        .padding(vertical = Dshm.spacing.sm),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(option.labelRes),
+                        style = Dshm.typography.rowTitle,
+                        color = if (active) Dshm.colors.accent else Dshm.colors.textSecondary,
+                    )
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun AccentSwatch(
+    color: String?,
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val fill = color?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+        ?: Dshm.colors.accent
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(if (color == null) Dshm.colors.surfaceMuted else fill)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) Dshm.colors.accent else Dshm.colors.divider,
+                shape = CircleShape,
+            )
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (color == null) {
+            Text(
+                text = stringResource(R.string.bot_prefs_accent_auto_short),
+                style = Dshm.typography.rowTime,
+                color = Dshm.colors.textTertiary,
+            )
         }
     }
 }

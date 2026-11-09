@@ -242,24 +242,49 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         }
     }
 
-    /** `llm/discoverModels`：向 draft 端点要模型列表，不落库。 */
-    suspend fun discoverModels(baseUrl: String, api: String, apiKey: String): List<String> {
-        val request = JSONObject()
-            .put("baseURL", baseUrl)
-            .put("api", api)
-        if (apiKey.isNotBlank()) request.put("apiKey", apiKey)
-        val value = client.rpcValue(
-            "llm/discoverModels",
-            JSONObject().put("settingsNs", PROVIDER_NAMESPACE).put("request", request),
-        )
-        val array = value as? JSONArray ?: return emptyList()
-        return buildList {
-            for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                val id = item.optString("id")
-                if (id.isNotEmpty()) add(id)
+    /**
+     * `llm/discoverModels`：对齐 dsh-Go `ProviderActions.discover`。
+     *
+     * `provider` 认已存凭据（`storedProfile.resolveApiKey`），`baseURL/api` 用来问端点，
+     * 两者同时传；只有用户当场输入的新 Key 才作为 `apiKey` 明文传过去。
+     * 裸域名端点返回 404 时，按 dsh-Go 的写法补一次 `/v1` 并回填生效 URL。
+     */
+    suspend fun discoverModels(
+        baseUrl: String,
+        api: String,
+        apiKey: String,
+        route: String?,
+    ): DiscoveredModels {
+        val candidates = discoveryBaseUrlCandidates(baseUrl, api)
+
+        suspend fun ask(url: String): List<String> {
+            val call = JSONObject()
+                .put("settingsNs", PROVIDER_NAMESPACE)
+                .put("request", discoveryRequest(url, api, apiKey, route))
+            val value = client.rpcValue("llm/discoverModels", call)
+            val array = value as? JSONArray ?: return emptyList()
+            return buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val id = item.optString("id")
+                    if (id.isNotEmpty()) add(id)
+                }
             }
         }
+
+        var firstError: Throwable? = null
+        for ((index, candidate) in candidates.withIndex()) {
+            val result = runCatching { ask(candidate) }
+            if (result.isSuccess) return DiscoveredModels(result.getOrThrow(), candidate)
+            val error = result.exceptionOrNull() ?: continue
+            if (index == 0) {
+                if (candidates.size == 1 || !isDiscoveryNotFound(error)) throw error
+                firstError = error
+            } else {
+                throw firstError ?: error
+            }
+        }
+        error("unreachable")
     }
 
     suspend fun providerSettings(): ProviderSettings =

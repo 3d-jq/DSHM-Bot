@@ -82,6 +82,7 @@ import com.dshm.bot.ui.settings.PhoneControlSettingsScreen
 import com.dshm.bot.ui.settings.PluginsScreen
 import com.dshm.bot.ui.settings.PrivacySettingsScreen
 import com.dshm.bot.ui.settings.SettingsPageId
+import com.dshm.bot.ui.settings.BotPrefsViewModel
 import com.dshm.bot.ui.settings.SettingsScreen
 import com.dshm.bot.ui.settings.SettingsViewModel
 import com.dshm.bot.ui.settings.VoiceSettingsScreen
@@ -154,6 +155,10 @@ fun DshmBotApp(
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val engineState by engineViewModel.state.collectAsStateWithLifecycle()
     val accountUi by accountViewModel.ui.collectAsStateWithLifecycle()
+    val botPrefsViewModel: BotPrefsViewModel = viewModel(
+        key = "bot-prefs:${(engineState as? RuntimeState.Running)?.endpoint?.baseUrl.orEmpty()}",
+        factory = BotPrefsViewModel.factory((engineState as? RuntimeState.Running)?.endpoint),
+    )
     LaunchedEffect(engineState) {
         if (engineState is RuntimeState.Running && settingsUiState.notificationsEnabled) {
             EngineNotifier.notifyReady(appContext)
@@ -649,6 +654,7 @@ fun DshmBotApp(
                     )
 
                     SettingsPageId.PERSONALIZATION -> PersonalizationScreen(
+                        viewModel = botPrefsViewModel,
                         onBack = close,
                         onOpenAgentPresets = {
                             navForward = true
@@ -787,6 +793,7 @@ fun DshmBotApp(
             key == SCREEN_SETTINGS -> SettingsScreen(
                 uiState = settingsUiState,
                 engineSettings = engineSettingsViewModel,
+                botPrefs = botPrefsViewModel,
                 onBack = {
                     navForward = false
                     settingsOpen = false

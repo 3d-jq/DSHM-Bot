@@ -53,6 +53,8 @@ import com.dshm.bot.data.remote.ProviderHealthEvaluator
 import com.dshm.bot.data.remote.ProviderModelSpec
 import com.dshm.bot.data.remote.ProviderProfile
 import com.dshm.bot.data.remote.deriveProviderKeyRef
+import com.dshm.bot.data.remote.isValidProviderBaseUrl
+import com.dshm.bot.data.remote.normalizeDiscoveryBaseUrl
 import com.dshm.bot.data.remote.providerRoutePattern
 
 /** 渠道子页面目标：列表 → 详情 → 编辑 → 模型设置。 */
@@ -433,6 +435,8 @@ private fun ProviderEditorScreen(
     val enterBaseUrlText = stringResource(R.string.settings_model_enter_base_url)
     val needModelText = stringResource(R.string.settings_model_need_model)
     val invalidRouteText = stringResource(R.string.settings_model_invalid_route)
+    val enterKeyText = stringResource(R.string.settings_model_enter_key)
+    val invalidBaseUrlText = stringResource(R.string.settings_model_invalid_base_url)
 
     fun attemptSave() {
         error = null
@@ -457,12 +461,21 @@ private fun ProviderEditorScreen(
             error = invalidRouteText
             return
         }
+        if (existing == null && draft.apiKey.isBlank()) {
+            error = enterKeyText
+            return
+        }
+        val normalizedBaseUrl = normalizeDiscoveryBaseUrl(draft.baseUrl, draft.api)
+        if (!isValidProviderBaseUrl(draft.baseUrl)) {
+            error = invalidBaseUrlText
+            return
+        }
         saving = true
         viewModel.saveProvider(
             route = route,
             displayName = draft.displayName,
             api = draft.api,
-            baseUrl = draft.baseUrl,
+            baseUrl = normalizedBaseUrl,
             models = models,
             apiKey = draft.apiKey,
             existing = existing,
@@ -654,14 +667,30 @@ private fun ProviderEditorScreen(
                     },
                     onClick = {
                         error = null
-                        discovering = true
-                        viewModel.discoverModels(draft.baseUrl, draft.api, draft.apiKey) { ids, failure ->
-                            discovering = false
-                            if (failure != null) {
-                                error = failure
-                            } else if (ids != null) {
-                                pickerCandidates = ids
-                                showModelPicker = true
+                        if (existing == null && draft.apiKey.isBlank()) {
+                            error = enterKeyText
+                        }
+                        else if (!isValidProviderBaseUrl(draft.baseUrl)) {
+                            error = invalidBaseUrlText
+                        } else {
+                            discovering = true
+                            viewModel.discoverModels(
+                                baseUrl = draft.baseUrl,
+                                api = draft.api,
+                                apiKey = draft.apiKey,
+                                // 已存 route 让引擎解析凭据；draft Key 只覆盖本次新填的值。
+                                route = existing?.route,
+                            ) { ids, failure, effectiveBaseUrl ->
+                                discovering = false
+                                if (!effectiveBaseUrl.isNullOrBlank() && effectiveBaseUrl != draft.baseUrl) {
+                                    onDraftChange(draft.copy(baseUrl = effectiveBaseUrl))
+                                }
+                                if (failure != null) {
+                                    error = failure
+                                } else if (ids != null) {
+                                    pickerCandidates = ids
+                                    showModelPicker = true
+                                }
                             }
                         }
                     },

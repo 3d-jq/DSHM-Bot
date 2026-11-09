@@ -32,8 +32,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,6 +67,8 @@ fun AgentPresetsScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var actionFor by remember { mutableStateOf<AgentPresetInfo?>(null) }
     var document by remember { mutableStateOf<AgentPresetDocument?>(null) }
     var deleteFor by remember { mutableStateOf<AgentPresetInfo?>(null) }
@@ -162,12 +167,33 @@ fun AgentPresetsScreen(
                         }
                     },
                 )
-                // 新建 / 复制 / 编辑要创造模式会话，本项目未接。
                 PresetActionRow(
-                    title = stringResource(R.string.presets_create_unavailable),
-                    icon = R.drawable.ic_lucide_plus,
-                    enabled = false,
-                    onClick = {},
+                    title = stringResource(R.string.presets_copy_id),
+                    icon = R.drawable.ic_lucide_copy,
+                    onClick = {
+                        clipboard.setText(AnnotatedString(action.id))
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.presets_copied),
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                        actionFor = null
+                    },
+                )
+                PresetActionRow(
+                    title = stringResource(R.string.presets_copy_config),
+                    icon = R.drawable.ic_lucide_copy,
+                    onClick = {
+                        viewModel.agentPresetDocument(action.id) { loaded ->
+                            clipboard.setText(AnnotatedString(loaded?.content ?: action.id))
+                            android.widget.Toast.makeText(
+                                context,
+                                context.getString(R.string.presets_copied),
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                            actionFor = null
+                        }
+                    },
                 )
                 if (action.id !in BUILT_IN_AGENT_PRESETS) {
                     PresetActionRow(
@@ -267,6 +293,7 @@ fun AgentPresetsScreen(
 /** 预设列表里的一行：名字 + 徽标 + 描述。 */
 @Composable
 private fun PresetRow(preset: AgentPresetInfo, onClick: () -> Unit) {
+    val icon = presetIcon(preset.id)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -283,7 +310,7 @@ private fun PresetRow(preset: AgentPresetInfo, onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                painter = painterResource(R.drawable.ic_lucide_sliders_horizontal),
+                painter = painterResource(icon),
                 contentDescription = null,
                 tint = Dshm.colors.textPrimary,
                 modifier = Modifier.size(Dshm.spacing.topBarIcon),
@@ -324,6 +351,15 @@ private fun PresetRow(preset: AgentPresetInfo, onClick: () -> Unit) {
             }
         }
     }
+}
+
+/** dsh-Go `agent_presets_page.dart`：四个内建预设各有图标，自定义用通用图标（统一单色）。 */
+private fun presetIcon(id: String): Int = when (id) {
+    "standard" -> R.drawable.ic_lucide_bot
+    "ptc" -> R.drawable.ic_lucide_code
+    "minimal" -> R.drawable.ic_lucide_sparkles
+    "cordis" -> R.drawable.ic_lucide_puzzle
+    else -> R.drawable.ic_lucide_sliders_horizontal
 }
 
 /** 操作弹层里的一行。 */
