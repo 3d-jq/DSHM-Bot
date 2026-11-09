@@ -207,6 +207,7 @@
     <string name="bot_settings_name">Name</string>
     <string name="bot_settings_role">Role</string>
     <string name="bot_settings_model">Model</string>
+    <string name="bot_settings_thinking_level">Thinking level</string>
     <string name="bot_settings_workdir">Working folder</string>
     <string name="bot_settings_folder">Folder</string>
     <string name="bot_settings_workdir_default">Team default</string>

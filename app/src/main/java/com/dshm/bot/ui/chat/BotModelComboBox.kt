@@ -94,3 +94,78 @@ fun BotModelComboBox(
         }
     }
 }
+
+/**
+ * 推理强度 Combobox（和模型选择同一套外观/交互）。
+ *
+ * 第一项永远是「默认」= 不指定 effort（引擎会删掉 `bot.effort`）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BotEffortComboBox(
+    efforts: List<BotEffortOption>,
+    current: String?,
+    onSelect: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val currentName = efforts.firstOrNull { it.id == current }?.name
+        ?: stringResource(R.string.settings_value_default)
+    val shape = RoundedCornerShape(Dshm.radius.md)
+    val menuShape = RoundedCornerShape(Dshm.radius.lg)
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = currentName,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(stringResource(R.string.bot_settings_thinking_level)) },
+            singleLine = true,
+            enabled = enabled,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            shape = shape,
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = menuShape,
+            containerColor = Dshm.colors.surface,
+            border = androidx.compose.foundation.BorderStroke(
+                Dshm.spacing.hairline,
+                Dshm.colors.divider,
+            ),
+            shadowElevation = Dshm.spacing.cardElevation,
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.settings_value_default)) },
+                onClick = {
+                    expanded = false
+                    onSelect(null)
+                },
+            )
+            efforts.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = option.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelect(option.id)
+                    },
+                )
+            }
+        }
+    }
+}

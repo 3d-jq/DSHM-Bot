@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -165,13 +166,33 @@ fun BotDetailsScreen(
                         models = state.models,
                         selectedRef = info?.model,
                         onSelect = { ref ->
+                            viewModel.ensureEfforts(ref)
                             viewModel.update(
                                 patch = JSONObject().put("model", ref),
-                                optimistic = { it.copy(model = ref) },
+                                optimistic = { it.copy(model = ref, effort = null) },
                             )
                         },
                         enabled = info != null && !state.saving,
                     )
+                    val modelRef = info?.model
+                    if (!modelRef.isNullOrEmpty()) {
+                        LaunchedEffect(modelRef) { viewModel.ensureEfforts(modelRef) }
+                        val efforts = state.efforts[modelRef].orEmpty()
+                        if (efforts.isNotEmpty()) {
+                            Spacer(Modifier.height(Dshm.spacing.md))
+                            BotEffortComboBox(
+                                efforts = efforts,
+                                current = info?.effort,
+                                onSelect = { choice ->
+                                    viewModel.update(
+                                        patch = JSONObject().put("effort", choice ?: JSONObject.NULL),
+                                        optimistic = { it.copy(effort = choice) },
+                                    )
+                                },
+                                enabled = !state.saving,
+                            )
+                        }
+                    }
                 }
                 SettingsRowDivider()
                 SettingsRow(
@@ -745,18 +766,41 @@ fun BotSettingsSheet(
 
             Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_model)) {
-                Column(Modifier.padding(Dshm.spacing.md)) {
+                Column(
+                    Modifier.padding(Dshm.spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(Dshm.spacing.md),
+                ) {
                     BotModelComboBox(
                         models = state.models,
                         selectedRef = info?.model,
                         onSelect = { ref ->
+                            viewModel.ensureEfforts(ref)
                             viewModel.update(
                                 patch = JSONObject().put("model", ref),
-                                optimistic = { it.copy(model = ref) },
+                                // 换模型后旧 effort 多半不适用（网页版也是先回落到默认）。
+                                optimistic = { it.copy(model = ref, effort = null) },
                             )
                         },
                         enabled = info != null && !state.saving,
                     )
+                    val modelRef = info?.model
+                    if (!modelRef.isNullOrEmpty()) {
+                        LaunchedEffect(modelRef) { viewModel.ensureEfforts(modelRef) }
+                        val efforts = state.efforts[modelRef].orEmpty()
+                        if (efforts.isNotEmpty()) {
+                            BotEffortComboBox(
+                                efforts = efforts,
+                                current = info?.effort,
+                                onSelect = { choice ->
+                                    viewModel.update(
+                                        patch = JSONObject().put("effort", choice ?: JSONObject.NULL),
+                                        optimistic = { it.copy(effort = choice) },
+                                    )
+                                },
+                                enabled = !state.saving,
+                            )
+                        }
+                    }
                 }
                 if (state.saving) {
                     SettingsRow(

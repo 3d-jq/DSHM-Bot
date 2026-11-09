@@ -83,8 +83,7 @@ fun SettingsScreen(
     var languageAnchorHeight by remember { mutableStateOf(0) }
 
 
-    val customRoutes = providers.profiles.map { it.route }.toSet()
-    val providerCount = providers.profiles.size + engineState.listedProviders.count { it.id !in customRoutes }
+    val providerCount = providerDisplayCount(providers.profiles, engineState.listedProviders)
     val modelValue = if (providerCount == 0) null else {
         stringResource(R.string.settings_model_channels, providerCount)
     }

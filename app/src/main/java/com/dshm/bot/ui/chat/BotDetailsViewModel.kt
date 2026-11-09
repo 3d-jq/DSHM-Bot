@@ -69,6 +69,8 @@ data class BotDetailsInfo(
     val color: String?,
     val shape: String?,
     val model: String?,
+    /** 当前选中的推理强度 id；null = 用模型默认。 */
+    val effort: String? = null,
     val workDir: String?,
     val permission: String? = null,
     val instructions: String = "",
@@ -80,6 +82,8 @@ data class BotDetailsUiState(
     val saving: Boolean = false,
     val info: BotDetailsInfo? = null,
     val models: List<BotModelOption> = emptyList(),
+    /** 模型 ref → 可选推理强度（含「默认」由界面补）。 */
+    val efforts: Map<String, List<BotEffortOption>> = emptyMap(),
     val permissions: List<BotPermissionOption> = emptyList(),
     val memory: List<BotMemoryEntry> = emptyList(),
     val schedules: List<BotScheduleTask> = emptyList(),
@@ -102,6 +106,9 @@ data class BotDetailsUiState(
 ) {
     val isMain: Boolean get() = info?.id in mainBotIds
 }
+
+/** `efforts {ref}` 的一档：`{id, name, description?}`。 */
+data class BotEffortOption(val id: String, val name: String, val description: String? = null)
 
 /** Bot 详情/设置：`/api/bot` 的 `state` 读取，`update-bot` / `delete-bot` 写回。 */
 class BotDetailsViewModel(
@@ -134,15 +141,39 @@ class BotDetailsViewModel(
                         return@onSuccess
                     }
                     val models = mutableListOf<BotModelOption>()
+                    val efforts = mutableMapOf<String, List<BotEffortOption>>()
                     state.optJSONArray("models")?.let { array ->
                         for (index in 0 until array.length()) {
                             val item = array.optJSONObject(index) ?: continue
                             val ref = item.optString("ref")
                             if (ref.isNotEmpty()) {
                                 models += BotModelOption(ref, item.optString("name").ifEmpty { ref })
+                                // 网页版 `useEfforts` 优先用 state.models[].reasoning，
+                                // 只有缺的时候才另发 `efforts {ref}`。
+                                val reasoning = item.optJSONObject("reasoning")
+                                val options = reasoning?.optJSONArray("efforts")?.let { list ->
+                                    buildList {
+                                        for (entry in 0 until list.length()) {
+                                            val option = list.optJSONObject(entry) ?: continue
+                                            val id = option.optString("id")
+                                            if (id.isNotEmpty()) {
+                                                add(
+                                                    BotEffortOption(
+                                                        id = id,
+                                                        name = option.optString("name").ifEmpty { id },
+                                                        description = option.optString("description")
+                                                            .takeIf { text -> text.isNotEmpty() },
+                                                    ),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }.orEmpty()
+                                if (options.isNotEmpty()) efforts[ref] = options
                             }
                         }
                     }
+                    val effort = bot.optString("effort").takeIf { value -> value.isNotEmpty() }
                     val permissions = mutableListOf<BotPermissionOption>()
                     val permissionCatalog = state.optJSONObject("permissions")
                     permissionCatalog?.optJSONArray("options")?.let { array ->
@@ -170,6 +201,7 @@ class BotDetailsViewModel(
                             loading = false,
                             error = null,
                             models = models,
+                            efforts = efforts,
                             permissions = permissions,
                             mainBotIds = mainIds,
                             memoryEnabled = state.optBoolean("memory", true),
@@ -182,6 +214,7 @@ class BotDetailsViewModel(
                                 model = bot.optString("model")
                                     .ifEmpty { bot.optString("appliedModel") }
                                     .takeIf { ref -> ref.isNotEmpty() },
+                                effort = effort,
                                 workDir = bot.optString("workDir").takeIf { dir -> dir.isNotEmpty() },
                                 permission = bot.optString("permission").takeIf { preset -> preset.isNotEmpty() }
                                     ?: permissionCatalog?.optString("defaultPreset")
@@ -196,6 +229,44 @@ class BotDetailsViewModel(
                 .onFailure { error ->
                     _ui.update { it.copy(loading = false, error = error.message ?: "读取失败") }
                 }
+        }
+    }
+
+    /**
+     * 按 `efforts {ref}` 补某个模型的推理强度档位。
+     *
+     * state 只给「已被某个 Bot 用着」的模型带 `reasoning`；用户刚切到一个新模型时
+     * 需要现问引擎（网页版 `useEfforts` 同款懒加载）。结果缓存进 [BotDetailsUiState.efforts]，
+     * 同一 ref 不重复请求。
+     */
+    fun ensureEfforts(ref: String) {
+        val connection = client ?: return
+        if (ref.isEmpty() || _ui.value.efforts.containsKey(ref)) return
+        viewModelScope.launch {
+            val value = runCatching {
+                connection.bot("efforts", JSONObject().put("ref", ref))
+            }.getOrNull() ?: return@launch
+            val options = value.optJSONArray("efforts")?.let { list ->
+                buildList {
+                    for (index in 0 until list.length()) {
+                        val item = list.optJSONObject(index) ?: continue
+                        val id = item.optString("id")
+                        if (id.isNotEmpty()) {
+                            add(
+                                BotEffortOption(
+                                    id = id,
+                                    name = item.optString("name").ifEmpty { id },
+                                    description = item.optString("description")
+                                        .takeIf { text -> text.isNotEmpty() },
+                                ),
+                            )
+                        }
+                    }
+                }
+            }.orEmpty()
+            _ui.update { state ->
+                state.copy(efforts = state.efforts + (ref to options))
+            }
         }
     }
 

@@ -207,6 +207,7 @@
     <string name="bot_settings_name">名称</string>
     <string name="bot_settings_role">角色</string>
     <string name="bot_settings_model">模型</string>
+    <string name="bot_settings_thinking_level">推理强度</string>
     <string name="bot_settings_workdir">工作文件夹</string>
     <string name="bot_settings_folder">文件夹</string>
     <string name="bot_settings_workdir_default">团队默认</string>
