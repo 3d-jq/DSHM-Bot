@@ -26,9 +26,10 @@ data class DshmColors(
     val onAccent: Color,
     /** 对话里 AI 气泡（浅灰，和页面白底区分）。 */
     val bubbleAssistant: Color,
-    /** 用户气泡的蓝色渐变（参考 DS Bot 手机端的亮蓝）。 */
-    val bubbleUserStart: Color,
-    val bubbleUserEnd: Color,
+    /** 用户气泡的实心蓝（参考 DS Bot 手机端的亮蓝；不做渐变）。 */
+    val bubbleUser: Color,
+    /** 用户气泡上的文字 / 图标（蓝底永远用白，不跟 onAccent 走 —— 深色主题的 onAccent 是深色）。 */
+    val onBubbleUser: Color,
     val onInk: Color,
     val iconTint: Color,
     val badge: Color,
@@ -63,8 +64,8 @@ data class DshmColors(
             accent = Color(0xFF1F4FD8),
             onAccent = Color(0xFFFFFFFF),
             bubbleAssistant = Color(0xFFF2F3F5),
-            bubbleUserStart = Color(0xFF4D8DFF),
-            bubbleUserEnd = Color(0xFF2F6BFF),
+            bubbleUser = Color(0xFF2F6BFF),
+            onBubbleUser = Color(0xFFFFFFFF),
             onInk = Color(0xFFFFFFFF),
             iconTint = Color(0xFF111318),
             badge = Color(0xFFFF3E51),
@@ -92,8 +93,8 @@ data class DshmColors(
             accent = Color(0xFF6A84FF),
             onAccent = Color(0xFF0B0D12),
             bubbleAssistant = Color(0xFF1C1F25),
-            bubbleUserStart = Color(0xFF4D8DFF),
-            bubbleUserEnd = Color(0xFF2F6BFF),
+            bubbleUser = Color(0xFF2F6BFF),
+            onBubbleUser = Color(0xFFFFFFFF),
             onInk = Color(0xFFFFFFFF),
             iconTint = Color(0xFFF2F3F5),
             badge = Color(0xFFFF5A7A),

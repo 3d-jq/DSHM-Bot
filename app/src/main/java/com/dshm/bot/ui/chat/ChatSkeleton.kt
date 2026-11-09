@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.core.design.Dshm
 
@@ -37,6 +38,11 @@ import com.dshm.bot.core.design.Dshm
 fun ChatSkeleton(
     modifier: Modifier = Modifier,
     isGroup: Boolean = false,
+    /**
+     * 顶栏（悬浮名字胶囊那块）的高度：内容区是 edge-to-edge 的，消息列表靠
+     * `contentPadding.top = topPadding + md` 让开它，骨架屏必须用同一个值。
+     */
+    topPadding: Dp = 0.dp,
 ) {
     val transition = rememberInfiniteTransition(label = "chat-skeleton")
     val alpha by transition.animateFloat(
@@ -65,7 +71,12 @@ fun ChatSkeleton(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.lg),
+            .padding(
+                start = Dshm.spacing.lg,
+                end = Dshm.spacing.lg,
+                top = topPadding + Dshm.spacing.md,
+                bottom = Dshm.spacing.lg,
+            ),
         verticalArrangement = Arrangement.spacedBy(Dshm.spacing.turnGap),
     ) {
         rows.forEachIndexed { index, (fromBot, widthFraction) ->

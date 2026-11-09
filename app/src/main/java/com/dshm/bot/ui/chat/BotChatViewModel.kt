@@ -248,6 +248,8 @@ class BotChatViewModel(
     private var reloadJob: Job? = null
     private var statusJob: Job? = null
     private var runningWatchJob: Job? = null
+    /** 去抖后的「重拉一次会话」（中转结果 / 通知触发）。 */
+    private var chatRefreshJob: Job? = null
     private var memoryNoticeJob: Job? = null
     private var streamingAttempt: String? = null
     private var streamingText = ""
@@ -373,6 +375,9 @@ class BotChatViewModel(
                     target = line.target,
                     tool = pending.name,
                 )
+                // 中转类工具：结果里带着「谁没能回答 / 谁被中途打断」这些行，
+                // 它们只在 `chat` / `room-chat` 的 items 里，得重拉一次才会出现在界面上。
+                if (pending.name in RELAY_TOOLS) refreshChatSoon()
             }
             DELIVERABLES_PRESENTED_EVENT -> {
                 val presented = presentedFilesOf(event) ?: return
@@ -936,7 +941,16 @@ class BotChatViewModel(
                 val kind = data.optString("kind")
                 val belongs = data.optString("botId") == botId ||
                     data.optString("roomId") == botId
-                if (kind == "approval" && belongs) refreshBotStatus()
+                if (!belongs) return
+                when (kind) {
+                    "approval" -> refreshBotStatus()
+                    // 后台完成 / 新卡片：状态与这一轮的行都刷一下，别静默。
+                    "done", "question", "view", "group" -> {
+                        refreshBotStatus()
+                        refreshChatSoon(400)
+                    }
+                    else -> Unit
+                }
             }
 
             "room" -> {
@@ -1313,6 +1327,8 @@ class BotChatViewModel(
             var idlePolls = 0
             var lastRunning: Boolean? = null
             var lastStatusAt = 0L
+            val watchStartedAt = System.currentTimeMillis()
+            val botEntriesAtStart = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT }
             while (idlePolls < 2) {
                 delay(1_000)
                 // 群聊只读 `room-progress`（很小）；`state` 太重，不能每秒拉 ——
@@ -1338,6 +1354,10 @@ class BotChatViewModel(
             }
             optimisticRun = false
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
+            // 一轮结束却一个字都没产出：多半是模型调用失败（DS Bot 只写诊断不写 chat），
+            // 查一次诊断，找到就把失败贴成一行，别让「失败」和「正常做完」长得一样。
+            val produced = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT } > botEntriesAtStart
+            if (!produced) reportTurnFailure(connection, watchStartedAt)
         }
     }
 
@@ -1346,6 +1366,59 @@ class BotChatViewModel(
         streamingText = ""
         if (_uiState.value.streaming.isNotEmpty()) {
             _uiState.update { it.copy(streaming = "") }
+        }
+    }
+
+    /**
+     * 稍后重拉一次会话（同一小段时间内只做一次）。
+     *
+     * 中转结果 / 通知类事件到达时用：那些「谁没能回答、谁被重启打断」的行只存在于
+     * `chat` / `room-chat` 的 items 里，不重拉就一直看不到（等于静默）。
+     */
+    private fun refreshChatSoon(delayMs: Long = 300) {
+        if (client == null) return
+        chatRefreshJob?.cancel()
+        chatRefreshJob = viewModelScope.launch {
+            delay(delayMs)
+            load(initial = false)
+        }
+    }
+
+    /**
+     * 一轮结束了却没有任何输出：去插件的诊断里找这一轮的错误。
+     *
+     * DS Bot 的 `turns.js noteTurnFailure` 只把模型调用失败写进 diagnostics（不写 chat 行），
+     * 所以界面上「失败」跟「正常做完」长得一样。这里补一条错误事件行。
+     */
+    private suspend fun reportTurnFailure(connection: DshRemoteApi, sinceMs: Long) {
+        val report = runCatching { connection.bot("diagnostics") }.getOrNull() ?: return
+        val entries = report.optJSONArray("entries") ?: return
+        val mine = sessionId?.takeIf { it.isNotEmpty() } ?: botId
+        for (index in 0 until entries.length()) {
+            val entry = entries.optJSONObject(index) ?: continue
+            if (entry.optString("source") != "turn") continue
+            val entrySession = entry.optString("sessionId")
+            if (entrySession.isNotEmpty() && entrySession != mine) continue
+            val time = entry.optLong("time", 0L)
+            if (time in 1 until sinceMs) continue
+            val code = entry.optString("code").takeIf { it.isNotEmpty() }
+            val id = "turnfail:$time"
+            if (!seen.add(id)) return
+            _uiState.update { state ->
+                state.copy(
+                    entries = state.entries + ChatEntry(
+                        id = id,
+                        kind = ChatEntryKind.EVENT,
+                        text = "$botName 没能回答：${failureLabel(code, entry.optString("text"))}",
+                        author = botName,
+                        botId = botId,
+                        eventKind = "failed",
+                        eventCode = code,
+                        timeMs = time.takeIf { it > 0L },
+                    ),
+                )
+            }
+            return
         }
     }
 
@@ -1417,6 +1490,8 @@ class BotChatViewModel(
     companion object {
         /** 事件流缓存的上限：同时等应答的提问一般就一个对话，多出来的一定是漏掉的 cancel。 */
         private const val HOST_PENDING_CAP = 32
+        /** 这些工具的结果里会带「谁没能回答 / 谁被打断」的行，跑完要重拉一次会话。 */
+        private val RELAY_TOOLS = setOf("group_relay", "message_bot", "post_to_group", "stop_bot")
         /** 对话里最多留几张浏览器缩略图卡（只活在本次对话）。 */
         private const val MAX_BROWSER_SHOTS = 30
         private const val STOP_GRACE_NS = 2_000_000_000L

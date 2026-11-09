@@ -584,3 +584,8 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - ☑️ **对话气泡里的附件**：用户发过的图片显示缩略图（最多 3 张 + `+N`），文件显示文件卡；
   附件在选定时就落到 `cacheDir/chat-attachments`，`ChatEntry.attachmentItems` 带路径。
   历史回读只有文件名时仍走原来的 `📎 名字` 回退。
+- ☑️ **对话界面 4 个 bug**（2026-11-09）：流式气泡间距抖动（抽 `chatItemSpacing` 纯函数共用）、
+  骨架屏避让名字胶囊（`topPadding`）、用户气泡改实心 `bubbleUser` + `onBubbleUser`、
+  失败/通知静默（事件行分错误级 `ChatEventTone` + `failureLabel`、中转结果后重拉会话、
+  一轮无产出时查 diagnostics 补失败行、`notice` 接 `done/question/view/group`）。
+  详见 [bugfix-chat-2026-11-09.md](bugfix-chat-2026-11-09.md)。

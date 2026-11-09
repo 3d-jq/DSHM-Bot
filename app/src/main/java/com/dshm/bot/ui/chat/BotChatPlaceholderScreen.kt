@@ -389,6 +389,7 @@ fun BotChatScreen(
 
                     state.loading && state.entries.isEmpty() -> ChatSkeleton(
                         isGroup = bot.isGroup,
+                        topPadding = innerPadding.calculateTopPadding(),
                     )
 
                     state.error != null && state.entries.isEmpty() -> ChatError(
@@ -771,6 +772,18 @@ private fun ChatMessages(
         }
     }
 
+    // 流式态 / 思考行和正式条目走同一套间距规则（`chatItemSpacing`）：
+    // 否则「流式中 8dp → 落地 12dp」会抖一下。这里要在 LazyColumn 外算好 ——
+    // `Dshm.spacing` 是 @Composable，LazyListScope 里取不到。
+    val pendingSpacing = chatItemSpacing(
+        spacing = Dshm.spacing,
+        entryKind = ChatEntryKind.BOT,
+        entryBotId = bot.id,
+        olderKind = entries.lastOrNull()?.kind,
+        olderBotId = entries.lastOrNull()?.botId,
+        isGroup = bot.isGroup,
+    )
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
@@ -796,7 +809,7 @@ private fun ChatMessages(
             // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
             if (typing) {
                 item(key = "typing") {
-                    Box(Modifier.padding(top = Dshm.spacing.sm)) {
+                    Box(Modifier.padding(top = pendingSpacing.top)) {
                         ChatActivityRow(
                             bot = bot,
                             activity = requireNotNull(activity),
@@ -807,11 +820,19 @@ private fun ChatMessages(
             }
             if (streaming.isNotEmpty()) {
                 item(key = "streaming") {
-                    Box(Modifier.padding(top = Dshm.spacing.sm)) {
+                    Box(Modifier.padding(top = pendingSpacing.top)) {
                         BotBubble(
                             text = streaming,
-                            author = null,
+                            author = bot.name,
                             fontScale = fontScale,
+                            // 和最终那条 BOT 条目画得一模一样（群聊里同样有头像 + 名字），
+                            // 这样文字写完落地时形状不变。
+                            isGroup = bot.isGroup,
+                            showName = pendingSpacing.groupStart,
+                            botId = bot.id,
+                            members = bot.roomMembers,
+                            adminId = bot.roomAdmin,
+                            onOpenMember = onOpenMember,
                         )
                     }
                 }
@@ -821,25 +842,17 @@ private fun ChatMessages(
                 val entry = entries[chrono]
                 // 视觉相邻：older 在上面，newer 在下面（chronological 顺序）。
                 val older = entries.getOrNull(chrono - 1)
-                // 换人：跟**上面**那条比 —— item 的 top padding 决定的正是它和上方气泡的距离。
-                // 用 newer 的话，用户上下各贴一个 Bot 时会一边 12dp、一边 4dp（之前就是这样）。
-                val turnsChanged = older != null && older.kind != entry.kind &&
-                    (older.kind == ChatEntryKind.USER || entry.kind == ChatEntryKind.USER)
-                // 群聊里同一 bot 连续的多条回复合成一组（对齐 DS Bot `stackReplies`）：
-                // 名字只在组首（视觉最上一条），头像只贴组尾（视觉最下一条）的气泡左侧。
-                val isBotEntry = entry.kind == ChatEntryKind.BOT
-                val sameBotAsOlder = bot.isGroup && isBotEntry && entry.botId != null &&
-                    older?.kind == ChatEntryKind.BOT && older.botId == entry.botId
-                val groupStart = bot.isGroup && isBotEntry && !sameBotAsOlder
+                // 间距 / 分组只有一套规则：见 `chatItemSpacing`（流式态也用它）。
+                val spacing = chatItemSpacing(
+                    spacing = Dshm.spacing,
+                    entryKind = entry.kind,
+                    entryBotId = entry.botId,
+                    olderKind = older?.kind,
+                    olderBotId = older?.botId,
+                    isGroup = bot.isGroup,
+                )
                 Column(
-                    modifier = Modifier.padding(
-                        top = if (groupStart || turnsChanged || entry.kind == ChatEntryKind.ARTIFACTS) {
-                            Dshm.spacing.turnGap
-                        } else {
-                            // 同一个人接着说的气泡贴紧一点。
-                            Dshm.spacing.xs
-                        },
-                    ),
+                    modifier = Modifier.padding(top = spacing.top),
                 ) {
                 when (entry.kind) {
                     ChatEntryKind.USER -> UserBubble(
@@ -854,7 +867,7 @@ private fun ChatMessages(
                         author = entry.author,
                         fontScale = fontScale,
                         isGroup = bot.isGroup,
-                        showName = groupStart,
+                        showName = spacing.groupStart,
                         botId = entry.botId,
                         members = bot.roomMembers,
                         adminId = bot.roomAdmin,
@@ -1153,9 +1166,7 @@ private fun UserBubble(
                     detectTapGestures(onLongPress = { copyMessage(context, text) })
                 }
                 .background(
-                    Brush.linearGradient(
-                        listOf(Dshm.colors.bubbleUserStart, Dshm.colors.bubbleUserEnd),
-                    ),
+                    Dshm.colors.bubbleUser,
                     RoundedCornerShape(Dshm.radius.lg),
                 )
                 .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
@@ -1171,7 +1182,7 @@ private fun UserBubble(
                         fontSize = Dshm.typography.composerText.fontSize * fontScale,
                         lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
                     ),
-                    color = Dshm.colors.onAccent,
+                    color = Dshm.colors.onBubbleUser,
                 )
             }
             // 老路径（只拿到名字，没有本地文件）：保留原来的回退样子。
@@ -1179,7 +1190,7 @@ private fun UserBubble(
                 Text(
                     text = "📎 $name",
                     style = Dshm.typography.rowTime,
-                    color = Dshm.colors.onAccent.copy(alpha = 0.85f),
+                    color = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
                     modifier = Modifier.padding(top = Dshm.spacing.xxs),
                 )
             }
@@ -1213,7 +1224,7 @@ private fun UserAttachmentCards(items: List<ChatAttachmentItem>) {
                 Text(
                     text = "+${images.size - MAX_USER_THUMBS}",
                     style = Dshm.typography.rowTime,
-                    color = Dshm.colors.onAccent.copy(alpha = 0.85f),
+                    color = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
                     modifier = Modifier.padding(top = Dshm.spacing.xxs),
                 )
             }
@@ -1223,21 +1234,21 @@ private fun UserAttachmentCards(items: List<ChatAttachmentItem>) {
                 modifier = Modifier
                     .padding(top = Dshm.spacing.xs)
                     .clip(RoundedCornerShape(Dshm.radius.sm))
-                    .background(Dshm.colors.onAccent.copy(alpha = 0.16f))
+                    .background(Dshm.colors.onBubbleUser.copy(alpha = 0.16f))
                     .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xxs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_lucide_file_text),
                     contentDescription = null,
-                    tint = Dshm.colors.onAccent.copy(alpha = 0.85f),
+                    tint = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
                     modifier = Modifier.size(Dshm.spacing.md),
                 )
                 Spacer(Modifier.width(Dshm.spacing.xxs))
                 Text(
                     text = item.name,
                     style = Dshm.typography.rowTime,
-                    color = Dshm.colors.onAccent,
+                    color = Dshm.colors.onBubbleUser,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1258,7 +1269,7 @@ private fun UserThumb(item: ChatAttachmentItem, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(Dshm.spacing.sm))
-            .background(Dshm.colors.onAccent.copy(alpha = 0.16f)),
+            .background(Dshm.colors.onBubbleUser.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
@@ -1272,7 +1283,7 @@ private fun UserThumb(item: ChatAttachmentItem, modifier: Modifier = Modifier) {
             Icon(
                 painter = painterResource(R.drawable.ic_lucide_image),
                 contentDescription = item.name,
-                tint = Dshm.colors.onAccent.copy(alpha = 0.8f),
+                tint = Dshm.colors.onBubbleUser.copy(alpha = 0.8f),
                 modifier = Modifier.size(Dshm.spacing.lg),
             )
         }
@@ -1465,6 +1476,14 @@ private fun EventLine(
         else -> relaySenderName(name)
     }
     val label = eventLineLabel(kind, subjectName, text, code)
+    // 失败类事件（failed / missed / cut）用危险色，跟普通事件行分开 ——
+    // 否则「没能回答」看起来跟「查阅了自己的对话」一模一样，等于静默。
+    val tone = chatEventTone(kind)
+    val ink = when {
+        tone == ChatEventTone.ERROR -> Dshm.colors.danger
+        subject != null -> Dshm.colors.textSecondary
+        else -> Dshm.colors.textTertiary
+    }
     // DS Bot 的事件行是「前缀 + 头像 + 名字」（`prefix` 在 `BotMark` 前面），
     // 所以把文案按名字切开：名字跟头像贴在一起，前缀留在头像前面。
     val nameAt = subjectName?.let { label.indexOf(it) }?.takeIf { it >= 0 }
@@ -1487,7 +1506,7 @@ private fun EventLine(
             Text(
                 text = head.trimEnd(),
                 style = Dshm.typography.rowTime,
-                color = Dshm.colors.textSecondary,
+                color = ink,
             )
             Spacer(Modifier.width(Dshm.spacing.xs))
         }
@@ -1526,7 +1545,7 @@ private fun EventLine(
         Text(
             text = if (inlineName) requireNotNull(subjectName) + tail else label,
             style = Dshm.typography.rowTime,
-            color = if (subject != null) Dshm.colors.textSecondary else Dshm.colors.textTertiary,
+            color = ink,
             textAlign = if (inlineName && head.isNotBlank()) TextAlign.Start else TextAlign.Center,
             modifier = Modifier.weight(1f, fill = false),
         )
@@ -1570,7 +1589,8 @@ private fun eventLineLabel(kind: String?, name: String?, fallback: String, code:
         "resumed" -> "$who 的工作被重启打断，已接着做"
         "cut" -> "$who 的工作又被重启打断，已停下"
         "schedule" -> fallback.ifBlank { "定时任务已启动" }
-        "failed" -> if (fallback.isNotBlank()) "$who 没能回答：$fallback" else "$who 没能回答"
+        // 失败原因优先按 code 翻成人话（对齐 DS Bot `failureLabel`），没有 code 才用原文。
+        "failed" -> "$who 没能回答：${failureLabel(code, fallback)}"
         else -> null
     }
     return prefix ?: (if (fallback.isNotBlank()) fallback else (kind ?: "更新"))
