@@ -130,6 +130,7 @@ class HomeViewModel(
                     avatarShape = bot.avatarShape,
                     roomMembers = bot.roomMembers,
                     roomAdmin = bot.roomAdmin,
+                    activity = bot.activity,
                 )
             }
     }

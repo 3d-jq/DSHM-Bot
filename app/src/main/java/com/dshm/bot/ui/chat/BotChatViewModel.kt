@@ -42,8 +42,87 @@ import org.json.JSONObject
 import org.json.JSONArray
 import java.util.UUID
 
-/** 对话里的一行：用户消息、Bot 消息、系统事件、产物卡或浏览器缩略图卡。 */
-enum class ChatEntryKind { USER, BOT, EVENT, ARTIFACTS, BROWSER_SHOT }
+/**
+ * 对话里的一行。对齐 DS Bot 网页版 `chat` items 的全部 kind
+ * （`parts.js displayItems`：user / bot / answer / view / event / divider）。
+ */
+enum class ChatEntryKind {
+    USER, BOT, EVENT, ARTIFACTS, BROWSER_SHOT,
+
+    /** `divider`：一段会话的起点（换对话/换目录后），画一条时间分隔线。 */
+    DIVIDER,
+
+    /** `view`：只读视图卡（`show_view` 的非交互回放），网页版用 `WidgetCell` 画。 */
+    VIEW,
+
+    /** `answer`：用户回答过的提问（`AnsweredCell`：问题 + 选了哪些）。 */
+    ANSWERED,
+}
+
+/** 历史里「用户回答过的提问」。 */
+data class ChatAnsweredQuestion(
+    val question: String,
+    /** 选中的选项文案（含自定义输入）。 */
+    val answers: List<String>,
+)
+
+/**
+ * 历史里「用户回答过的视图卡」（`answer` item 的 `views` + `answers`）。
+ *
+ * 网页版 `AnsweredView` → `WidgetCard(settled = true, answer)`：把那张卡连**当时的填写**
+ * 只读地回放一遍。[values] 是插件校验后存下来的提交值：
+ * `selected`（选项文案）/ `fields`（表单字段）/ `confirmed`（确认与否）/ `inputs`（卡内输入）。
+ */
+data class ChatAnsweredView(
+    val card: ChatViewCard,
+    /** 提交按钮的组件 id（`options` / `form` / `confirm` / `submit` 之一）。 */
+    val action: String,
+    val values: JSONObject,
+)
+
+/**
+ * 一条过长的 Bot 消息：正文被折起，完整内容在 `whole.file` 里。
+ * 网页版用「显示全部」按 `file-text` 读出来（`channel.js` 的 `file-text`）。
+ */
+data class ChatWholePost(
+    val name: String,
+    val length: Int,
+    val file: JSONObject,
+)
+
+/**
+ * 群聊暂停时被「寄存」的一次中转（`state.rooms[roomId].paused`）。
+ *
+ * 群聊里 Bot 互相喊的次数超过上限后，这一轮会停在半路等用户：插件把等待的中转记在
+ * `room.paused` 里，只有 `room-continue` 会放行（`groups.js continueRoom`）。
+ */
+data class ChatPausedMember(
+    val id: String,
+    val name: String,
+    val note: String? = null,
+)
+
+/** 一个可选的模型（`state.models[]`）。 */
+data class ChatModelChoice(
+    val ref: String,
+    val name: String,
+    val provider: String? = null,
+    val needsKey: Boolean = false,
+)
+
+/**
+ * 「先给我选个模型」提示（网页版 `ModelChoiceDock`）。
+ *
+ * DS Bot 在 Bot 还没有模型、或原来的模型已经不在模型列表里时，会在输入框上方
+ * 出一张卡：Bot 说一句话 + 一排模型 chip，点一下就是 `update-bot {model}`。
+ * 我们的新 Bot 如果没有走详情页选模型，之前会一直卡着没人干活。
+ */
+data class ChatModelPrompt(
+    /** `pick`（还没选过）/ `lost`（模型没了）/ `key`（缺 API Key）/ `empty`（一个模型都没有）。 */
+    val kind: String,
+    val message: String,
+    val choices: List<ChatModelChoice> = emptyList(),
+)
 
 /**
  * 一轮浏览器操作结束后贴在对话里的页面缩略图。
@@ -84,6 +163,16 @@ data class ChatEntry(
     val tool: String? = null,
     /** 浏览器缩略图卡的内容（[ChatEntryKind.BROWSER_SHOT]）。 */
     val shot: ChatBrowserShot? = null,
+    /** 只读视图卡（[ChatEntryKind.VIEW]）。 */
+    val view: ChatViewCard? = null,
+    /** 回答过的提问（[ChatEntryKind.ANSWERED]）。 */
+    val answered: List<ChatAnsweredQuestion> = emptyList(),
+    /** 回答过的视图卡（[ChatEntryKind.ANSWERED]）。 */
+    val answeredView: ChatAnsweredView? = null,
+    /** 用户消息里的图片数量（历史回读只有计数，没有图）。 */
+    val images: Int = 0,
+    /** 长文消息（`whole`）：正文折起，完整内容在附件里。 */
+    val whole: ChatWholePost? = null,
 )
 
 /** 待发送的本地附件。 */
@@ -162,6 +251,12 @@ data class BotChatUiState(
     val teamMembers: List<RoomMemberUi> = emptyList(),
     /** 团队的群聊（事件行「阅读群聊」要画成员头像堆叠）。 */
     val teamRooms: List<TeamRoomUi> = emptyList(),
+    /** 群聊被中转上限暂停：等用户点「继续」（`state.rooms[].paused`）。 */
+    val roomPaused: List<ChatPausedMember> = emptyList(),
+    /** 正在提交「继续」：按钮禁用，避免重复点。 */
+    val roomContinuing: Boolean = false,
+    /** 需要用户先选模型（`ModelChoiceDock`）；不需要时为 null。 */
+    val modelPrompt: ChatModelPrompt? = null,
 )
 
 /**
@@ -1043,6 +1138,8 @@ class BotChatViewModel(
             )
             val team = DsBotParser.teamMembers(state)
             val rooms = DsBotParser.teamRooms(state)
+            // 群聊被中转上限暂停：`state.rooms[].paused` 里是等待放行的中转。
+            val paused = if (isGroup) parseRoomPaused(state, botId) else emptyList()
             // 输入框上方的待办卡：Bot 自己的提问 / 视图（群聊里 DS Bot 只允许在私聊用）。
             val cardScope = sessionId?.takeIf { it.isNotEmpty() } ?: botId
             val questions = if (isGroup) emptyList() else parseChatQuestions(state, cardScope)
@@ -1081,6 +1178,8 @@ class BotChatViewModel(
                     pendingQuestions = questions,
                     pendingViews = views,
                     pendingSecrets = secrets,
+                    roomPaused = paused,
+                    modelPrompt = if (isGroup) null else modelPromptOf(state, bot),
                 )
             }
             recomputeApprovals()
@@ -1291,6 +1390,41 @@ class BotChatViewModel(
         }
     }
 
+    /**
+     * 群聊暂停后点「继续」：`room-continue { roomId }`。
+     *
+     * 插件把寄存的中转放进新的一轮里跑（`groups.js continueRoom`），
+     * 所以提交完要刷一次状态和这一轮的行。
+     */
+    fun continueRoom(onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        if (_uiState.value.roomContinuing) return
+        _uiState.update { it.copy(roomContinuing = true) }
+        viewModelScope.launch {
+            val failure = runCatching {
+                connection.bot("room-continue", JSONObject().put("roomId", botId))
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            _uiState.update { it.copy(roomContinuing = false) }
+            if (failure == null) {
+                refreshBotStatus()
+                refreshChatSoon(200)
+            }
+            onDone(failure)
+        }
+    }
+
+    /** 在对话上方选模型：`update-bot {id, model}`（网页版 `ModelChoiceDock` 的 chip）。 */
+    fun chooseModel(ref: String, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            val failure = runCatching {
+                connection.bot("update-bot", JSONObject().put("id", botId).put("model", ref))
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            if (failure == null) refreshBotStatus()
+            onDone(failure)
+        }
+    }
+
     /** 停止当前对话正在执行的回合：按钮点下去立刻收起，再让引擎取消。 */
     fun stopRunning(onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
@@ -1441,6 +1575,7 @@ class BotChatViewModel(
                         text = it,
                         timeMs = time,
                         seq = seqValue,
+                        images = item.optInt("images", 0),
                     )
                 }
 
@@ -1455,11 +1590,63 @@ class BotChatViewModel(
                         timeMs = time,
                         durationMs = duration,
                         seq = seqValue,
+                        whole = wholePost(item),
                     )
                 }
 
-            "answer" -> text.takeIf { it.isNotBlank() }
-                ?.let { ChatEntry(id, ChatEntryKind.BOT, it, botName, timeMs = time, seq = seqValue) }
+            // 用户回答过的提问：网页版画成 `AnsweredCell`（问题 + 选了哪些），
+            // 不是一条普通气泡 —— 这里保留问答对，交给界面画卡片。
+            "answer" -> {
+                val answeredView = answeredView(item)
+                val answered = if (answeredView == null) answeredQuestions(item) else emptyList()
+                when {
+                    answeredView != null -> ChatEntry(
+                        id = id,
+                        kind = ChatEntryKind.ANSWERED,
+                        text = "",
+                        timeMs = time,
+                        seq = seqValue,
+                        answeredView = answeredView,
+                    )
+
+                    answered.isNotEmpty() -> ChatEntry(
+                        id = id,
+                        kind = ChatEntryKind.ANSWERED,
+                        text = "",
+                        timeMs = time,
+                        seq = seqValue,
+                        answered = answered,
+                    )
+
+                    else -> text.takeIf { it.isNotBlank() }
+                        ?.let { ChatEntry(id, ChatEntryKind.BOT, it, botName, timeMs = time, seq = seqValue) }
+                }
+            }
+
+            // 一段会话的起点：网页版画一条时间分隔线（`PartLine`）。
+            "divider" -> ChatEntry(
+                id = id,
+                kind = ChatEntryKind.DIVIDER,
+                text = "",
+                timeMs = time,
+                seq = seqValue,
+            )
+
+            // 只读视图卡：网页版用 `WidgetCell` 回放这张卡。
+            "view" -> item.optJSONObject("view")?.let { view ->
+                ChatEntry(
+                    id = id,
+                    kind = ChatEntryKind.VIEW,
+                    text = item.optString("title"),
+                    timeMs = time,
+                    seq = seqValue,
+                    view = ChatViewCard(
+                        id = item.optString("callId").ifEmpty { id },
+                        title = item.optString("title").takeIf { it.isNotBlank() },
+                        view = view,
+                    ),
+                )
+            }
 
             "event" -> {
                 val eventKind = item.optString("event").ifEmpty { item.optString("role") }
@@ -1479,6 +1666,146 @@ class BotChatViewModel(
 
             else -> null
         }
+    }
+
+    /**
+     * `answer` item 里的问答对。
+     *
+     * 形状来自插件（`parts.js`）：`questions: [asked]` / `answers: [given]`，
+     * 作答里 `selected` 是选中的选项文案，`custom` 是自定义输入（对齐网页版 `SettledQuestion`）。
+     */
+    private fun answeredQuestions(item: JSONObject): List<ChatAnsweredQuestion> {
+        val questions = item.optJSONArray("questions") ?: return emptyList()
+        if (questions.length() == 0) return emptyList()
+        val answers = item.optJSONArray("answers")
+        return buildList {
+            for (index in 0 until questions.length()) {
+                val question = questions.optJSONObject(index) ?: continue
+                val prompt = question.optString("question")
+                    .ifBlank { question.optString("prompt") }
+                    .ifBlank { question.optString("title") }
+                val id = question.optString("id")
+                val given = (0 until (answers?.length() ?: 0))
+                    .mapNotNull { answers?.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == id }
+                val picked = buildList {
+                    given?.optJSONArray("selected")?.let { selected ->
+                        for (at in 0 until selected.length()) add(selected.optString(at))
+                    }
+                    given?.optString("custom")?.takeIf { it.isNotBlank() }?.let(::add)
+                }
+                add(ChatAnsweredQuestion(question = prompt, answers = picked))
+            }
+        }
+    }
+
+    /** 长文消息的附件（`whole.file`）：网页版「显示全部」按它调 `file-text`。 */
+    private fun wholePost(item: JSONObject): ChatWholePost? {
+        val whole = item.optJSONObject("whole") ?: return null
+        val file = whole.optJSONObject("file") ?: return null
+        return ChatWholePost(
+            name = file.optString("name").takeIf { it.isNotBlank() } ?: "长文",
+            length = whole.optInt("length", 0),
+            file = file,
+        )
+    }
+
+    /** `state.rooms[roomId].paused` → 等待放行的中转（DS Bot `room.paused`）。 */
+    private fun parseRoomPaused(state: JSONObject, roomId: String): List<ChatPausedMember> {
+        val rooms = state.optJSONArray("rooms") ?: return emptyList()
+        val room = (0 until rooms.length())
+            .mapNotNull { rooms.optJSONObject(it) }
+            .firstOrNull { it.optString("id") == roomId }
+            ?: return emptyList()
+        val paused = room.optJSONArray("paused") ?: return emptyList()
+        return (0 until paused.length()).mapNotNull { index ->
+            val entry = paused.optJSONObject(index) ?: return@mapNotNull null
+            val name = entry.optString("name").trim()
+            if (name.isEmpty()) return@mapNotNull null
+            ChatPausedMember(
+                id = entry.optString("id"),
+                name = name,
+                note = entry.optString("note").takeIf { it.isNotBlank() },
+            )
+        }
+    }
+
+    /**
+     * 该不该让用户先选模型（对齐网页版 `ModelChoiceDock`）。
+     *
+     * 条件与文案都照抄它：模型还在 → 不提示；模型没了 / 没选过 / 一个可用模型都没有
+     * → 出一张卡，点 chip 即 `update-bot {model}`。
+     */
+    private fun modelPromptOf(state: JSONObject, bot: JSONObject?): ChatModelPrompt? {
+        val models = state.optJSONArray("models")?.let { array ->
+            (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val ref = item.optString("ref")
+                if (ref.isEmpty()) return@mapNotNull null
+                ChatModelChoice(
+                    ref = ref,
+                    name = item.optString("name").ifEmpty { ref },
+                    provider = item.optString("providerName")
+                        .ifEmpty { item.optString("provider") }
+                        .takeIf { it.isNotEmpty() },
+                    needsKey = item.optBoolean("needsKey", false),
+                )
+            }
+        }.orEmpty()
+        val current = bot?.optString("model").orEmpty()
+        val usable = models.filterNot { it.needsKey }
+        val lost = current.isNotEmpty() && models.none { it.ref == current }
+        // 模型还在：什么都不用提示（和网页版一样）。
+        if (current.isNotEmpty() && !lost) return null
+        if (current.isNotEmpty() && lost && models.isEmpty()) return null
+        return when {
+            lost -> ChatModelPrompt(
+                kind = "lost",
+                message = "原来的模型已经不在了，给我换一个吧",
+                choices = usable,
+            )
+            usable.isEmpty() && models.isNotEmpty() -> ChatModelPrompt(
+                kind = "key",
+                message = "我还需要一个 ${models.first().provider ?: "模型"} 的 API Key 才能开始",
+                choices = models,
+            )
+            usable.isEmpty() -> ChatModelPrompt(
+                kind = "empty",
+                message = "我还没有模型，你想怎么设置？",
+            )
+            else -> ChatModelPrompt(
+                kind = "pick",
+                message = "先给我选一个模型吧，之后可以在详情里改",
+                choices = usable,
+            )
+        }
+    }
+
+    /**
+     * `answer` item 里回答过的视图卡（网页版 `AnsweredView`）。
+     *
+     * `views[0]` 是当时展示的那张卡，`answers` 里同 id 的那条带 `action` 与 `values`。
+     */
+    private fun answeredView(item: JSONObject): ChatAnsweredView? {
+        val views = item.optJSONArray("views") ?: return null
+        val shown = (0 until views.length())
+            .mapNotNull { views.optJSONObject(it) }
+            .firstOrNull { it.optJSONObject("view") != null }
+            ?: return null
+        val id = shown.optString("id")
+        val answers = item.optJSONArray("answers")
+        val given = (0 until (answers?.length() ?: 0))
+            .mapNotNull { answers?.optJSONObject(it) }
+            .let { list -> list.firstOrNull { it.optString("id") == id } ?: list.firstOrNull() }
+        return ChatAnsweredView(
+            card = ChatViewCard(
+                id = id,
+                title = shown.optString("title").takeIf { it.isNotBlank() },
+                view = requireNotNull(shown.optJSONObject("view")),
+            ),
+            action = given?.optString("action").orEmpty(),
+            values = given?.optJSONObject("values") ?: JSONObject(),
+        )
     }
 
     override fun onCleared() {

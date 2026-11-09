@@ -382,8 +382,9 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   可选形象 / 颜色 / 模型 / 角色 / 开场消息，校验重名与非法名字；创建成功后打开 Bot 设置页。
 - ☑️ 模型选择：新建 Bot、Bot 底部面板、Bot 完整设置页统一用 `BotModelComboBox` 下拉选择，
   不支持搜索输入；选中立即走 `update-bot` 或写进 `create-bot`。
-- ⬜ 群聊后续：`folder-list` / `folder-pick` 群目录选择器、`memory-add` / `memory-edit` 群记忆新增编辑、
-  `room-continue` / 群接力进度、浏览器标签页。
+- ☑️ 群聊后续（2026-11-09）：`folder-list` / `folder-pick` 群目录选择器（工作文件夹改用同一个
+  `FolderPickerDialog`）、`memory-add` / `memory-edit` 群记忆新增编辑（本来已接，本轮确认）、
+  `room-continue`（群聊暂停后「继续」）、浏览器标签页。
 
 ## 已知工程债（与修 bug 并行清）
 
@@ -533,24 +534,28 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   回合轮询的结论、手动停止）。判定顺序抽成 `botRunIsRunning` / `groupRunIsRunning` 两个纯函数
   并配单测（`ChatActivityTest`），顺序就是之前踩过的坑：会话状态 > 本地乐观 > 回合边界 > `work`。
   群聊轮询也瘦身：每秒只读 `room-progress`，重的 `state` 最多 3 秒一次。
-- 🟡 群聊 `paused` + 「继续」（`room-continue`）未接。
+- ☑️ 群聊 `paused` + 「继续」（`room-continue`）：输入框上方出「群聊暂停了…」卡片 + 「继续」，
+  数据取 `state.rooms[].paused`（2026-11-09）。
+- ☑️ 群详情成员的实时状态（`state.work` → 等你批准 / 正在干活），页面开着时 3 秒轻量轮询（2026-11-09）。
 - 🟡 长文折叠：DS Bot 单聊也折叠（`FOLD_HUGE`），按用户要求目前只在群聊折叠。
 
 **输入区**
 - ⬜ 成员 dock（群聊成员在输入框上方，`MemberDock`）。
-- ⬜ 模型选择 dock（输入框上方，`ModelChoiceDock`）；目前只在详情/新建页选。
+- ☑️ 模型选择 dock（输入框上方，`ModelChoiceDock`）：Bot 没模型 / 模型没了时出卡 + 模型 chip
+  （`update-bot {model}`）—— 之前新建的 Bot 没选模型会直接卡住（2026-11-09）。
 - ⬜ 输入框上方的 usage dock / btw dock（DS Bot 里 activity/usage 两个 dock 被隐藏，btw 显示）。
 - ⬜ 斜杠命令 / 技能引用（DSH 输入触发器）。
 
 **顶栏 / 主界面**
 - ⬜ 新回复药丸 `NewMessagePills`。
-- ⬜ 主界面行状态：头像状态环（running / waiting / approval）、主 Bot 徽标、未读点、置顶标记、
-  运行中那一行（`doingLine`）、Working / Waiting / Unread 文案。
+- 🟡 主界面行状态（2026-11-09）：头像状态环（running 主色 / waiting 警告色）+ 置顶标记已做；
+  ⬜ 还差主 Bot 徽标、未读点、运行中那一行（`doingLine`）、Working / Waiting / Unread 文案
+  （未读相关按用户决定不做）。
 - ⬜ 侧栏 workspace/team 分组、footer 的账号 / 连接插件入口（`TeamSidebar` 等）。
 
 **详情面板**
 - ⬜ `RunStats`：`N turns · xx tok/s · cache hit xx% · context xx%`。
-- ⬜ 「复制整段对话为 Markdown」（`Share` 按钮）。
+- ☑️ 「复制整段对话为 Markdown」（`Share` 按钮）：对话页按当前条目生成，Bot / 群聊面板各有一个入口（2026-11-09）。
 - ⬜ more 菜单：side chat / terminal / files（DSH 右栏标签）。
 - ⬜ 浏览器 tab（Bot 专属多标签浏览器，当前仍是占位）。
 - 🟡 群详情成员列表缺实时状态（working / approval）。
@@ -589,3 +594,11 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   失败/通知静默（事件行分错误级 `ChatEventTone` + `failureLabel`、中转结果后重拉会话、
   一轮无产出时查 diagnostics 补失败行、`notice` 接 `done/question/view/group`）。
   详见 [bugfix-chat-2026-11-09.md](bugfix-chat-2026-11-09.md)。
+- ☑️ **对话界面与网页版对齐（专项，2026-11-09）**：目标「网页版有的，原生必须有」，
+  做完才去掉网页版入口。清单见 [web-parity-chat.md](web-parity-chat.md)。
+  本轮已补：`divider`（时间分隔）、`view`（只读视图卡）、`answer(questions)`（问答回执卡）、
+  `user.images` 计数、`bot.whole`（长文附件 + `file-text` 显示全部）、
+  `answer(views)` 回放（`AnsweredViewCard` 按当时填写只读回放）、
+  中转类事件行文案核对（群聊工具从结果解析群名，与网页版同一正则；`ToolEventLineTest` 覆盖）。
+  清单已收口：群聊时间/耗时、BTW 旁白卡、reactions 三条按 2026-11-09 决定**有意不做**
+  （理由见清单末尾），余下全部对齐 → **网页版入口可以去掉了**。

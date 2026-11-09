@@ -287,6 +287,20 @@ fun BotChatScreen(
     val bottomChromeHeight = composerHeight + composerBottomPadding
     var chatError by remember { mutableStateOf<String?>(null) }
     var stopError by remember { mutableStateOf<String?>(null) }
+    /** 正在提交上方的模型选择：chip 禁用，避免重复点。 */
+    var pickingModel by remember { mutableStateOf(false) }
+
+    // 「复制整段对话」：按当前界面上的条目生成 Markdown（网页版详情抽屉的 Share）。
+    fun copyTranscript() {
+        copyMessage(
+            attachContext,
+            conversationMarkdown(
+                title = bot.name,
+                botName = bot.name,
+                entries = state.entries,
+            ),
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -514,6 +528,29 @@ fun BotChatScreen(
                     }
                 },
             )
+            // 还没有模型（或模型没了）：先让用户选一个，否则这个 Bot 谁也喊不动。
+            state.modelPrompt?.let { prompt ->
+                ModelChoiceCard(
+                    prompt = prompt,
+                    botName = bot.name,
+                    busy = pickingModel,
+                    onPick = { ref ->
+                        pickingModel = true
+                        viewModel.chooseModel(ref) { error ->
+                            pickingModel = false
+                            if (error != null) chatError = error
+                        }
+                    },
+                )
+            }
+            // 群聊跑到中转上限会停下等用户：这一行 + 「继续」走 `room-continue`。
+            RoomPausedCard(
+                paused = state.roomPaused,
+                busy = state.roomContinuing,
+                onContinue = {
+                    viewModel.continueRoom { error -> if (error != null) chatError = error }
+                },
+            )
             ChatComposer(
                 value = draft,
                 onValueChange = { draft = it },
@@ -559,6 +596,7 @@ fun BotChatScreen(
                     onDetails()
                 },
                 onOpenMember = onOpenMember,
+                onCopyTranscript = { copyTranscript() },
             )
         } else {
             BotSettingsSheet(
@@ -570,6 +608,7 @@ fun BotChatScreen(
                     onDetails()
                 },
                 onBrowser = onOpenBrowser,
+                onCopyTranscript = { copyTranscript() },
             )
         }
     }
@@ -860,6 +899,7 @@ private fun ChatMessages(
                         fontScale = fontScale,
                         attachments = entry.attachments,
                         items = entry.attachmentItems,
+                        images = entry.images,
                         timeMs = null,
                     )
                     ChatEntryKind.BOT -> BotBubble(
@@ -874,6 +914,8 @@ private fun ChatMessages(
                         onOpenMember = onOpenMember,
                         timeMs = null,
                         durationMs = null,
+                        whole = entry.whole,
+                        endpoint = endpoint,
                     )
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
@@ -911,6 +953,18 @@ private fun ChatMessages(
                         shot = entry.shot,
                         onClick = onOpenBrowser,
                     )
+
+                    // 网页版 `chat` items 的另外三种 kind：分隔线 / 只读视图卡 / 问答回执。
+                    ChatEntryKind.DIVIDER -> PartDividerRow(timeMs = entry.timeMs)
+
+                    ChatEntryKind.VIEW -> ViewCardReadOnly(card = entry.view)
+
+                    // 回答过的提问 / 视图卡：网页版分别是 `AnsweredCell` / `AnsweredView`。
+                    ChatEntryKind.ANSWERED -> if (entry.answeredView != null) {
+                        AnsweredViewCard(answer = entry.answeredView)
+                    } else {
+                        AnsweredQuestionCard(answered = entry.answered)
+                    }
                 }
                 }
             }
@@ -1152,6 +1206,8 @@ private fun UserBubble(
     fontScale: Float,
     attachments: List<String> = emptyList(),
     items: List<ChatAttachmentItem> = emptyList(),
+    /** 历史回读里的图片数量（只有计数，没有图）。 */
+    images: Int = 0,
     timeMs: Long? = null,
 ) {
     val context = LocalContext.current
@@ -1194,6 +1250,7 @@ private fun UserBubble(
                     modifier = Modifier.padding(top = Dshm.spacing.xxs),
                 )
             }
+            ImageCountCaption(count = images)
         }
         timeMs?.let { t ->
             Text(
@@ -1312,6 +1369,9 @@ private fun BotBubble(
     onOpenMember: (String) -> Unit = {},
     timeMs: Long? = null,
     durationMs: Long? = null,
+    /** 长文消息：正文折起，完整内容在附件里（网页版「显示全部」）。 */
+    whole: ChatWholePost? = null,
+    endpoint: RuntimeEndpoint? = null,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
@@ -1367,6 +1427,11 @@ private fun BotBubble(
                             color = Dshm.colors.textTertiary,
                         )
                     }
+                }
+                // 正文被折起的长文：完整内容在附件里（网页版「显示全部」按 `file-text` 读）。
+                whole?.let { post ->
+                    androidx.compose.material3.HorizontalDivider(color = Dshm.colors.divider)
+                    WholeAttachmentRow(post = post, endpoint = endpoint)
                 }
             }
         }

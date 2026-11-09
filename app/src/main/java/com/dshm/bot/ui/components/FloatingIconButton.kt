@@ -2,6 +2,7 @@ package com.dshm.bot.ui.components
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -37,7 +38,10 @@ fun FloatingIconButton(
                 spotColor = Dshm.colors.shadow,
             )
             .clip(CircleShape)
-            .background(Dshm.colors.surface)
+            // 深色主题下 `surface` 跟页面底色几乎一样，圆钮会「没有形状」；
+            // 用专门的悬浮填充色 + 一圈描边，两种主题都能看出这是一颗按钮。
+            .background(Dshm.colors.floatingSurface)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, CircleShape)
             .then(
                 if (enabled) {
                     Modifier.clickable(onClick = onClick)

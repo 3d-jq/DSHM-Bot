@@ -13,8 +13,12 @@ data class ToolEventLine(
     val target: String? = null,
 )
 
-private val GROUP_NAME = Regex("""(?:Created group|Updated group|Nothing changed in group) "([^"]+)"""")
-private val POST_NAME = Regex("""Posted in "([^"]+)"""")
+/**
+ * 群聊类工具的结果里带群名，网页版就是用这个前缀解析的
+ * （`client.js` `renderCall`：`/^(Created group|Updated|Nothing changed in|Deleted|Posted in) "([^"]+)"/`）。
+ */
+private val GROUP_RESULT_NAME =
+    Regex("""^(?:Created group|Updated|Nothing changed in|Deleted|Posted in) "([^"]+)"""")
 /**
  * DS Bot 会画出来的团队级工具事件（`ToolCell` 的 `DRAWN` 集合里，除卡片和群接力外的那些）。
  *
@@ -61,24 +65,33 @@ fun toolEventLine(
         }
 
         "create_group" -> {
-            val name = GROUP_NAME.find(result)?.groupValues?.getOrNull(1) ?: target
+            val name = GROUP_RESULT_NAME.find(result.trim())?.groupValues?.getOrNull(1) ?: target
             ToolEventLine(
                 if (isError) "创建群聊失败" else "创建了群聊${if (name.isNullOrBlank()) "" else "：$name"}",
                 name?.takeUnless { isError },
             )
         }
 
-        "update_group" -> ToolEventLine(
-            if (isError) "更新群聊失败" else "更新了群聊",
-            target?.takeUnless { isError },
-        )
+        "update_group" -> {
+            val name = GROUP_RESULT_NAME.find(result.trim())?.groupValues?.getOrNull(1) ?: target
+            ToolEventLine(
+                if (isError) "更新群聊失败" else "更新了群聊${if (name.isNullOrBlank()) "" else "：$name"}",
+                name?.takeUnless { isError },
+            )
+        }
 
-        "delete_group" -> ToolEventLine(if (isError) "删除群聊失败" else "删除了群聊")
+        "delete_group" -> {
+            val name = GROUP_RESULT_NAME.find(result.trim())?.groupValues?.getOrNull(1) ?: target
+            ToolEventLine(
+                if (isError) "删除群聊失败" else "删除了群聊${if (name.isNullOrBlank()) "" else "：$name"}",
+                name?.takeUnless { isError },
+            )
+        }
 
         "post_to_group" -> {
-            val name = POST_NAME.find(result)?.groupValues?.getOrNull(1) ?: target
+            val name = GROUP_RESULT_NAME.find(result.trim())?.groupValues?.getOrNull(1) ?: target
             ToolEventLine(
-                if (isError) "群发言失败" else "在${if (name.isNullOrBlank()) "群里" else " $name "}发言",
+                if (isError) "没能在群里发言" else "在${if (name.isNullOrBlank()) "群里" else " $name "}发言",
                 name?.takeUnless { isError },
             )
         }

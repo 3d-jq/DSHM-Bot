@@ -65,6 +65,24 @@ data class RoomSettingsUi(
     val memoryFresh: Boolean = true,
     val usageTokens: Long = 0L,
     val cacheHit: Float? = null,
+    /** 每个成员的实时状态（`state.work`）：等批准 / 正在干活 / 空闲。 */
+    val memberStatus: Map<String, RoomMemberStatus> = emptyMap(),
+    /** `folders` 接口已知的目录 + 这个 DSH 提供哪种选择方式（与 Bot 详情同一套）。 */
+    val folders: List<BotFolder> = emptyList(),
+    val teamFolder: String? = null,
+    val folderPicker: String? = null,
+)
+
+/**
+ * 群成员的实时状态，对齐 DS Bot `memberWork`（`client.js:15521`）：
+ * 有属于它的审批就是 `ask`（等你批准）；否则看 `work.rooms[roomId]` 里它在群里的活，
+ * 再退回 `work.bots[id]`（在它自己的对话里干活）；都没有就是空闲（界面退回显示角色）。
+ */
+data class RoomMemberStatus(
+    /** `ask` / `work` / `idle`。 */
+    val state: String,
+    /** 正在干什么（DS Bot 的 `workPhrase(doing)`）。 */
+    val doing: String? = null,
 )
 
 /** DS Bot `state.rooms[]` + `state.permissions`。 */
@@ -137,7 +155,49 @@ fun parseRoomSettings(state: JSONObject, roomId: String): RoomSettingsUi {
         botRows = botRows,
         permissions = permissions,
         memoryEnabled = state.optBoolean("memory", true),
+        memberStatus = parseMemberStatus(state, roomId),
     )
+}
+
+/**
+ * `state.work` → 每个成员的实时状态（对齐 DS Bot `memberWork`）。
+ *
+ * - `ask`：`work.approvals` 里有这个 Bot 的待批准；
+ * - `work`：先看 `work.rooms[roomId]`（在群里干活），再看 `work.bots[id]`（在自己的对话里干活）；
+ * - `idle`：都没有。
+ */
+internal fun parseMemberStatus(state: JSONObject, roomId: String): Map<String, RoomMemberStatus> {
+    val work = state.optJSONObject("work") ?: return emptyMap()
+    val approvals = work.optJSONArray("approvals")
+    val roomWork = work.optJSONObject("rooms")?.optJSONArray(roomId)
+    val botWork = work.optJSONObject("bots")
+    val out = mutableMapOf<String, RoomMemberStatus>()
+    fun statusOf(id: String): RoomMemberStatus {
+        val waiting = approvals != null && (0 until approvals.length()).any { index ->
+            approvals.optJSONObject(index)?.optString("botId") == id
+        }
+        if (waiting) return RoomMemberStatus(state = "ask")
+        val local = roomWork?.let { array ->
+            (0 until array.length())
+                .mapNotNull { array.optJSONObject(it) }
+                .firstOrNull { it.optString("botId") == id }
+        }
+        val doing = local ?: botWork?.optJSONObject(id)
+        if (doing != null) {
+            return RoomMemberStatus(
+                state = "work",
+                doing = toolLabel(doing)?.takeIf { it.isNotBlank() } ?: "正在干活",
+            )
+        }
+        return RoomMemberStatus(state = "idle")
+    }
+    state.optJSONArray("bots")?.let { array ->
+        for (index in 0 until array.length()) {
+            val id = array.optJSONObject(index)?.optString("id").orEmpty()
+            if (id.isNotEmpty()) out[id] = statusOf(id)
+        }
+    }
+    return out
 }
 
 internal fun RoomBotOption.toMemberUi(): RoomMemberUi = RoomMemberUi(

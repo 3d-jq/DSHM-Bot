@@ -1,6 +1,8 @@
 package com.dshm.bot.ui.home.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,11 +12,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.painterResource
+import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.ui.components.BotAvatar
 import com.dshm.bot.ui.chat.RoomAvatar
@@ -35,15 +41,33 @@ fun BotRow(
             .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (row.isGroup) {
-            RoomAvatar(members = row.roomMembers)
-        } else {
-            BotAvatar(
-                inkId = row.inkId,
-                glyph = row.glyph,
-                avatarImage = row.avatarImage,
-                avatarShape = row.avatarShape,
-            )
+        // 头像状态环：干活中（主色）/ 等你批准（警告色）。DS Bot 侧栏也是这个语义。
+        val ring = when (row.activity) {
+            "waiting" -> Dshm.colors.warning
+            "running" -> Dshm.colors.accent
+            else -> null
+        }
+        Box(
+            modifier = Modifier.then(
+                if (ring != null) {
+                    Modifier
+                        .border(Dshm.spacing.xxs, ring, CircleShape)
+                        .padding(Dshm.spacing.xxs)
+                } else {
+                    Modifier
+                },
+            ),
+        ) {
+            if (row.isGroup) {
+                RoomAvatar(members = row.roomMembers)
+            } else {
+                BotAvatar(
+                    inkId = row.inkId,
+                    glyph = row.glyph,
+                    avatarImage = row.avatarImage,
+                    avatarShape = row.avatarShape,
+                )
+            }
         }
         Spacer(Modifier.width(Dshm.spacing.md))
         // 文字列与头像中线对齐（行级 CenterVertically）；名字与预览之间留 4dp 间隙。
@@ -60,6 +84,15 @@ fun BotRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (row.pinned) {
+                    Spacer(Modifier.width(Dshm.spacing.xxs))
+                    Icon(
+                        painter = painterResource(R.drawable.ic_lucide_pin),
+                        contentDescription = null,
+                        tint = Dshm.colors.textTertiary,
+                        modifier = Modifier.width(Dshm.spacing.md),
+                    )
+                }
                 Spacer(Modifier.width(Dshm.spacing.sm))
                 Text(
                     text = row.timeLabel,

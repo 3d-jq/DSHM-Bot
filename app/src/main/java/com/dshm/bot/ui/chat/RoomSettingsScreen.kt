@@ -18,6 +18,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,11 @@ fun RoomSettingsScreen(
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val info = state.info
+    // 成员状态是实时的（谁在干活 / 谁等批准）：页面开着时轻量轮询，退出就停。
+    DisposableEffect(Unit) {
+        viewModel.startStatusPolling()
+        onDispose { viewModel.stopStatusPolling() }
+    }
     var editName by rememberSaveable { mutableStateOf(false) }
     var editNotice by rememberSaveable { mutableStateOf(false) }
     var editFolder by rememberSaveable { mutableStateOf(false) }
@@ -177,12 +183,28 @@ fun RoomSettingsScreen(
                 info?.members?.forEachIndexed { index, id ->
                     if (index > 0) SettingsRowDivider()
                     val member = names[id]
+                    // 实时状态优先：等你批准 / 正在干活（对齐 DS Bot `MemberState`），
+                    // 空闲时才退回显示角色或管理员标记。
+                    val status = state.memberStatus[id]
+                    val badge = if (id == info.admin) {
+                        stringResource(R.string.room_settings_admin_badge)
+                    } else {
+                        member?.role
+                    }
                     SettingsRow(
                         title = member?.name ?: id,
-                        subtitle = if (id == info.admin) {
-                            stringResource(R.string.room_settings_admin_badge)
-                        } else {
-                            member?.role
+                        subtitle = when (status?.state) {
+                            "ask" -> stringResource(R.string.room_member_waiting_approval)
+                            "work" -> stringResource(
+                                R.string.room_member_working,
+                                status.doing.orEmpty(),
+                            )
+                            else -> badge
+                        },
+                        subtitleColor = when (status?.state) {
+                            "ask" -> Dshm.colors.warning
+                            "work" -> Dshm.colors.accent
+                            else -> null
                         },
                         leading = {
                             if (member != null) {
@@ -377,17 +399,23 @@ fun RoomSettingsScreen(
         )
     }
     if (editFolder && info != null) {
-        TextEditDialog(
-            title = stringResource(R.string.bot_settings_workdir),
-            initial = info.workDir.orEmpty(),
-            onDismiss = { editFolder = false },
-            onSave = { value ->
+        // 与 Bot 详情同一套：已知目录 + 浏览 + 系统选择器 + 手动输入（`folders` / `folder-list` / `folder-pick`）。
+        FolderPickerDialog(
+            value = info.workDir,
+            fallback = state.teamFolder,
+            folders = state.folders,
+            picker = state.folderPicker,
+            onLoad = { viewModel.loadFolders { } },
+            onList = { path, then -> viewModel.listFolders(path, then) },
+            onPickNative = { then -> viewModel.pickFolder(then) },
+            onChoose = { value ->
                 editFolder = false
                 viewModel.updateRoom(
                     patch = JSONObject().put("workDir", value),
-                    optimistic = { it.copy(workDir = value.takeIf { it.isNotEmpty() }) },
+                    optimistic = { it.copy(workDir = value?.takeIf { path -> path.isNotEmpty() }) },
                 )
             },
+            onDismiss = { editFolder = false },
         )
     }
     if (pickAdmin && info != null) {

@@ -639,6 +639,8 @@ fun BotSettingsSheet(
     onDismiss: () -> Unit,
     onDetails: () -> Unit,
     onBrowser: () -> Unit = {},
+    /** 复制整段对话（网页版详情抽屉的 Share；内容由对话页按当前条目生成）。 */
+    onCopyTranscript: () -> Unit = {},
     viewModel: BotDetailsViewModel = viewModel(
         key = "bot-sheet:${bot.id}:${endpoint?.baseUrl.orEmpty()}:${endpoint?.token.orEmpty()}",
         factory = BotDetailsViewModel.factory(bot.id, endpoint),
@@ -733,6 +735,11 @@ fun BotSettingsSheet(
                         onDismiss()
                         onDetails()
                     },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.chat_copy_transcript),
+                    onClick = onCopyTranscript,
                 )
             }
 

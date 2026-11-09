@@ -43,6 +43,8 @@ fun RoomSettingsSheet(
     onDismiss: () -> Unit,
     onDetails: () -> Unit,
     onOpenMember: (String) -> Unit,
+    /** 复制整段对话（网页版详情抽屉的 Share）。 */
+    onCopyTranscript: () -> Unit = {},
     viewModel: RoomSettingsViewModel = viewModel(
         key = "room-sheet:${row.id}:${endpoint?.baseUrl.orEmpty()}",
         factory = RoomSettingsViewModel.factory(row.id, endpoint),
@@ -185,6 +187,11 @@ fun RoomSettingsSheet(
                         onDismiss()
                         onDetails()
                     },
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = stringResource(R.string.chat_copy_transcript),
+                    onClick = onCopyTranscript,
                 )
             }
         }

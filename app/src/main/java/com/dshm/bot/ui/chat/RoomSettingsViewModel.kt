@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,6 +27,7 @@ class RoomSettingsViewModel(
     private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
     private val _ui = MutableStateFlow(RoomSettingsUi(loading = client != null))
     val ui: StateFlow<RoomSettingsUi> = _ui.asStateFlow()
+    private var statusJob: Job? = null
 
     init {
         if (client == null) {
@@ -44,6 +47,110 @@ class RoomSettingsViewModel(
                 }
             loadMemory(connection)
             loadUsage(connection)
+        }
+    }
+
+    /**
+     * 群详情开着时轻量轮询成员状态（`state.work`）。
+     *
+     * 只更新 `memberStatus`：记忆 / 用量不跟着重拉（那两条很贵）。
+     */
+    fun startStatusPolling() {
+        val connection = client ?: return
+        if (statusJob?.isActive == true) return
+        statusJob = viewModelScope.launch {
+            while (true) {
+                delay(3_000)
+                val state = runCatching { connection.bot("state") }.getOrNull() ?: continue
+                _ui.update { it.copy(memberStatus = parseMemberStatus(state, roomId)) }
+            }
+        }
+    }
+
+    fun stopStatusPolling() {
+        statusJob?.cancel()
+        statusJob = null
+    }
+
+    /**
+     * 工作目录候选 + 这个 DSH 提供哪种选择方式（`folders`）。
+     *
+     * 与 Bot 详情页同一套接口：群聊和 Bot 用的是同一个 `folder-list` / `folder-pick`。
+     */
+    fun loadFolders(onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching { connection.bot("folders") }
+                .onSuccess { view ->
+                    val folders = view.optJSONArray("folders")?.let { array ->
+                        buildList {
+                            for (index in 0 until array.length()) {
+                                val item = array.optJSONObject(index) ?: continue
+                                val path = item.optString("path")
+                                if (path.isNotEmpty()) {
+                                    add(BotFolder(path, item.optString("title").ifEmpty { path }))
+                                }
+                            }
+                        }
+                    }.orEmpty()
+                    _ui.update {
+                        it.copy(
+                            folders = folders,
+                            teamFolder = view.optString("team").takeIf { team -> team.isNotEmpty() },
+                            folderPicker = view.optString("picker").takeIf { kind -> kind.isNotEmpty() },
+                        )
+                    }
+                    onDone(null)
+                }
+                .onFailure { onDone(it.message ?: "读取目录失败") }
+        }
+    }
+
+    /** 浏览一个目录（`folder-list`）。 */
+    fun listFolders(path: String?, onDone: (BotFolderListing?) -> Unit) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching {
+                connection.bot("folder-list", JSONObject().put("path", path.orEmpty()))
+            }.onSuccess { view ->
+                val crumbs = view.optJSONArray("crumbs")?.let { array ->
+                    buildList {
+                        for (index in 0 until array.length()) {
+                            val item = array.optJSONObject(index) ?: continue
+                            add(item.optString("name") to item.optString("path"))
+                        }
+                    }
+                }.orEmpty()
+                val entries = view.optJSONArray("entries")?.let { array ->
+                    buildList {
+                        for (index in 0 until array.length()) {
+                            val item = array.optJSONObject(index) ?: continue
+                            if (item.optBoolean("hidden", false)) continue
+                            val entryPath = item.optString("path")
+                            if (entryPath.isEmpty()) continue
+                            add(BotFolder(entryPath, item.optString("name").ifEmpty { entryPath }))
+                        }
+                    }
+                }.orEmpty()
+                onDone(
+                    BotFolderListing(
+                        path = view.optString("path"),
+                        home = view.optString("home").takeIf { it.isNotEmpty() },
+                        crumbs = crumbs,
+                        entries = entries,
+                        truncated = view.optBoolean("truncated", false),
+                    ),
+                )
+            }.onFailure { onDone(null) }
+        }
+    }
+
+    /** 宿主自己的目录选择器（`folder-pick`），本机 DSH 通常没有。 */
+    fun pickFolder(onDone: (String?) -> Unit) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            val path = runCatching { connection.botValue("folder-pick") }.getOrNull() as? String
+            onDone(path?.takeIf { it.isNotEmpty() })
         }
     }
 

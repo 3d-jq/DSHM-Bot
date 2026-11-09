@@ -19,6 +19,8 @@ data class ChatRowUi(
     val roomMembers: List<RoomMemberUi> = emptyList(),
     /** 群管理员 id；单 Bot 为 null。 */
     val roomAdmin: String? = null,
+    /** 实时状态：`running` 干活中 / `waiting` 等你批准 / null 空闲（主页行的头像状态环）。 */
+    val activity: String? = null,
 )
 
 data class RoomMemberUi(

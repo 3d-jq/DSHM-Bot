@@ -32,6 +32,43 @@ class ToolEventLineTest {
         assertNull(sent?.target)
     }
 
+    /**
+     * 群聊类工具从结果里取群名（网页版 `renderCall` 的同一个正则）：
+     * 插件的结果文案是 `Created group "X" with …` / `Updated "X": …` / `Nothing changed in "X".` /
+     * `Deleted "X". …` / `Posted in "X", …`。
+     */
+    @Test
+    fun `group tools read the group name out of the result`() {
+        val created = line(
+            "create_group",
+            result = """Created group "团队小群" with 小助手, 大总管. You are its admin.""",
+        )
+        assertEquals("创建了群聊：团队小群", created?.label)
+        assertEquals("团队小群", created?.target)
+
+        val updated = line("update_group", result = """Updated "团队小群": name; members.""")
+        assertEquals("更新了群聊：团队小群", updated?.label)
+
+        val unchanged = line("update_group", result = """Nothing changed in "团队小群".""")
+        assertEquals("更新了群聊：团队小群", unchanged?.label)
+
+        val deleted = line("delete_group", result = """Deleted "团队小群". Its history is archived.""")
+        assertEquals("删除了群聊：团队小群", deleted?.label)
+        assertEquals("团队小群", deleted?.target)
+
+        val posted = line("post_to_group", result = """Posted in "团队小群". Members reply there.""")
+        assertEquals("在 团队小群 发言", posted?.label)
+        assertEquals("团队小群", posted?.target)
+    }
+
+    @Test
+    fun `group tools keep their failure wording`() {
+        assertEquals("创建群聊失败", line("create_group", isError = true)?.label)
+        assertEquals("更新群聊失败", line("update_group", isError = true)?.label)
+        assertEquals("删除群聊失败", line("delete_group", isError = true)?.label)
+        assertEquals("没能在群里发言", line("post_to_group", isError = true)?.label)
+    }
+
     @Test
     fun `stop_bot and create_bot point at their target`() {
         assertEquals("叫停了 小助手", line("stop_bot", JSONObject().put("bot", "小助手"))?.label)

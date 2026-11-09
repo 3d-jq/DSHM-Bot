@@ -38,4 +38,9 @@ data class BotSummary(
     val roomMembers: List<RoomMemberUi> = emptyList(),
     /** 群管理员 id；单 Bot 为空。 */
     val roomAdmin: String? = null,
+    /**
+     * 实时状态（`state.work`）：`running` 正在干活 / `waiting` 等你批准 / null 空闲。
+     * 主页行据此画头像状态环（对齐 DS Bot 侧栏的状态点）。
+     */
+    val activity: String? = null,
 )

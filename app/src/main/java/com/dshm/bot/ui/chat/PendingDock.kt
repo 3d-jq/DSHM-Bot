@@ -486,6 +486,97 @@ private fun ViewDockCard(
     }
 }
 
+/**
+ * 只读视图卡：历史里 `view` item 的回放（网页版 `WidgetCell`）。
+ *
+ * 复用同一套 `ViewNode` 渲染，只是把作答回调换成空实现 —— 卡里的控件不可点。
+ */
+@Composable
+fun ViewCardReadOnly(
+    card: ChatViewCard?,
+    modifier: Modifier = Modifier,
+) {
+    card ?: return
+    val inputs = remember(card.id) { viewDefaultInputs(card.view) }
+    val scope = viewScope(card.view, inputs)
+    val reply = ViewReply(
+        busy = true,
+        picked = emptyMap(),
+        fields = emptyMap(),
+        onInput = { _, _ -> },
+        onPick = { _, _ -> },
+        onField = { _, _, _ -> },
+        onSubmit = { _, _ -> },
+    )
+    ReadOnlyCardFrame(title = card.title, modifier = modifier) {
+        ViewNode(card.view, scope, inputs, reply)
+    }
+}
+
+/**
+ * 回答过的视图卡：把当时的填写只读地填回去（网页版 `AnsweredView` → `WidgetCard(settled)`）。
+ *
+ * 提交值来自插件（`views.js validateViewAnswer`）：
+ * - `inputs`：卡内输入（`toggle` / `choice` / `slider` / `number`）；
+ * - `selected`：选项文案（`action` 指向那个 `options` 组件）；
+ * - `fields`：表单字段（`action` 指向那个 `form` 组件）；
+ * - `confirmed`：确认类组件的「确认 / 取消」。
+ */
+@Composable
+fun AnsweredViewCard(
+    answer: ChatAnsweredView?,
+    modifier: Modifier = Modifier,
+) {
+    answer ?: return
+    val view = answer.card.view
+    val values = answer.values
+    val sentInputs = values.optJSONObject("inputs")
+    val inputs = remember(answer.card.id, values.toString()) {
+        val base = viewDefaultInputs(view)
+        if (sentInputs == null) {
+            base
+        } else {
+            base + sentInputs.keys().asSequence().associateWith { key -> sentInputs.opt(key) }
+        }
+    }
+    val selected = values.optJSONArray("selected")?.let { array ->
+        (0 until array.length()).map { array.optString(it) }
+    }.orEmpty()
+    val fields = values.optJSONObject("fields")?.let { obj ->
+        obj.keys().asSequence().associateWith { key -> obj.optString(key) }
+    }.orEmpty()
+    val confirmed = if (values.has("confirmed")) values.optBoolean("confirmed") else null
+    val reply = ViewReply(
+        busy = true,
+        picked = if (selected.isEmpty() || answer.action.isEmpty()) {
+            emptyMap()
+        } else {
+            mapOf(answer.action to selected)
+        },
+        fields = if (fields.isEmpty() || answer.action.isEmpty()) {
+            emptyMap()
+        } else {
+            mapOf(answer.action to fields)
+        },
+        onInput = { _, _ -> },
+        onPick = { _, _ -> },
+        onField = { _, _, _ -> },
+        onSubmit = { _, _ -> },
+    )
+    ReadOnlyCardFrame(title = answer.card.title, modifier = modifier) {
+        ViewNode(view, viewScope(view, inputs), inputs, reply)
+        confirmed?.let { ok ->
+            Text(
+                text = stringResource(
+                    if (ok) R.string.chat_view_confirmed else R.string.chat_view_cancelled,
+                ),
+                style = Dshm.typography.rowTime,
+                color = if (ok) Dshm.colors.success else Dshm.colors.textSecondary,
+            )
+        }
+    }
+}
+
 /** 蓝图里的一个节点：容器递归，叶子按 `type` 画。 */
 @Composable
 private fun ViewNode(

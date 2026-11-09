@@ -47,8 +47,11 @@ fun BotAvatar(
 ) {
     val colors = Dshm.colors
     val shape = avatarShape
-    val whale = shape == "whale" || (shape == null && glyph == AvatarGlyph.BOT)
-    val drawing = shape != null && shape != "whale" && BotShapeSpecs.all.containsKey(shape)
+    // 默认头像（没指定形状的 Bot）就是鲸鱼：走矢量绘制，**不用**那张自带白底的 PNG ——
+    // PNG 的白圆在深色主题下不会跟着变，头像会一直是白的。
+    val key = shape?.takeIf { it.isNotEmpty() }
+        ?: if (glyph == AvatarGlyph.BOT) "whale" else null
+    val drawing = key != null && BotShapeSpecs.all.containsKey(key)
     Box(
         modifier = modifier
             .size(size)
@@ -57,7 +60,7 @@ fun BotAvatar(
                 when {
                     avatarImage != null -> Color(BotInks.color(inkId, colors.isDark))
                     // 所有角色头像统一白底圆圈，和 DS Bot 的白底鲸鱼头像同一套观感。
-                    whale || drawing -> colors.surface
+                    drawing -> colors.surface
                     else -> Color(BotInks.color(inkId, colors.isDark))
                 },
             ),
@@ -80,13 +83,6 @@ fun BotAvatar(
                 },
             )
 
-            whale -> Image(
-                painter = painterResource(R.drawable.ic_dsbot_avatar),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
-
             drawing -> Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -94,7 +90,7 @@ fun BotAvatar(
                 contentAlignment = Alignment.Center,
             ) {
                 ShapeAvatar(
-                    shape = shape ?: BotShapeSpecs.FALLBACK,
+                    shape = key ?: BotShapeSpecs.FALLBACK,
                     inkId = inkId,
                 )
             }

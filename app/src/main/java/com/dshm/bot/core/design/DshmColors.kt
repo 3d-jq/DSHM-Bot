@@ -18,6 +18,13 @@ data class DshmColors(
     val pageBackground: Color,
     val surface: Color,
     val surfaceMuted: Color,
+    /**
+     * 悬浮圆钮（顶栏那些）的填充色。
+     *
+     * 浅色主题跟 `surface` 一样是白的；深色主题要比 `background`/`surface` 都亮一档，
+     * 否则深底上的深圆钮只剩一个图标，看不出按钮形状。
+     */
+    val floatingSurface: Color,
     val textPrimary: Color,
     val textSecondary: Color,
     val textTertiary: Color,
@@ -57,6 +64,7 @@ data class DshmColors(
             pageBackground = Color(0xFFF1F2F4),
             surface = Color(0xFFFFFFFF),
             surfaceMuted = Color(0xFFF1F2F4),
+            floatingSurface = Color(0xFFFFFFFF),
             textPrimary = Color(0xFF0B0B0F),
             textSecondary = Color(0xFF8A8F98),
             textTertiary = Color(0xFFB3B8C0),
@@ -86,6 +94,7 @@ data class DshmColors(
             pageBackground = Color(0xFF0E0F12),
             surface = Color(0xFF14161A),
             surfaceMuted = Color(0xFF1C1F25),
+            floatingSurface = Color(0xFF262A33),
             textPrimary = Color(0xFFF2F3F5),
             textSecondary = Color(0xFF9AA0AA),
             textTertiary = Color(0xFF6C727C),
@@ -93,7 +102,8 @@ data class DshmColors(
             accent = Color(0xFF6A84FF),
             onAccent = Color(0xFF0B0D12),
             bubbleAssistant = Color(0xFF1C1F25),
-            bubbleUser = Color(0xFF2F6BFF),
+            // 深色主题下用更深的蓝：原来的亮蓝在深底上太刺眼（白字对比度 ~6.5:1）。
+            bubbleUser = Color(0xFF2B4FD6),
             onBubbleUser = Color(0xFFFFFFFF),
             onInk = Color(0xFFFFFFFF),
             iconTint = Color(0xFFF2F3F5),

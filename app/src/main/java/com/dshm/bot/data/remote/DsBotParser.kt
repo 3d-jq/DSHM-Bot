@@ -63,6 +63,7 @@ object DsBotParser {
         val out = mutableListOf<BotSummary>()
         val now = System.currentTimeMillis()
         val botLooks = teamMembers(state).associateBy { it.id }
+        val live = liveStatusOf(state)
 
         state.optJSONArray("bots")?.let { array ->
             for (index in 0 until array.length()) {
@@ -84,6 +85,7 @@ object DsBotParser {
                         // 没有自定义形状的 Bot 由 id 决定默认角色（DS Bot 同一套规则）。
                         avatarShape = (avatar?.anyOrNull("shape") as? String)
                             ?: BotShapeDefaults.shapeFor(id),
+                        activity = live.bots[id],
                     ),
                 )
             }
@@ -110,12 +112,59 @@ object DsBotParser {
                             }
                         }.orEmpty(),
                         roomAdmin = item.optString("admin").takeIf { it.isNotEmpty() },
+                        activity = live.rooms[id],
                     ),
                 )
             }
         }
         return out
     }
+
+    /**
+     * `state.work` → 每个 Bot / 群聊的实时状态。
+     *
+     * 对齐 DS Bot 的 `busyMembers` / 侧栏状态点：
+     * - `waiting`：`work.approvals` 里有它（等你批准）；
+     * - `running`：`work.bots[id]` 或 `work.rooms[某群]` 里有它（在干活）。
+     */
+    private fun liveStatusOf(state: JSONObject): LiveStatus {
+        val work = state.optJSONObject("work") ?: return LiveStatus()
+        val bots = mutableMapOf<String, String>()
+        val rooms = mutableMapOf<String, String>()
+        work.optJSONArray("approvals")?.let { approvals ->
+            for (index in 0 until approvals.length()) {
+                val entry = approvals.optJSONObject(index) ?: continue
+                val botId = entry.optString("botId")
+                if (botId.isNotEmpty()) bots[botId] = "waiting"
+                val roomId = entry.optString("roomId")
+                if (roomId.isNotEmpty()) rooms[roomId] = "waiting"
+            }
+        }
+        work.optJSONObject("bots")?.let { running ->
+            running.keys().forEach { id ->
+                if (bots[id] == null) bots[id] = "running"
+            }
+        }
+        work.optJSONObject("rooms")?.let { byRoom ->
+            byRoom.keys().forEach { roomId ->
+                byRoom.optJSONArray(roomId)?.let { entries ->
+                    for (index in 0 until entries.length()) {
+                        val botId = entries.optJSONObject(index)?.optString("botId").orEmpty()
+                        if (botId.isNotEmpty() && bots[botId] == null) bots[botId] = "running"
+                    }
+                }
+                if (rooms[roomId] == null && (byRoom.optJSONArray(roomId)?.length() ?: 0) > 0) {
+                    rooms[roomId] = "running"
+                }
+            }
+        }
+        return LiveStatus(bots = bots, rooms = rooms)
+    }
+
+    private data class LiveStatus(
+        val bots: Map<String, String> = emptyMap(),
+        val rooms: Map<String, String> = emptyMap(),
+    )
 
     private fun stamp(value: Long, now: Long): Instant =
         Instant.ofEpochMilli(if (value > 0L) value else now)

@@ -215,7 +215,7 @@ private fun groupDoing(members: JSONArray?): JSONObject? {
         ?: (0 until members.length()).mapNotNull { members.optJSONObject(it) }.lastOrNull()
 }
 
-private fun toolLabel(doing: JSONObject?): String? {
+internal fun toolLabel(doing: JSONObject?): String? {
     if (doing == null) return null
     val own = listOf("said", "note")
         .firstNotNullOfOrNull { key -> doing.optString(key).takeIf { it.isNotBlank() } }
