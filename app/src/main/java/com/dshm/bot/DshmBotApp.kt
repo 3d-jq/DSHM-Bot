@@ -134,6 +134,22 @@ fun DshmBotApp(
     pluginMarketViewModel: PluginMarketViewModel = viewModel(factory = PluginMarketViewModel.factory()),
 ) {
     val appContext = LocalContext.current
+    // 首页长按面板的两个动作：所有 HomeScreen 调用点共用（首页有好几个分支，
+    // 之前只接了其中一个，实际显示的分支点到的是空回调）。
+    val homeTogglePin: (com.dshm.bot.ui.home.ChatRowUi) -> Unit = { row ->
+        homeViewModel.setPinned(row.id, !row.pinned) { error ->
+            if (error != null) {
+                android.widget.Toast.makeText(appContext, error, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val homeDelete: (com.dshm.bot.ui.home.ChatRowUi) -> Unit = { row ->
+        homeViewModel.delete(row.id, row.isGroup) { error ->
+            if (error != null) {
+                android.widget.Toast.makeText(appContext, error, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val engineState by engineViewModel.state.collectAsStateWithLifecycle()
@@ -411,6 +427,8 @@ fun DshmBotApp(
                             newBotOpen = true
                         },
                         onCreateGroup = { newGroupOpen = true },
+                        onTogglePin = homeTogglePin,
+                        onDelete = homeDelete,
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -459,6 +477,8 @@ fun DshmBotApp(
                             newBotOpen = true
                         },
                         onCreateGroup = { newGroupOpen = true },
+                        onTogglePin = homeTogglePin,
+                        onDelete = homeDelete,
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -517,6 +537,8 @@ fun DshmBotApp(
                             newBotOpen = true
                         },
                         onCreateGroup = { newGroupOpen = true },
+                        onTogglePin = homeTogglePin,
+                        onDelete = homeDelete,
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -850,6 +872,8 @@ fun DshmBotApp(
                     newBotOpen = true
                 },
                 onCreateGroup = { newGroupOpen = true },
+                onTogglePin = homeTogglePin,
+                onDelete = homeDelete,
                 onOpenSearch = {
                     navForward = true
                     searchOpen = true

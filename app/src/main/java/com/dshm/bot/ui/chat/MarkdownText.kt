@@ -1,8 +1,12 @@
 package com.dshm.bot.ui.chat
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -11,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -18,17 +23,30 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -37,14 +55,21 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmColors
+import com.dshm.bot.R
+import kotlinx.coroutines.delay
 
 /** Markdown 块级节点（够聊天回复用：标题、段落、列表、引用、代码块、分隔线）。 */
 internal sealed interface MarkdownBlock {
     data class Paragraph(val text: String) : MarkdownBlock
     data class Heading(val level: Int, val text: String) : MarkdownBlock
-    data class ListItem(val text: String, val number: Int? = null) : MarkdownBlock
+    data class ListItem(
+        val text: String,
+        val number: Int? = null,
+        /** `- [ ]` / `- [x]` 的勾选态；普通条目为 null。 */
+        val checked: Boolean? = null,
+    ) : MarkdownBlock
     data class Quote(val text: String) : MarkdownBlock
-    data class Code(val text: String) : MarkdownBlock
+    data class Code(val text: String, val language: String = "") : MarkdownBlock
     data object Divider : MarkdownBlock
     /** 表格：第一行是表头，其余是数据行；每列有对齐方式。 */
     data class Table(
@@ -56,6 +81,7 @@ internal sealed interface MarkdownBlock {
 
 private val HEADING = Regex("^(#{1,6})\\s+(.*)$")
 private val BULLET = Regex("^\\s*[-*+]\\s+(.*)$")
+private val TASK = Regex("^\\s*[-*+]\\s+\\[([ xX])]\\s+(.*)$")
 private val NUMBERED = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
 
 /** 把模型回复切成块；解析失败或未知语法按段落保留，绝不吞文本。 */
@@ -78,6 +104,7 @@ internal fun parseMarkdown(source: String): List<MarkdownBlock> {
         when {
             trimmed.startsWith("```") -> {
                 flushParagraph()
+                val language = trimmed.removePrefix("```").trim().substringBefore(' ')
                 index += 1
                 val code = StringBuilder()
                 while (index < lines.size && !lines[index].trim().startsWith("```")) {
@@ -85,7 +112,7 @@ internal fun parseMarkdown(source: String): List<MarkdownBlock> {
                     index += 1
                 }
                 if (index < lines.size) index += 1
-                blocks += MarkdownBlock.Code(code.toString().trimEnd())
+                blocks += MarkdownBlock.Code(code.toString().trimEnd(), language)
             }
 
             trimmed.isEmpty() -> {
@@ -99,6 +126,16 @@ internal fun parseMarkdown(source: String): List<MarkdownBlock> {
                 blocks += MarkdownBlock.Heading(
                     level = match.groupValues[1].length,
                     text = match.groupValues[2],
+                )
+                index += 1
+            }
+
+            TASK.matches(line) -> {
+                flushParagraph()
+                val match = TASK.find(line)!!
+                blocks += MarkdownBlock.ListItem(
+                    text = match.groupValues[2],
+                    checked = match.groupValues[1].equals("x", ignoreCase = true),
                 )
                 index += 1
             }
@@ -198,6 +235,7 @@ fun MarkdownText(
                 is MarkdownBlock.ListItem -> ListLine(
                     text = block.text,
                     number = block.number,
+                    checked = block.checked,
                     colors = colors,
                     base = base,
                     mentionMembers = mentionMembers,
@@ -209,29 +247,24 @@ fun MarkdownText(
                         color = colors.textSecondary,
                         fontStyle = FontStyle.Italic,
                     ),
-                    modifier = Modifier.padding(start = Dshm.spacing.sm),
+                    // 左边一条强调色竖线：引用块不靠缩进硬猜，一眼能认出来。
+                    modifier = Modifier
+                        .drawBehind {
+                            drawRect(
+                                color = colors.accent,
+                                topLeft = androidx.compose.ui.geometry.Offset.Zero,
+                                size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height),
+                            )
+                        }
+                        .padding(start = Dshm.spacing.md),
                 )
 
-                is MarkdownBlock.Code -> Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(Dshm.radius.sm))
-                        .background(colors.surfaceMuted),
-                ) {
-                    Text(
-                        text = block.text,
-                        style = base.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = base.fontSize * 0.9f,
-                            lineHeight = base.lineHeight * 0.9f,
-                            color = colors.textPrimary,
-                        ),
-                        softWrap = false,
-                        modifier = Modifier
-                            .horizontalScroll(rememberScrollState())
-                            .padding(Dshm.spacing.sm),
-                    )
-                }
+                is MarkdownBlock.Code -> CodeBlockView(
+                    code = block.text,
+                    language = block.language,
+                    base = base,
+                    colors = colors,
+                )
 
                 MarkdownBlock.Divider -> HorizontalDivider(
                     thickness = Dshm.spacing.hairline,
@@ -246,6 +279,90 @@ fun MarkdownText(
                     base = base,
                 )
             }
+        }
+    }
+}
+
+/**
+ * 代码块：语言标签 + 一键复制 + 语法高亮 + 横竖都能滚。
+ *
+ * 对齐 DeepSearch 的 `CodeBlockView`；高亮用 [highlightCode]（轻量词法着色）。
+ */
+@Composable
+private fun CodeBlockView(
+    code: String,
+    language: String,
+    base: TextStyle,
+    colors: DshmColors,
+) {
+    val context = LocalContext.current
+    var copied by remember(code) { mutableStateOf(false) }
+    val palette = remember(colors.isDark) { codePalette(colors.isDark) }
+    val highlighted = remember(code, palette) { highlightCode(code, language, palette) }
+    val lineColor = colors.textSecondary.copy(alpha = 0.22f)
+    val shape = RoundedCornerShape(8.dp)
+
+    LaunchedEffect(copied) {
+        if (!copied) return@LaunchedEffect
+        delay(1_400)
+        copied = false
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surfaceMuted)
+            .border(1.dp, lineColor, shape),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = Dshm.spacing.sm, end = Dshm.spacing.xxs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = language.ifEmpty { "code" },
+                style = Dshm.typography.rowTime,
+                color = colors.textSecondary,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = {
+                    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    manager?.setPrimaryClip(ClipData.newPlainText("code", code))
+                    copied = true
+                },
+                modifier = Modifier.height(30.dp),
+            ) {
+                Icon(
+                    painter = painterResource(
+                        if (copied) R.drawable.ic_lucide_check else R.drawable.ic_lucide_copy,
+                    ),
+                    contentDescription = stringResource(R.string.chat_selection_copy),
+                    tint = if (copied) colors.accent else colors.textSecondary,
+                    modifier = Modifier.height(16.dp),
+                )
+            }
+        }
+        HorizontalDivider(thickness = 1.dp, color = lineColor)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState())
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xs),
+        ) {
+            Text(
+                text = highlighted,
+                style = base.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = base.fontSize * 0.9f,
+                    lineHeight = base.lineHeight * 0.95f,
+                ),
+                softWrap = false,
+            )
         }
     }
 }
@@ -266,12 +383,14 @@ private fun MarkdownTable(
     base: TextStyle,
 ) {
     if (header.isEmpty()) return
-    val borderColor = colors.divider
+    // 照 DeepSearch `TableView`：只画外框 + 每行横线，**不画竖线**（竖线会把
+    // 宽度不同的单元格切得参差），4dp 圆角、0.5dp 边框。
+    val borderColor = colors.textPrimary.copy(alpha = 0.2f)
+    val headerFill = colors.surfaceMuted
     val shape = RoundedCornerShape(4.dp)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
             .border(0.5.dp, borderColor, shape)
             .clip(shape),
     ) {
@@ -279,7 +398,8 @@ private fun MarkdownTable(
             // 表头行
             Row(
                 modifier = Modifier
-                    .background(colors.surfaceMuted)
+                    .fillMaxWidth()
+                    .background(headerFill)
                     .height(IntrinsicSize.Min),
             ) {
                 header.forEachIndexed { column, cell ->
@@ -289,13 +409,21 @@ private fun MarkdownTable(
                         colors = colors,
                         base = base,
                         bold = true,
+                        modifier = Modifier.weight(1f),
                     )
+                    if (column < header.lastIndex) {
+                        VerticalDivider(
+                            thickness = 0.5.dp,
+                            color = borderColor,
+                            modifier = Modifier.fillMaxHeight(),
+                        )
+                    }
                 }
             }
-            HorizontalDivider(color = borderColor)
+            HorizontalDivider(thickness = 0.5.dp, color = borderColor)
             // 数据行
             rows.forEach { row ->
-                Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     header.indices.forEach { column ->
                         TableCell(
                             text = row.getOrNull(column).orEmpty(),
@@ -303,10 +431,18 @@ private fun MarkdownTable(
                             colors = colors,
                             base = base,
                             bold = false,
+                            modifier = Modifier.weight(1f),
                         )
+                        if (column < header.lastIndex) {
+                            VerticalDivider(
+                                thickness = 0.5.dp,
+                                color = borderColor,
+                                modifier = Modifier.fillMaxHeight(),
+                            )
+                        }
                     }
                 }
-                HorizontalDivider(color = borderColor)
+                HorizontalDivider(thickness = 0.5.dp, color = borderColor)
             }
         }
     }
@@ -320,11 +456,11 @@ private fun TableCell(
     colors: DshmColors,
     base: TextStyle,
     bold: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
-            .width(Dshm.spacing.tableCellWidth)
-            .padding(horizontal = Dshm.spacing.sm, vertical = 6.dp),
+        // 列宽均分气泡宽度：手机上不会出现「第三列被切掉、要横向拖」的情况。
+        modifier = modifier.padding(horizontal = Dshm.spacing.sm, vertical = 6.dp),
         contentAlignment = when (alignment) {
             MarkdownTables.Alignment.CENTER -> Alignment.Center
             MarkdownTables.Alignment.RIGHT -> Alignment.CenterEnd
@@ -345,25 +481,34 @@ private fun TableCell(
 private fun ListLine(
     text: String,
     number: Int?,
+    checked: Boolean? = null,
     colors: DshmColors,
     base: TextStyle,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Text(
-            text = number?.let { "$it." } ?: "•",
+            text = when {
+                checked == true -> "☑"
+                checked == false -> "☐"
+                number != null -> "$number."
+                else -> "•"
+            },
             style = base.copy(
-                color = colors.textSecondary,
+                color = if (checked != null) colors.accent else colors.textSecondary,
                 fontWeight = if (number != null) FontWeight.Medium else FontWeight.Normal,
             ),
             modifier = Modifier.width(Dshm.spacing.lg),
         )
         Spacer(Modifier.width(Dshm.spacing.xxs))
-        Text(
-            text = inlineMarkdown(text, colors, base, mentionMembers),
-            style = base,
-            modifier = Modifier.weight(1f),
-        )
+        // 注意：weight 放在外层 Box 上，Text 本身保持普通测量 ——
+        // 直接把 weight 挂在 Text 上时，它在 Compose 的选择注册里会漏掉（长按选不中）。
+        Box(modifier = Modifier.weight(1f)) {
+            Text(
+                text = inlineMarkdown(text, colors, base, mentionMembers),
+                style = base,
+            )
+        }
     }
 }
 
@@ -453,13 +598,29 @@ internal fun inlineMarkdown(
                     -1
                 }
                 if (close > index && urlEnd > close) {
-                    withStyle(
-                        SpanStyle(
-                            color = colors.accent,
-                            textDecoration = TextDecoration.Underline,
-                        ),
-                    ) {
-                        append(text.substring(index + 1, close))
+                    val url = text.substring(close + 2, urlEnd).trim()
+                    // 可点：Compose 的 LinkAnnotation 交给系统打开浏览器。
+                    val link = runCatching { LinkAnnotation.Url(url) }.getOrNull()
+                    if (link != null) {
+                        withLink(link) {
+                            withStyle(
+                                SpanStyle(
+                                    color = colors.accent,
+                                    textDecoration = TextDecoration.Underline,
+                                ),
+                            ) {
+                                append(text.substring(index + 1, close))
+                            }
+                        }
+                    } else {
+                        withStyle(
+                            SpanStyle(
+                                color = colors.accent,
+                                textDecoration = TextDecoration.Underline,
+                            ),
+                        ) {
+                            append(text.substring(index + 1, close))
+                        }
                     }
                     index = urlEnd + 1
                 } else {

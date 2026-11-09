@@ -49,6 +49,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -102,6 +104,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -444,6 +447,7 @@ fun BotChatScreen(
                         onOpenMember = onOpenMember,
                         onOpenExchange = { id -> exchangeWith = id },
                         onOpenBrowser = onOpenBrowser,
+                        onEditMessage = { text -> draft = text },
                     )
                 }
             }
@@ -711,6 +715,8 @@ private fun ChatMessages(
     onOpenExchange: (String) -> Unit = {},
     onOpenBrowser: () -> Unit = {},
     onLoadEarlier: () -> Unit = {},
+    /** 长按用户气泡 → 编辑：把内容填回输入框。 */
+    onEditMessage: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val streamingNow = streaming.isNotEmpty()
@@ -909,6 +915,7 @@ private fun ChatMessages(
                         items = entry.attachmentItems,
                         images = entry.images,
                         timeMs = null,
+                        onEdit = onEditMessage,
                     )
                     ChatEntryKind.BOT -> BotBubble(
                         text = entry.text,
@@ -1217,48 +1224,100 @@ private fun UserBubble(
     /** 历史回读里的图片数量（只有计数，没有图）。 */
     images: Int = 0,
     timeMs: Long? = null,
+    /** 长按面板的「编辑」：把这条内容填回输入框。 */
+    onEdit: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
+    var menuOpen by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.End,
     ) {
-        Column(
-            horizontalAlignment = Alignment.End,
-            modifier = Modifier
-                .pointerInput(text) {
-                    detectTapGestures(onLongPress = { copyMessage(context, text) })
+        Box {
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier
+                    .pointerInput(text) {
+                        detectTapGestures(onLongPress = {
+                            menuOpen = true
+                        })
+                    }
+                    .background(
+                        Dshm.colors.bubbleUser,
+                        RoundedCornerShape(Dshm.radius.lg),
+                    )
+                    .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+            ) {
+                if (items.isNotEmpty()) {
+                    UserAttachmentCards(items)
+                    if (text.isNotBlank()) Spacer(Modifier.height(Dshm.spacing.xs))
                 }
-                .background(
-                    Dshm.colors.bubbleUser,
-                    RoundedCornerShape(Dshm.radius.lg),
-                )
-                .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-        ) {
-            if (items.isNotEmpty()) {
-                UserAttachmentCards(items)
-                if (text.isNotBlank()) Spacer(Modifier.height(Dshm.spacing.xs))
+                if (text.isNotBlank()) {
+                    // 列表整体在 SelectionContainer 里；用户气泡的长按要留给面板，
+                    // 所以这段退出文字选择（DeepSearch 也是这么做的）。
+                    androidx.compose.foundation.text.selection.DisableSelection {
+                        Text(
+                            text = text,
+                            style = Dshm.typography.composerText.copy(
+                                fontSize = Dshm.typography.composerText.fontSize * fontScale,
+                                lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
+                            ),
+                            color = Dshm.colors.onBubbleUser,
+                        )
+                    }
+                }
+                // 老路径（只拿到名字，没有本地文件）：保留原来的回退样子。
+                if (items.isEmpty()) attachments.forEach { name ->
+                    Text(
+                        text = "📎 $name",
+                        style = Dshm.typography.rowTime,
+                        color = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(top = Dshm.spacing.xxs),
+                    )
+                }
+                ImageCountCaption(count = images)
             }
-            if (text.isNotBlank()) {
-                Text(
-                    text = text,
-                    style = Dshm.typography.composerText.copy(
-                        fontSize = Dshm.typography.composerText.fontSize * fontScale,
-                        lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
-                    ),
-                    color = Dshm.colors.onBubbleUser,
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                offset = DpOffset(0.dp, 6.dp),
+                shape = RoundedCornerShape(Dshm.radius.md),
+                containerColor = Dshm.colors.surface,
+                modifier = Modifier.widthIn(max = 220.dp),
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.chat_longpress_copy)) },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_lucide_copy),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = Dshm.colors.textSecondary,
+                        )
+                    },
+                    onClick = {
+                        menuOpen = false
+                        copyMessage(context, text)
+                    },
                 )
+                if (text.isNotBlank()) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.chat_longpress_edit)) },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_lucide_pencil),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = Dshm.colors.textSecondary,
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            onEdit(text)
+                        },
+                    )
+                }
             }
-            // 老路径（只拿到名字，没有本地文件）：保留原来的回退样子。
-            if (items.isEmpty()) attachments.forEach { name ->
-                Text(
-                    text = "📎 $name",
-                    style = Dshm.typography.rowTime,
-                    color = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
-                    modifier = Modifier.padding(top = Dshm.spacing.xxs),
-                )
-            }
-            ImageCountCaption(count = images)
         }
         timeMs?.let { t ->
             Text(
@@ -1385,7 +1444,6 @@ private fun BotBubble(
     val name = member?.name ?: author
     val isAdmin = botId != null && botId == adminId
     val avatarSize = Dshm.spacing.lg + Dshm.spacing.xs
-    val context = LocalContext.current
     var expanded by remember(text) { mutableStateOf(false) }
     // DS Bot 群聊才有「显示全部 / 收起」；单 Bot 不折叠。
     val collapsible = isGroup && text.length > 600
@@ -1394,9 +1452,6 @@ private fun BotBubble(
         Column(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
-                    .pointerInput(text) {
-                        detectTapGestures(onLongPress = { copyMessage(context, text) })
-                    }
                     .clip(RoundedCornerShape(Dshm.radius.lg))
                     .background(Dshm.colors.bubbleAssistant),
             ) {
@@ -1411,7 +1466,11 @@ private fun BotBubble(
                         )
                         .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
                 ) {
-                    MarkdownText(markdown = text, fontScale = fontScale, mentionMembers = members)
+                    // 长按 = 选中文字（系统选择工具栏：复制 / 全选 / 朗读 / 搜索）。
+                    // 容器放在气泡里，别包到整张列表外面。
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        MarkdownText(markdown = text, fontScale = fontScale, mentionMembers = members)
+                    }
                 }
                 if (collapsible) {
                     androidx.compose.material3.HorizontalDivider(color = Dshm.colors.divider)
@@ -1443,6 +1502,7 @@ private fun BotBubble(
                 }
             }
         }
+            // 长按面板（DeepSearch 的用户气泡同款浮层）：复制 / 复制 Markdown / 加入输入框。
     }
 
     if (!isGroup) {
