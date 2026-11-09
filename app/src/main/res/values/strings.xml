@@ -755,6 +755,13 @@
     <string name="settings_permission_new_default">Default for new conversations</string>
     <string name="settings_permission_phone_files">Access phone files</string>
     <string name="settings_permission_phone_confirm">Phone control confirmation</string>
+    <string name="settings_permission_phone_group">Phone</string>
+    <string name="settings_permission_phone_files_hint">Mounts shared storage into the local engine. The engine restarts when this changes.</string>
+    <string name="settings_permission_phone_files_on">Shared storage is mounted</string>
+    <string name="settings_permission_phone_files_off">Shared storage is not mounted</string>
+    <string name="settings_permission_phone_files_risk">Allows AI to read and change files on this phone. Only turn it on when needed.</string>
+    <string name="settings_permission_phone_files_grant">Grant All files access in system settings, then come back and turn this on.</string>
+    <string name="settings_permission_phone_confirm_hint">Choose when phone control asks for confirmation.</string>
     <!-- Personalization -->
     <string name="settings_personal_preference">Personal preference</string>
     <string name="settings_visual_replies">Visual replies</string>

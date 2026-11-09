@@ -66,6 +66,9 @@ class RuntimeLauncher(
             "{PORT}" to actualPort.toString(),
         )
         val argv = ProotCommand.buildArgv(manifest.launchArgv, placeholders, guestEnv).toMutableList()
+        // 「访问手机文件」：把手机共享存储挂到 guest 的 /sdcard。
+        // 对齐 dsh-Go `_onPhoneFiles`——bind 是启动时固定的，所以开关变化后必须重启引擎。
+        if (PhoneStorageAccess.enabled(appContext)) addPhoneStorageBind(argv)
         // 账号登录桥：文件写入 rootfs 后才追加 --patch（失败则跳过，避免 DSH 起不来）。
         if (AuthGuest.writeFiles(appContext, rootfs)) {
             val webIndex = argv.indexOfFirst { it.contains("/usr/local/bin/dsh web") }
@@ -150,6 +153,7 @@ class RuntimeLauncher(
         process = null
         runCatching { File(rootfs, "tmp/dsh-web.pid").delete() }
     }
+
 
     private data class EngineProcess(val pid: Int, val cmdline: String)
 
@@ -273,6 +277,12 @@ class RuntimeLauncher(
         const val KEY_APK_STAMP = "apk-stamp"
         const val KEY_RUNTIME_VERSION = "runtime-version"
     }
+}
+
+/** 把 `/sdcard` 插到 `env` 之前；proot 的 `-b` 必须在解释器之前。 */
+internal fun addPhoneStorageBind(argv: MutableList<String>) {
+    val envIndex = argv.indexOf("/usr/bin/env")
+    if (envIndex > 0) argv.addAll(envIndex, listOf("-b", "/sdcard"))
 }
 
 

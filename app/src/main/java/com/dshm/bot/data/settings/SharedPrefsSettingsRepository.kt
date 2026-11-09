@@ -24,6 +24,7 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
     private val voiceMode = MutableStateFlow(readEnum(KEY_VOICE, VoiceMode.AUTO))
     private val phoneControlEnabled = MutableStateFlow(prefs.getBoolean(KEY_PHONE_ENABLED, false))
     private val phoneConfirmMode = MutableStateFlow(readEnum(KEY_PHONE_CONFIRM, PhoneConfirmMode.ASK))
+    private val phoneStorageEnabled = MutableStateFlow(prefs.getBoolean(KEY_PHONE_STORAGE, false))
     private val dshGoPreferences = MutableStateFlow(readDshGoPreferences())
 
     override fun observeThemeMode(): Flow<ThemeMode> = themeMode
@@ -82,6 +83,13 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
         phoneConfirmMode.value = mode
     }
 
+    override fun observePhoneStorageEnabled(): Flow<Boolean> = phoneStorageEnabled
+
+    override fun setPhoneStorageEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_PHONE_STORAGE, enabled).apply()
+        phoneStorageEnabled.value = enabled
+    }
+
     override fun observeDshGoPreferences(): Flow<DshGoPreferences> = dshGoPreferences
 
     override fun setDshGoPreference(key: String, value: Boolean) {
@@ -115,5 +123,6 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
         const val KEY_VOICE = "voice_mode"
         const val KEY_PHONE_ENABLED = "phone_control_enabled"
         const val KEY_PHONE_CONFIRM = "phone_confirm_mode"
+        const val KEY_PHONE_STORAGE = "phone_storage_enabled"
     }
 }

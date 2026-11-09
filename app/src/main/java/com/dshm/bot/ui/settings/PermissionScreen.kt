@@ -5,19 +5,33 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.runtime.PhoneStorageAccess
 import com.dshm.bot.data.remote.PermissionOption
 
-// 权限：当前对话、新对话默认、访问手机文件、手机操控确认，对齐 dsh-Go PermissionPage。
+// 权限：新对话默认 + 手机文件访问 + 手机操控确认，对齐 dsh-Go PermissionPage。
 @Composable
-fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
+fun PermissionScreen(
+    viewModel: EngineSettingsViewModel,
+    settings: SettingsViewModel,
+    onOpenPhoneControl: () -> Unit,
+    onRestartEngine: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val context = LocalContext.current
+    val appSettings by settings.uiState.collectAsStateWithLifecycle()
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
     val current = viewModel.permissionDefault()
@@ -27,6 +41,30 @@ fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
     val catalog = state.permission
     val options = catalog?.defaultOptions.orEmpty()
     val writable = viewModel.permissionRevisionWritable()
+    var storageGranted by remember { mutableStateOf(PhoneStorageAccess.granted(context)) }
+    var confirmRisk by remember { mutableStateOf(false) }
+    var pendingEnable by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+
+    // 从系统「所有文件访问」页返回时重新判权限（dsh-Go 的 `storageStatus()` 同款）。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val granted = PhoneStorageAccess.granted(context)
+                storageGranted = granted
+                // 从系统「所有文件访问」页返回：授权到了就自动完成挂载。
+                if (granted && pendingEnable) {
+                    pendingEnable = false
+                    notice = null
+                    settings.setPhoneStorageEnabled(true)
+                    onRestartEngine()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     SettingsPage(
         title = stringResource(R.string.settings_permission),
@@ -35,17 +73,6 @@ fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
             SettingsRefreshButton(onClick = viewModel::refresh)
         },
     ) {
-        // 当前对话：dsh-Go 随打开的对话出现，本项目未接入对话级权限，明确标注不可用。
-        item {
-            SettingsSection {
-                SettingsRow(
-                    title = stringResource(R.string.settings_permission_current),
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                    enabled = false,
-                )
-            }
-        }
         when {
             state.loading && state.description == null -> item { SettingsLoading() }
             savedError != null && state.description == null -> item {
@@ -104,24 +131,91 @@ fun PermissionScreen(viewModel: EngineSettingsViewModel, onBack: () -> Unit) {
                 }
             }
         }
-        // 访问手机文件 / 手机操控确认：依赖本机引擎与手机操控能力，本项目未接入，标注不可用。
+        // 手机能力：文件访问是真实开关（系统授权 + /sdcard 挂载 + 重启引擎），
+        // 操控确认跳到「手机操控」页的三档偏好。
         item {
-            SettingsSection {
-                SettingsRow(
+            SettingsSection(
+                title = stringResource(R.string.settings_permission_phone_group),
+                footer = stringResource(R.string.settings_permission_phone_files_hint),
+            ) {
+                SettingsSwitchRow(
                     title = stringResource(R.string.settings_permission_phone_files),
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                    enabled = false,
+                    subtitle = if (appSettings.phoneStorageEnabled && storageGranted) {
+                        stringResource(R.string.settings_permission_phone_files_on)
+                    } else {
+                        stringResource(R.string.settings_permission_phone_files_off)
+                    },
+                    checked = appSettings.phoneStorageEnabled && storageGranted,
+                    onCheckedChange = { next ->
+                        if (next) {
+                            confirmRisk = true
+                        } else {
+                            pendingEnable = false
+                            settings.setPhoneStorageEnabled(false)
+                            notice = null
+                            onRestartEngine()
+                        }
+                    },
                 )
                 SettingsRowDivider()
                 SettingsRow(
                     title = stringResource(R.string.settings_permission_phone_confirm),
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                    enabled = false,
+                    subtitle = stringResource(R.string.settings_permission_phone_confirm_hint),
+                    value = confirmModeLabel(appSettings.phoneConfirmMode),
+                    onClick = onOpenPhoneControl,
                 )
+                notice?.let { message ->
+                    SettingsRowDivider()
+                    SettingsRow(title = message, enabled = false)
+                }
             }
         }
+    }
+
+    // 打开前说明风险；确认后先拿系统权限，再写偏好并重启引擎。
+    if (confirmRisk) {
+        AlertDialog(
+            onDismissRequest = { confirmRisk = false },
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(R.string.settings_permission_phone_files),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.settings_permission_phone_files_risk),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmRisk = false
+                        if (!PhoneStorageAccess.granted(context)) {
+                            pendingEnable = true
+                            PhoneStorageAccess.openSystemSettings(context)
+                            notice = context.getString(R.string.settings_permission_phone_files_grant)
+                        } else {
+                            pendingEnable = false
+                            settings.setPhoneStorageEnabled(true)
+                            notice = null
+                            onRestartEngine()
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.action_continue), color = Dshm.colors.danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRisk = false }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
     }
 
     val pending = confirming

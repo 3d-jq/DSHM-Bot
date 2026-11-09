@@ -832,6 +832,13 @@
     <string name="settings_permission_new_default">新对话默认</string>
     <string name="settings_permission_phone_files">访问手机文件</string>
     <string name="settings_permission_phone_confirm">手机操控确认</string>
+    <string name="settings_permission_phone_group">手机</string>
+    <string name="settings_permission_phone_files_hint">把手机共享存储挂载进本机引擎，切换后引擎会重启生效。</string>
+    <string name="settings_permission_phone_files_on">已挂载手机共享存储</string>
+    <string name="settings_permission_phone_files_off">未挂载手机共享存储</string>
+    <string name="settings_permission_phone_files_risk">开启后 AI 可以读写本机文件，请按需开启。</string>
+    <string name="settings_permission_phone_files_grant">请先在系统设置里允许「所有文件访问」，返回后再打开此开关。</string>
+    <string name="settings_permission_phone_confirm_hint">设置手机操控在什么时候需要确认。</string>
     <!-- 个性化 -->
     <string name="settings_personal_preference">个人偏好</string>
     <string name="settings_visual_replies">可视化回复</string>

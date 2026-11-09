@@ -189,7 +189,7 @@ internal fun isAccessibilityEnabled(context: Context): Boolean {
 }
 
 @Composable
-private fun confirmModeLabel(mode: PhoneConfirmMode): String = when (mode) {
+internal fun confirmModeLabel(mode: PhoneConfirmMode): String = when (mode) {
     PhoneConfirmMode.ASK -> stringResource(R.string.phone_confirm_ask)
     PhoneConfirmMode.TASK -> stringResource(R.string.phone_confirm_task)
     PhoneConfirmMode.ALWAYS -> stringResource(R.string.phone_confirm_always)

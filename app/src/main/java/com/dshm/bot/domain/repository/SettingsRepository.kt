@@ -43,6 +43,11 @@ interface SettingsRepository {
 
     fun setPhoneConfirmMode(mode: PhoneConfirmMode)
 
+    /** 「访问手机文件」：把手机共享存储挂进本机引擎（需系统所有文件访问）。 */
+    fun observePhoneStorageEnabled(): Flow<Boolean>
+
+    fun setPhoneStorageEnabled(enabled: Boolean)
+
     /** dsh-Go 设置 IA 的细分偏好（通知四类、完成后收起过程、自动启动引擎）。 */
     fun observeDshGoPreferences(): Flow<DshGoPreferences>
 

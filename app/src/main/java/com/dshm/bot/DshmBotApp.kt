@@ -692,6 +692,14 @@ fun DshmBotApp(
 
                     SettingsPageId.PERMISSION -> PermissionScreen(
                         viewModel = engineSettingsViewModel,
+                        settings = settingsViewModel,
+                        onOpenPhoneControl = {
+                            navForward = true
+                            settingsStack = ArrayList(settingsStack).apply {
+                                add(SettingsPageId.PHONE_CONTROL.name)
+                            }
+                        },
+                        onRestartEngine = engineViewModel::restart,
                         onBack = close,
                     )
 
