@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 class DsBotRepository(
     private val client: DshClient,
     private val cache: BotCache? = null,
+    private val previewCache: BotPreviewCache? = null,
 ) : BotRepository {
 
     override fun observeBots(): Flow<List<BotSummary>> = flow {
@@ -30,6 +31,7 @@ class DsBotRepository(
                 // 模型的新输出 —— 记下来当这个 Bot 的预览（不用再问引擎）。
                 EVENT_MESSAGE -> event.data.let(::previewFromFeed)?.let { (botId, text) ->
                     previews[botId] = BotPreview.oneLine(text)
+                    previewCache?.save(previews)
                 }
 
                 EVENT_HELLO, EVENT_REVISION, EVENT_LIVE -> emit(fetchWithRetry())
@@ -86,6 +88,7 @@ class DsBotRepository(
                     if (!preview.isNullOrBlank()) previews[bot.id] = BotPreview.oneLine(preview)
                 }
             }.awaitAll()
+            previewCache?.save(previews)
             bots.map { bot ->
                 if (bot.isGroup) return@map bot
                 val preview = previews[bot.id]
@@ -130,7 +133,9 @@ class DsBotRepository(
     }
 
     /** 每个 Bot 最新的模型输出（预览）。feed 推来的消息会更新它。 */
-    private val previews = ConcurrentHashMap<String, String>()
+    private val previews = ConcurrentHashMap<String, String>(
+        previewCache?.load().orEmpty(),
+    )
 
     private companion object {
         const val EVENT_MESSAGE = "message"

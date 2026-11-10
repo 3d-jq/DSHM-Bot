@@ -318,10 +318,12 @@ class BotChatViewModel(
     private val rawClient: DshClient? = endpoint?.let { DshClients.of(it) }
     /** 语音输入：页面/输入框只依赖接口。 */
     val speechRepository: SpeechRepository? = endpoint?.let { RemoteSpeechRepository(DshClients.of(it)) }
+    private val historyCache = appContext?.let { ChatHistoryCache(it, botId) }
+    private val cachedHistory = historyCache?.load()
     private val _uiState = MutableStateFlow(
         BotChatUiState(
-            // 打开对话到 `chat` 回来之间就是「在加载」：骨架屏靠它，不能等请求回来才置上。
-            loading = true,
+            // 有磁盘缓存时首屏直接画缓存，不再每次热启动闪骨架。
+            loading = cachedHistory == null,
             engineOff = endpoint == null,
         ),
     )
@@ -411,6 +413,7 @@ class BotChatViewModel(
     private val localUserEntries = LinkedHashMap<String, ChatEntry>()
 
     init {
+        cachedHistory?.let { restoreHistory(it) }
         if (client != null) {
             // 先读历史，别让补模型/探测目录的 state 调用挡住对话首屏。
             load(initial = true)
@@ -428,6 +431,23 @@ class BotChatViewModel(
                     hub.hostEvents.collect { event -> handleHostEvent(event) }
                 }
             }
+        }
+    }
+
+    /** 热启动：先把上次的历史放回时间线，再向引擎静默对齐。 */
+    private fun restoreHistory(snapshot: ChatHistoryCache.Snapshot) {
+        sessionId = snapshot.sessionId
+        val scope = sessionId ?: botId
+        val entries = buildList {
+            for (index in 0 until snapshot.items.length()) {
+                val item = snapshot.items.optJSONObject(index) ?: continue
+                parseItem(item, scope, "cache:$index")?.let(::add)
+            }
+        }
+        seen.clear()
+        entries.forEach { seen.add(it.id) }
+        _uiState.update { state ->
+            state.copy(entries = entries, loading = false, engineOff = endpoint == null)
         }
     }
 
@@ -970,7 +990,7 @@ class BotChatViewModel(
         val connection = client ?: return
         _uiState.update { state ->
             state.copy(
-                // 没有内容时重新拉：又回到加载态（骨架屏）；已有内容就静默刷新。
+                // 已有缓存或已加载内容时静默刷新，不回骨架屏。
                 loading = state.entries.isEmpty(),
                 error = if (initial) state.error else null,
             )
@@ -982,6 +1002,7 @@ class BotChatViewModel(
                     payload = JSONObject().put(if (isGroup) "roomId" else "botId", botId),
                 )
             }.onSuccess { value ->
+                historyCache?.save(value)
                 value.optString("sessionId").takeIf { it.isNotEmpty() }?.let { currentSession ->
                     sessionId = currentSession
                     ensureFollow(currentSession)

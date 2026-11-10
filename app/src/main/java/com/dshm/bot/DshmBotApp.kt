@@ -1,5 +1,8 @@
 package com.dshm.bot
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -113,6 +116,15 @@ private const val BOT_DETAILS_PREFIX = "bot-details:"
 private const val ROOM_DETAILS_PREFIX = "room-details:"
 private const val SCREEN_BOT_BROWSER = "bot-browser"
 private const val SCREEN_WEB = "web"
+
+private fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
+}
 
 /**
  * 应用外壳：主界面 ↔ 搜索 ↔ 设置 ↔ Bot 对话。
@@ -317,9 +329,10 @@ fun DshmBotApp(
         }
     }
 
-    // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
-    // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || newBotOpen || newGroupOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || diagnosticsOpen || settingsStack.isNotEmpty() || webOpen || !onboardingDone) {
+    // 系统返回手势/返回键：先在 App 内部逐层返回；到首页时和 dsh-Go 一样只把
+    // 任务退到后台，不 finish Activity —— 热启动保留进程内状态、对话与事件订阅。
+    val activity = appContext.findActivity()
+    BackHandler(enabled = true) {
         navForward = false
         when {
             !onboardingDone -> Unit
@@ -348,6 +361,7 @@ fun DshmBotApp(
                 searchOpen = false
                 homeViewModel.setQuery("")
             }
+            else -> if (onboardingDone) activity?.moveTaskToBack(true)
         }
     }
 

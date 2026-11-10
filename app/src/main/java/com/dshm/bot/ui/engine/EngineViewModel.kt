@@ -12,6 +12,7 @@ import com.dshm.bot.data.runtime.RuntimeInstaller
 import com.dshm.bot.data.runtime.RuntimeLauncher
 import com.dshm.bot.data.runtime.RuntimeManager
 import com.dshm.bot.data.runtime.RuntimeManifest
+import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.data.runtime.TextMasking
 import com.dshm.bot.data.runtime.buildDiagnosticsReport
@@ -76,8 +77,11 @@ class EngineViewModel(
         appContext.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
             .getString("phone_control_bot_id", null)
 
-    private val _state = MutableStateFlow(manager.state.value)
+    private val _state = MutableStateFlow(restoredState ?: manager.state.value)
     val state: StateFlow<RuntimeState> = _state.asStateFlow()
+
+    /** 本机引擎是长驻进程：App 热启动、Activity 重建、ViewModel 回收都不该把它判回「未启动」。 */
+    private val endpointPrefs = appContext.getSharedPreferences("runtime-launch", Context.MODE_PRIVATE)
 
     val version: String = manifest.dshVersion.ifEmpty { manifest.runtimeVersion }
     val abi: String = manifest.abi.ifEmpty { "arm64-v8a" }
@@ -90,6 +94,8 @@ class EngineViewModel(
     val installedVersion: String? get() = installer.installedVersion()
 
     init {
+        restoredState = _state.value
+        restoreRunningEngine()
         viewModelScope.launch {
             manager.state.collect { state ->
                 // StateFlow 会给新订阅者重放当前值（Installed / NotInstalled）。它可能
@@ -97,9 +103,25 @@ class EngineViewModel(
                 // 「引擎没在启动」而显示空列表。启动中 / 运行中不让 manager 覆盖。
                 if (_state.value !is RuntimeState.Starting && _state.value !is RuntimeState.Running) {
                     _state.value = state
+                    restoredState = state
                 }
             }
         }
+    }
+
+    /**
+     * 从私有偏好恢复上一次的本地端点。只有端口真的还在监听且 token 还能登录时，
+     * 才直接把状态设成 Running —— 这样热启动没有「引擎启动中」骨架，也不会重启 proot。
+     */
+    private fun restoreRunningEngine() {
+        if (_state.value is RuntimeState.Running) return
+        val url = endpointPrefs.getString("endpoint-url", null) ?: return
+        val token = endpointPrefs.getString("endpoint-token", null) ?: return
+        val endpoint = RuntimeEndpoint(url, token)
+        if (runCatching { launcher.adoptAlive(manifest) }.getOrNull() != endpoint) return
+        _state.value = RuntimeState.Running(endpoint)
+        restoredState = _state.value
+        EngineLog.log("startup: restored running engine at ${endpoint.baseUrl}")
     }
 
     fun install(url: String) {
@@ -108,23 +130,21 @@ class EngineViewModel(
 
     fun start() {
         if (launcher.isRunning) return
-        _state.value = RuntimeState.Starting
+        if (_state.value is RuntimeState.Running) return
         viewModelScope.launch {
-            // 上次进程被杀后引擎可能还活着：接上比重新 boot（proot + node + dsh）快一个数量级。
             val adopted = withContext(Dispatchers.IO) {
                 runCatching { launcher.adoptAlive(manifest) }.getOrNull()
             }
-            if (adopted != null) {
-                val usable = withContext(Dispatchers.IO) {
+            if (adopted != null && withContext(Dispatchers.IO) {
                     runCatching { DshClients.of(adopted).login() }.isSuccess
-                }
-                if (usable) {
-                    EngineLog.log("startup: adopted running engine at ${adopted.baseUrl}")
-                    _state.value = RuntimeState.Running(adopted)
-                    return@launch
-                }
-                EngineLog.log("startup: adopted engine rejected the token; restarting")
+                }) {
+                _state.value = RuntimeState.Running(adopted)
+                restoredState = _state.value
+                EngineLog.log("startup: adopted running engine at ${adopted.baseUrl}")
+                return@launch
             }
+            _state.value = RuntimeState.Starting
+            restoredState = _state.value
             runCatching {
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
@@ -132,8 +152,14 @@ class EngineViewModel(
                     launcher.start(manifest, phoneGuestEnv(phoneControlEnabled(), phoneControlOwner()))
                 }
             }
-                .onSuccess { _state.value = RuntimeState.Running(it) }
-                .onFailure { _state.value = RuntimeState.Failed(it.message ?: "启动失败") }
+                .onSuccess {
+                    _state.value = RuntimeState.Running(it)
+                    restoredState = _state.value
+                }
+                .onFailure {
+                    _state.value = RuntimeState.Failed(it.message ?: "启动失败")
+                    restoredState = _state.value
+                }
         }
     }
 
@@ -141,6 +167,7 @@ class EngineViewModel(
         viewModelScope.launch {
             withContext(Dispatchers.IO) { launcher.stop() }
             _state.value = RuntimeState.Starting
+            restoredState = _state.value
             runCatching {
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
@@ -148,8 +175,14 @@ class EngineViewModel(
                     launcher.start(manifest, phoneGuestEnv(phoneControlEnabled(), phoneControlOwner()))
                 }
             }
-                .onSuccess { _state.value = RuntimeState.Running(it) }
-                .onFailure { _state.value = RuntimeState.Failed(it.message ?: "启动失败") }
+                .onSuccess {
+                    _state.value = RuntimeState.Running(it)
+                    restoredState = _state.value
+                }
+                .onFailure {
+                    _state.value = RuntimeState.Failed(it.message ?: "启动失败")
+                    restoredState = _state.value
+                }
         }
     }
 
@@ -157,6 +190,7 @@ class EngineViewModel(
         viewModelScope.launch {
             withContext(Dispatchers.IO) { launcher.stop() }
             _state.value = RuntimeState.Stopped
+            restoredState = _state.value
         }
     }
 
@@ -172,6 +206,7 @@ class EngineViewModel(
                 installer.delete()
             }
             _state.value = RuntimeState.NotInstalled
+            restoredState = _state.value
         }
     }
 
@@ -204,11 +239,12 @@ class EngineViewModel(
         TextMasking.maskSecrets(engineLog.trim().takeLast(300_000))
     }.getOrDefault("")
 
-    override fun onCleared() {
-        launcher.stop()
-    }
 
     companion object {
+        /** 进程级保留，Activity / ViewModel 重建时不把已运行的引擎判回 Installed。 */
+        @Volatile
+        private var restoredState: RuntimeState? = null
+
         fun factory(context: Context): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = context.applicationContext

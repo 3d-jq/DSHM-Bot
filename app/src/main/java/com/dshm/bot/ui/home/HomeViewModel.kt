@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.BotCache
+import com.dshm.bot.data.remote.BotPreviewCache
 import com.dshm.bot.data.remote.DsBotRepository
 import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.remote.DshClients
@@ -39,17 +40,29 @@ class HomeViewModel(
     zoneId: ZoneId = ZoneId.systemDefault(),
     locale: Locale = Locale.getDefault(),
     private val cache: BotCache? = null,
+    private val previewCache: BotPreviewCache? = null,
 ) : ViewModel() {
 
     private var repository: BotRepository = repository
     private var client: DshClient? = null
     private var collectJob: Job? = null
-    private val bots = MutableStateFlow(cache?.load().orEmpty())
+    private val bots = MutableStateFlow(restoreCachedRows())
     private val query = MutableStateFlow("")
     private val loading = MutableStateFlow(bots.value.isEmpty())
     private val failed = MutableStateFlow(false)
 
     private val timeFormatter = RelativeTimeFormatter(zoneId = zoneId, clock = clock, locale = locale)
+
+    /** 首屏就把单 Bot 预览补回缓存快照，避免先显示 role、再跳成消息预览。 */
+    private fun restoreCachedRows(): List<BotSummary> {
+        val rows = cache?.load().orEmpty()
+        val previews = previewCache?.load().orEmpty()
+        if (previews.isEmpty()) return rows
+        return rows.map { row ->
+            val preview = previews[row.id]?.takeIf { it.isNotBlank() }
+            if (row.isGroup || preview == null) row else row.copy(preview = preview)
+        }
+    }
 
     val uiState: StateFlow<HomeUiState> = combine(bots, query, loading, failed) { list, currentQuery, isLoading, hasError ->
         HomeUiState(
@@ -75,7 +88,7 @@ class HomeViewModel(
             if (endpoint == null) {
                 EmptyBotRepository()
             } else {
-                DsBotRepository(DshClients.of(endpoint), cache)
+                DsBotRepository(DshClients.of(endpoint), cache, previewCache)
             },
         )
     }
@@ -83,7 +96,7 @@ class HomeViewModel(
     private fun start(source: BotRepository) {
         collectJob?.cancel()
         repository = source
-        bots.value = cache?.load().orEmpty()
+        bots.value = restoreCachedRows()
         loading.value = bots.value.isEmpty()
         failed.value = false
         collectJob = viewModelScope.launch {
@@ -194,6 +207,7 @@ class HomeViewModel(
                 HomeViewModel(
                     repository = repository,
                     cache = context?.applicationContext?.let(::BotCache),
+                    previewCache = context?.applicationContext?.let(::BotPreviewCache),
                 )
             }
         }

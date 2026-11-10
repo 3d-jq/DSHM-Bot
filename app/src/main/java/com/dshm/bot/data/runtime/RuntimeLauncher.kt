@@ -118,6 +118,7 @@ class RuntimeLauncher(
             tail.addLast(line)
             if (tail.size > 30) tail.removeFirst()
             ProotCommand.parseToken(line)?.let { endpoint ->
+                rememberEndpoint(endpoint)
                 EngineLog.log("DSH is listening at ${endpoint.baseUrl}")
                 EngineLog.log("startup: ${startupLine(requested, spawned, SystemClock.elapsedRealtime())}")
                 EngineLog.log("startup: app ${EngineLog.elapsedMs()} ms (port $actualPort)")
@@ -126,6 +127,7 @@ class RuntimeLauncher(
         }
         val exit = runCatching { started.exitValue() }.getOrNull()
         EngineLog.log("startup failed: no token (exit=$exit)")
+        forgetEndpoint()
         throw IllegalStateException(
             "引擎启动失败：未收到 token（exit=$exit）\n" + tail.joinToString("\n"),
         )
@@ -138,6 +140,7 @@ class RuntimeLauncher(
      */
     fun stop() {
         val running = process ?: return
+        forgetEndpoint()
         EngineLog.log("stopping engine")
         val rootfs = installer.rootfsDir
         val records = engineProcesses(rootfs)
@@ -236,6 +239,7 @@ class RuntimeLauncher(
 
     /** 从日志末尾取回上一次的 token / 端口（只看最后 64KB，日志可能很长）。 */
     private fun lastEndpoint(): RuntimeEndpoint? {
+        cachedEndpoint()?.let { return it }
         val log = File(appContext.filesDir, "engine.log").takeIf { it.isFile } ?: return null
         val text = runCatching {
             log.inputStream().use { input ->
@@ -246,6 +250,28 @@ class RuntimeLauncher(
         }.getOrNull() ?: return null
         return text.lineSequence().toList().asReversed()
             .firstNotNullOfOrNull { ProotCommand.parseToken(it) }
+            ?.also(::rememberEndpoint)
+    }
+
+    private fun cachedEndpoint(): RuntimeEndpoint? {
+        val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val url = prefs.getString(KEY_ENDPOINT_URL, null) ?: return null
+        val token = prefs.getString(KEY_ENDPOINT_TOKEN, null) ?: return null
+        return RuntimeEndpoint(url, token)
+    }
+
+    private fun rememberEndpoint(endpoint: RuntimeEndpoint) {
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_ENDPOINT_URL, endpoint.baseUrl)
+            .putString(KEY_ENDPOINT_TOKEN, endpoint.token)
+            .apply()
+    }
+
+    private fun forgetEndpoint() {
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_ENDPOINT_URL)
+            .remove(KEY_ENDPOINT_TOKEN)
+            .apply()
     }
 
     private fun listening(baseUrl: String): Boolean = runCatching {
@@ -290,6 +316,8 @@ class RuntimeLauncher(
         const val KEY_RUNTIME_VERSION = "runtime-version"
         const val KEY_PHONE_CONTROL = "phone-control"
         const val KEY_PHONE_OWNER = "phone-owner"
+        const val KEY_ENDPOINT_URL = "endpoint-url"
+        const val KEY_ENDPOINT_TOKEN = "endpoint-token"
     }
 }
 
