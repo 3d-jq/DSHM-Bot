@@ -44,6 +44,10 @@
                 android:resource="@xml/dshm_accessibility_service" />
         </service>
 
+        <receiver
+            android:name=".service.PhoneApprovalReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

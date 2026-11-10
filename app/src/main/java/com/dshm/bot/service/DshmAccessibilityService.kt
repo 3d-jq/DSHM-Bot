@@ -16,9 +16,11 @@ class DshmAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        PhoneControlSession.reset()
     }
 
     override fun onDestroy() {
+        PhoneOverlay.hideNow()
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -27,9 +29,9 @@ class DshmAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() = Unit
 
-    fun tap(x: Float, y: Float): Boolean {
+    fun tap(x: Float, y: Float, durationMs: Long = 60): Boolean {
         val path = Path().apply { moveTo(x, y) }
-        return dispatch(path, 60)
+        return dispatch(path, durationMs)
     }
 
     fun swipe(fromX: Float, fromY: Float, toX: Float, toY: Float, durationMs: Long = 300): Boolean {
@@ -45,6 +47,8 @@ class DshmAccessibilityService : AccessibilityService() {
     fun home(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
 
     fun recents(): Boolean = performGlobalAction(GLOBAL_ACTION_RECENTS)
+
+    fun notifications(): Boolean = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
 
     fun findText(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
@@ -66,7 +70,9 @@ class DshmAccessibilityService : AccessibilityService() {
 
         val connected: Boolean get() = instance != null
 
-        fun tap(x: Float, y: Float): Boolean = instance?.tap(x, y) ?: false
+        internal val current: DshmAccessibilityService? get() = instance
+
+        fun tap(x: Float, y: Float, durationMs: Long = 60): Boolean = instance?.tap(x, y, durationMs) ?: false
 
         fun swipe(fromX: Float, fromY: Float, toX: Float, toY: Float): Boolean =
             instance?.swipe(fromX, fromY, toX, toY) ?: false
@@ -76,6 +82,8 @@ class DshmAccessibilityService : AccessibilityService() {
         fun home(): Boolean = instance?.home() ?: false
 
         fun recents(): Boolean = instance?.recents() ?: false
+
+        fun notifications(): Boolean = instance?.notifications() ?: false
 
         fun findText(text: String): Boolean = instance?.findText(text) ?: false
     }

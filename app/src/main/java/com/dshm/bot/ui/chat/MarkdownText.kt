@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -309,6 +310,8 @@ fun MarkdownText(
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
     /** 这条消息的 id：选区按 (消息, 片段) 记位置，滚动回来还能续上。 */
     messageId: String = "",
+    /** false：短消息按内容宽度排版，不把气泡撑满（Bot 气泡用）。 */
+    fillWidth: Boolean = true,
 ) {
     val colors = Dshm.colors
     val blocks = remember(markdown) { parseMarkdown(markdown) }
@@ -334,6 +337,7 @@ fun MarkdownText(
                     text = inlineMarkdown(block.text, colors, base, mentionMembers),
                     style = base,
                     shardId = "$baseId:p",
+                    fillWidth = fillWidth,
                 )
 
                 is MarkdownBlock.Heading -> ShardText(
@@ -344,6 +348,7 @@ fun MarkdownText(
                         fontWeight = FontWeight.Bold,
                     ),
                     shardId = "$baseId:h",
+                    fillWidth = fillWidth,
                 )
 
                 is MarkdownBlock.ListItem -> ListLine(
@@ -354,6 +359,7 @@ fun MarkdownText(
                     base = base,
                     mentionMembers = mentionMembers,
                     shardId = "$baseId:l",
+                    fillWidth = fillWidth,
                 )
 
                 is MarkdownBlock.Quote -> ShardText(
@@ -363,6 +369,7 @@ fun MarkdownText(
                         fontStyle = FontStyle.Italic,
                     ),
                     shardId = "$baseId:q",
+                    fillWidth = fillWidth,
                     // 左边一条强调色竖线：引用块不靠缩进硬猜，一眼能认出来。
                     modifier = Modifier
                         .drawBehind {
@@ -614,8 +621,12 @@ private fun ListLine(
     base: TextStyle,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
     shardId: String = "",
+    fillWidth: Boolean = true,
 ) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+    Row(
+        modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier.wrapContentWidth(Alignment.Start),
+        verticalAlignment = Alignment.Top,
+    ) {
         Text(
             text = when {
                 checked == true -> "☑"
@@ -637,6 +648,7 @@ private fun ListLine(
                 text = inlineMarkdown(text, colors, base, mentionMembers),
                 style = base,
                 shardId = shardId,
+                fillWidth = fillWidth,
             )
         }
     }

@@ -42,6 +42,7 @@ import com.dshm.bot.ui.chat.BotBrowserStore
 import com.dshm.bot.ui.chat.BrowserGuardStore
 import com.dshm.bot.ui.chat.BrowserHandOverStore
 import com.dshm.bot.ui.chat.BrowserReadBridge
+import com.dshm.bot.service.PhoneReadBridge
 import com.dshm.bot.ui.chat.BotChatScreen
 import com.dshm.bot.ui.chat.BotDetailsScreen
 import com.dshm.bot.ui.chat.NewGroupDialog
@@ -79,6 +80,7 @@ import com.dshm.bot.ui.settings.NotificationSettingsScreen
 import com.dshm.bot.ui.settings.PermissionScreen
 import com.dshm.bot.ui.settings.PersonalizationScreen
 import com.dshm.bot.ui.settings.PhoneControlSettingsScreen
+import com.dshm.bot.ui.settings.PhoneBotOption
 import com.dshm.bot.ui.settings.PluginsScreen
 import com.dshm.bot.ui.settings.PrivacySettingsScreen
 import com.dshm.bot.ui.settings.SettingsPageId
@@ -178,6 +180,11 @@ fun DshmBotApp(
         val endpoint = browserEndpoint ?: return@LaunchedEffect
         BrowserReadBridge.loop(endpoint, BotBrowserStore.of(appContext))
     }
+    LaunchedEffect(browserEndpoint, settingsUiState.phoneControlEnabled) {
+        val endpoint = browserEndpoint ?: return@LaunchedEffect
+        if (!settingsUiState.phoneControlEnabled) return@LaunchedEffect
+        PhoneReadBridge.loop(endpoint, appContext)
+    }
     val engineStatusText = when (engineState) {
         is RuntimeState.Running -> stringResource(R.string.engine_value_running)
         is RuntimeState.Installed -> stringResource(R.string.engine_value_installed)
@@ -192,6 +199,8 @@ fun DshmBotApp(
     var newGroupOpen by rememberSaveable { mutableStateOf(false) }
     var newBotOpen by rememberSaveable { mutableStateOf(false) }
     var botBrowserOpen by rememberSaveable { mutableStateOf(false) }
+    var botBrowserUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var handOverOpened by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var engineOpen by rememberSaveable { mutableStateOf(false) }
@@ -391,9 +400,12 @@ fun DshmBotApp(
             key == SCREEN_BOT_BROWSER -> BotBrowserScreen(
                 botId = openBotId,
                 botName = uiState.rows.firstOrNull { it.id == openBotId }?.name,
+                initialUrl = botBrowserUrl,
+                onInitialUrlConsumed = { botBrowserUrl = null },
                 onBack = {
                     navForward = false
                     botBrowserOpen = false
+                    botBrowserUrl = null
                 },
             )
 
@@ -517,7 +529,8 @@ fun DshmBotApp(
                             navForward = true
                             botDetailsOpen = true
                         },
-                        onOpenBrowser = {
+                        onOpenBrowser = { url ->
+                            botBrowserUrl = url
                             navForward = true
                             botBrowserOpen = true
                         },
@@ -672,8 +685,23 @@ fun DshmBotApp(
                     SettingsPageId.PHONE_CONTROL -> PhoneControlSettingsScreen(
                         enabled = settingsUiState.phoneControlEnabled,
                         confirmMode = settingsUiState.phoneConfirmMode,
-                        onEnabledChange = settingsViewModel::setPhoneControlEnabled,
+                        bots = uiState.rows
+                            .filter { !it.isGroup }
+                            .map { PhoneBotOption(it.id, it.name) },
+                        ownerBotId = settingsUiState.phoneControlBotId,
+                        onEnabledChange = { enabled ->
+                            val wasRunning = engineState is RuntimeState.Running
+                            settingsViewModel.setPhoneControlEnabled(enabled)
+                            if (wasRunning) engineViewModel.restart()
+                        },
                         onConfirmModeChange = settingsViewModel::setPhoneConfirmMode,
+                        onOwnerChange = { botId ->
+                            val active = engineState is RuntimeState.Running ||
+                                engineState is RuntimeState.Starting
+                            if (botId == null) settingsViewModel.setPhoneControlEnabled(false)
+                            settingsViewModel.setPhoneControlBotId(botId)
+                            if (active) engineViewModel.restart()
+                        },
                         onBack = close,
                     )
 
@@ -951,10 +979,17 @@ fun DshmBotApp(
     // 交接给用户：把那个 Bot 的浏览器推到前台（登录 / 验证码 / 付款）。
     val handOver by BrowserHandOverStore.pending.collectAsStateWithLifecycle()
     LaunchedEffect(handOver) {
-        val request = handOver ?: return@LaunchedEffect
-        openBotId = request.first
-        botBrowserOpen = true
-        navForward = true
+        val request = handOver
+        if (request != null) {
+            handOverOpened = true
+            openBotId = request.first
+            botBrowserOpen = true
+            navForward = true
+        } else if (handOverOpened) {
+            handOverOpened = false
+            botBrowserOpen = false
+            navForward = false
+        }
     }
 
     // 冷启动的启动画面：图标落定 + 字标 + 一道细光，引擎就绪或动画播完就淡出。

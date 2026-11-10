@@ -43,6 +43,11 @@ interface SettingsRepository {
 
     fun setPhoneConfirmMode(mode: PhoneConfirmMode)
 
+    /** 唯一拥有手机操控能力的 Bot；null 表示还没选。 */
+    fun observePhoneControlBotId(): Flow<String?>
+
+    fun setPhoneControlBotId(botId: String?)
+
     /** 「访问手机文件」：把手机共享存储挂进本机引擎（需系统所有文件访问）。 */
     fun observePhoneStorageEnabled(): Flow<Boolean>
 

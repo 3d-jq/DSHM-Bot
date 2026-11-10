@@ -42,6 +42,8 @@ class RuntimeLauncher(
         val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (prefs.getLong(KEY_APK_STAMP, -1L) != appStamp()) return null
         if (prefs.getString(KEY_RUNTIME_VERSION, null) != manifest.runtimeVersion) return null
+        if (prefs.getBoolean(KEY_PHONE_CONTROL, false) != phoneControlEnabled()) return null
+        if (prefs.getString(KEY_PHONE_OWNER, null) != phoneControlOwner()) return null
         val endpoint = lastEndpoint() ?: return null
         if (!listening(endpoint.baseUrl)) return null
         return endpoint
@@ -90,6 +92,8 @@ class RuntimeLauncher(
         appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putLong(KEY_APK_STAMP, appStamp())
             .putString(KEY_RUNTIME_VERSION, manifest.runtimeVersion)
+            .putBoolean(KEY_PHONE_CONTROL, phoneControlEnabled())
+            .putString(KEY_PHONE_OWNER, phoneControlOwner())
             .apply()
 
         val queue = java.util.concurrent.LinkedBlockingQueue<String>()
@@ -257,6 +261,14 @@ class RuntimeLauncher(
         appContext.packageManager.getPackageInfo(appContext.packageName, 0).lastUpdateTime
     }.getOrDefault(0L)
 
+    private fun phoneControlEnabled(): Boolean =
+        appContext.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
+            .getBoolean("phone_control_enabled", false)
+
+    private fun phoneControlOwner(): String? =
+        appContext.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
+            .getString("phone_control_bot_id", null)
+
     /**
      * 与 dsh-Go 一致：先在 3080–3100 找空闲端口（地址稳定），全被占才用系统临时端口。
      */
@@ -276,6 +288,8 @@ class RuntimeLauncher(
         const val PREFS = "runtime-launch"
         const val KEY_APK_STAMP = "apk-stamp"
         const val KEY_RUNTIME_VERSION = "runtime-version"
+        const val KEY_PHONE_CONTROL = "phone-control"
+        const val KEY_PHONE_OWNER = "phone-owner"
     }
 }
 

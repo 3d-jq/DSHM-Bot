@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +51,7 @@ fun BrowserShotCard(
             .fillMaxWidth()
             .clip(shape)
             .background(Dshm.colors.surface)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
             .clickable(onClick = onClick),
     ) {
         if (bitmap != null) {
@@ -71,13 +73,14 @@ fun BrowserShotCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(Dshm.colors.surfaceMuted)
                 .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_lucide_globe),
                 contentDescription = null,
-                tint = Dshm.colors.textTertiary,
+                tint = Dshm.colors.textSecondary,
                 modifier = Modifier.size(Dshm.spacing.settingsRowIcon),
             )
             Spacer(Modifier.size(Dshm.spacing.sm))
@@ -92,7 +95,7 @@ fun BrowserShotCard(
                 Text(
                     text = shot.url,
                     style = Dshm.typography.rowTime,
-                    color = Dshm.colors.textTertiary,
+                    color = Dshm.colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -100,7 +103,7 @@ fun BrowserShotCard(
             Icon(
                 painter = painterResource(R.drawable.ic_lucide_chevron_right),
                 contentDescription = null,
-                tint = Dshm.colors.textTertiary,
+                tint = Dshm.colors.textSecondary,
                 modifier = Modifier
                     .padding(start = Dshm.spacing.xs)
                     .size(Dshm.spacing.topBarIcon),

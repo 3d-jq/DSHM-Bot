@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.chat
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -10,6 +11,7 @@ import com.dshm.bot.data.remote.DsBotParser
 import com.dshm.bot.domain.model.ChatApproval
 import com.dshm.bot.data.remote.DELIVERABLES_PRESENTED_EVENT
 import com.dshm.bot.data.remote.presentedFilesOf
+import com.dshm.bot.data.remote.isArtifactPath
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.parseChatPage
 import com.dshm.bot.data.remote.RemoteDshApi
@@ -199,6 +201,13 @@ private val FOLLOW_TOOLS = setOf(
     // 都不进对话时间线：活动状态栏已经在显示，每来一行只会把对话冲乱。
 )
 
+private data class PendingArtifactCall(
+    val name: String,
+    val args: JSONObject,
+    val turn: Int,
+    val seq: Long,
+)
+
 /** 密钥卡答完后在 dock 里多留一会儿，让「已保存 / 已允许 / 已取消」看得见。 */
 private const val secretCardLingerMs = 20_000L
 
@@ -277,6 +286,7 @@ class BotChatViewModel(
     private val botName: String,
     private val isGroup: Boolean,
     private val endpoint: RuntimeEndpoint?,
+    appContext: Context? = null,
 ) : ViewModel() {
 
     private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
@@ -308,6 +318,10 @@ class BotChatViewModel(
     private val presentedByTurn = LinkedHashMap<Int, MutableList<ChatArtifact>>()
     /** 声明所在的 seq：这一轮还没结束（没有 turn/end）时用它占位。 */
     private val presentedSeq = HashMap<Int, Long>()
+    /** 没有 `present` 时，从成功的 write / str_replace_editor create 补出来的产物。 */
+    private val writtenByTurn = LinkedHashMap<Int, MutableList<ChatArtifact>>()
+    private val writtenSeq = HashMap<Int, Long>()
+    private val artifactCalls = HashMap<String, PendingArtifactCall>()
     /** 每个 turn 的 `turn/end` seq —— 产物卡按官方口径贴在一轮结束处。 */
     private val turnEndSeq = HashMap<Int, Long>()
     /**
@@ -338,6 +352,10 @@ class BotChatViewModel(
     /** 会话事件里最近一次 `turn/start` / `turn/end` 的 seq：最后的边界是哪一边。 */
     private var lastTurnStartSeq = 0L
     private var lastTurnEndSeq = 0L
+    /** 见过的最大会话 seq：乐观用户气泡用它往上抬，保证事件卡能插到自己上面。 */
+    private var maxSeenSeq = 0L
+    /** 每发一条乐观气泡往上抬一档，避免同一次重试撞到同一个占位 seq。 */
+    private var optimisticSeq = 0L
     private val pendingTools = LinkedHashMap<String, PendingTool>()
 
     private data class PendingTool(
@@ -360,6 +378,8 @@ class BotChatViewModel(
     private var loadedOnce = false
     /** 这一轮浏览器操作结束后贴的缩略图卡（只活在本次对话里）。 */
     private val browserShots = mutableListOf<ChatEntry>()
+    private val browserShotStore = appContext?.let { BrowserShotStore(it, botId) }
+    private var browserShotSessionId: String? = null
     /** 本屏发出的用户气泡；服务端回显用 `requestId` 认出同一条，不画第二条。 */
     private val localUserEntries = LinkedHashMap<String, ChatEntry>()
 
@@ -448,15 +468,25 @@ class BotChatViewModel(
         val type = event.optString("type")
         val data = event.optJSONObject("data") ?: return
         val seq = event.optLong("seq", -1L).takeIf { it >= 0L } ?: return
+        if (seq > maxSeenSeq) maxSeenSeq = seq
         val time = event.optLong("time", 0L)
         when (type) {
             "tool/call" -> {
                 val name = data.optString("name")
-                if (name !in FOLLOW_TOOLS) return
                 val callId = data.optString("callId").ifEmpty {
                     data.optJSONObject("message")?.optString("toolCallId").orEmpty()
                 }
                 if (callId.isEmpty()) return
+                val turn = data.optInt("turn", -1)
+                if (turn > 0) {
+                    artifactCalls[callId] = PendingArtifactCall(
+                        name = name,
+                        args = toolArguments(data),
+                        turn = turn,
+                        seq = seq,
+                    )
+                }
+                if (name !in FOLLOW_TOOLS) return
                 pendingTools[callId] = PendingTool(name, toolArguments(data), callId, time)
             }
             "tool/result" -> {
@@ -464,10 +494,11 @@ class BotChatViewModel(
                 val callId = message?.optString("toolCallId").orEmpty().ifEmpty {
                     data.optString("toolCallId").ifEmpty { data.optString("callId") }
                 }
-                val pending = pendingTools.remove(callId) ?: return
                 val isError = data.optBoolean("isError") ||
                     message?.optBoolean("isError") == true ||
                     data.optBoolean("error")
+                if (!isError) captureWrittenArtifact(callId, seq)
+                val pending = pendingTools.remove(callId) ?: return
                 val resultText = textContent(message?.opt("content"))
                 val line = toolEventLine(pending.name, pending.args, resultText, isError, botName) ?: return
                 toolEvents[seq] = ChatEntry(
@@ -502,7 +533,10 @@ class BotChatViewModel(
             "turn/end" -> {
                 lastTurnEndSeq = maxOf(lastTurnEndSeq, seq)
                 val turn = data.optInt("turn", -1)
-                if (turn >= 0) turnEndSeq[turn] = seq
+                if (turn >= 0) {
+                    turnEndSeq[turn] = seq
+                    artifactCalls.values.removeAll { it.turn == turn }
+                }
             }
         }
     }
@@ -511,6 +545,24 @@ class BotChatViewModel(
         data.optJSONObject("arguments")?.let { return it }
         val raw = data.optString("arguments")
         return runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
+    }
+
+    /**
+     * 一些模型不会调用 `present`，但 Web 端仍会把 write 创建的文件当产物。
+     * 只在没有 `present` 声明的回合补这层，避免重复。
+     */
+    private fun captureWrittenArtifact(callId: String, seq: Long) {
+        val call = artifactCalls.remove(callId) ?: return
+        val command = call.args.optString("command")
+        if (call.name == "str_replace_editor" && command != "create") return
+        if (call.name != "write" && call.name != "str_replace_editor") return
+        val path = call.args.optString("file_path")
+            .ifEmpty { call.args.optString("path") }
+            .trim()
+        if (path.isEmpty() || !isArtifactPath(path)) return
+        val files = writtenByTurn.getOrPut(call.turn) { mutableListOf() }
+        if (files.none { it.path == path }) files += ChatArtifact(path = path, description = null)
+        writtenSeq.putIfAbsent(call.turn, seq)
     }
 
     private fun textContent(value: Any?): String {
@@ -524,9 +576,16 @@ class BotChatViewModel(
     }
 
     /** 每个 turn 的产物卡：有 `turn/end` 就贴在那一轮结束处，否则留在声明的位置。 */
-    private fun presentedEntries(): List<ChatEntry> = presentedByTurn.mapNotNull { (turn, files) ->
-        if (files.isEmpty()) return@mapNotNull null
-        val seq = turnEndSeq[turn] ?: presentedSeq[turn] ?: return@mapNotNull null
+    private fun presentedEntries(): List<ChatEntry> {
+        val turns = (presentedByTurn.keys + writtenByTurn.keys).distinct()
+        return turns.mapNotNull { turn ->
+            val declared = presentedByTurn[turn]
+            val files = when {
+                !declared.isNullOrEmpty() -> declared
+                else -> writtenByTurn[turn]
+            } ?: return@mapNotNull null
+            if (files.isEmpty()) return@mapNotNull null
+            val seq = turnEndSeq[turn] ?: presentedSeq[turn] ?: writtenSeq[turn] ?: return@mapNotNull null
         ChatEntry(
             id = "present:$turn",
             kind = ChatEntryKind.ARTIFACTS,
@@ -534,11 +593,15 @@ class BotChatViewModel(
             seq = seq,
             artifacts = files.toList(),
         )
+        }
     }
 
     private fun clearPresented() {
         presentedByTurn.clear()
         presentedSeq.clear()
+        writtenByTurn.clear()
+        writtenSeq.clear()
+        artifactCalls.clear()
         turnEndSeq.clear()
     }
 
@@ -548,19 +611,39 @@ class BotChatViewModel(
      * 只在内存里留最近 [MAX_BROWSER_SHOTS] 张：它不是历史内容，重新进对话就不该再出现。
      */
     fun addBrowserShot(shot: ChatBrowserShot) {
+        val seq = lastTurnEndSeq.takeIf { it > 0L } ?: lastTurnStartSeq.takeIf { it > 0L }
         browserShots += ChatEntry(
-            id = "shot:${shot.timeMs}",
+            id = "shot:${shot.timeMs}:${shot.url.hashCode()}",
             kind = ChatEntryKind.BROWSER_SHOT,
             text = "",
             timeMs = shot.timeMs,
+            seq = seq,
             shot = shot,
         )
+        browserShotStore?.add(browserShotSessionId ?: sessionId ?: botId, shot, seq)
         while (browserShots.size > MAX_BROWSER_SHOTS) browserShots.removeAt(0)
         mergeSessionEvents()
     }
 
+    private fun loadBrowserShots(currentSession: String) {
+        if (browserShotSessionId == currentSession) return
+        browserShotSessionId = currentSession
+        browserShots.clear()
+        browserShotStore?.load(currentSession)?.forEach { stored ->
+            browserShots += ChatEntry(
+                id = "shot:${stored.shot.timeMs}:${stored.shot.url.hashCode()}",
+                kind = ChatEntryKind.BROWSER_SHOT,
+                text = "",
+                timeMs = stored.shot.timeMs,
+                seq = stored.seq,
+                shot = stored.shot,
+            )
+        }
+        browserShots.sortBy { it.seq ?: Long.MAX_VALUE }
+    }
+
     private fun mergeSessionEvents() {
-        if (toolEvents.isEmpty() && presentedByTurn.isEmpty() && browserShots.isEmpty()) return
+        if (toolEvents.isEmpty() && presentedByTurn.isEmpty() && writtenByTurn.isEmpty() && browserShots.isEmpty()) return
         _uiState.update { state ->
             val base = state.entries.filterNot {
                 it.id.startsWith("tool:") ||
@@ -575,10 +658,8 @@ class BotChatViewModel(
             // 要等下一次重载才有真 seq），按 seq 排序会把它甩到列表最后 ——
             // 倒序列表里就是最下面，表现成「大模型的回复跑到了问题上面」。
             // 所以只把事件插进「有 seq 的那段历史」的正确位置，插不进去就放末尾。
-            val incoming = (toolEvents.values + presentedEntries()).filter(::loaded)
-            // 缩略图卡不属于历史事件（没有 seq），一律排在当前时间线之后：
-            // 一张「刚看完的页面」贴在最新一条消息下面才对。
-            state.copy(entries = mergeTimeline(base, incoming) + browserShots)
+            val incoming = (toolEvents.values + presentedEntries() + browserShots).filter(::loaded)
+            state.copy(entries = mergeTimeline(base, incoming))
         }
     }
 
@@ -771,6 +852,9 @@ class BotChatViewModel(
             kind = ChatEntryKind.USER,
             text = text,
             attachments = attachments.map { it.name },
+            // 占位 seq：比当前所有历史都大，事件卡（网页卡/产物卡）能据此插到自己上面，
+            // 不会因为“本地气泡没有 seq”被甩到列表末尾（倒序里就是冒到气泡下面）。
+            seq = maxSeenSeq + ++optimisticSeq,
             attachmentItems = attachments.mapNotNull { draft ->
                 draft.cachePath?.let { path ->
                     ChatAttachmentItem(draft.name, path, draft.isImage)
@@ -852,9 +936,10 @@ class BotChatViewModel(
                     payload = JSONObject().put(if (isGroup) "roomId" else "botId", botId),
                 )
             }.onSuccess { value ->
-                value.optString("sessionId").takeIf { it.isNotEmpty() }?.let {
-                    sessionId = it
-                    ensureFollow(it)
+                value.optString("sessionId").takeIf { it.isNotEmpty() }?.let { currentSession ->
+                    sessionId = currentSession
+                    ensureFollow(currentSession)
+                    loadBrowserShots(currentSession)
                 }
                 // 群聊的 `room-chat` 直接给这一轮的状态：在跑吗、谁在发言
                 // （`mobile.js roomChat`：`running` 有活跃 round，`speaking` 是当前发言人）。
@@ -1646,6 +1731,7 @@ class BotChatViewModel(
 
     private fun parseItem(item: JSONObject, scope: String, fallbackId: String): ChatEntry? {
         val seq = item.optLong("seq", -1L)
+        if (seq > maxSeenSeq) maxSeenSeq = seq
         val id = item.optString("id").ifEmpty {
             if (seq >= 0L) "$scope:$seq" else fallbackId
         }
@@ -1918,9 +2004,10 @@ class BotChatViewModel(
             botName: String,
             isGroup: Boolean,
             endpoint: RuntimeEndpoint?,
+            appContext: Context? = null,
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                BotChatViewModel(botId, botName, isGroup, endpoint)
+                BotChatViewModel(botId, botName, isGroup, endpoint, appContext)
             }
         }
     }

@@ -95,7 +95,7 @@ export function install(rt) {
   })
   // What a host that only reads the team may still answer.
   // Updates change the dsh profile, not the team, so a reading host may run them too.
-  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'stop', 'thinking', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary'])
+  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'phone-wait', 'phone-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'stop', 'thinking', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary'])
 
   function setPrefs(body) {
     if (body.theme !== undefined) {
@@ -511,6 +511,17 @@ export function install(rt) {
         case 'browser-result':
           if (rt.browserChannel === undefined) return fail('Bot browsers are off on this host', 'bot/browser-off')
           return ok(rt.browserChannel.result(body))
+        // The Android app's long poll for phone control.
+        case 'phone-wait': {
+          if (rt.phoneChannel === undefined) return fail('Phone control is off on this host', 'bot/phone-off')
+          const clientId = typeof body.clientId === 'string' ? body.clientId.slice(0, 100) : ''
+          if (clientId === '') return fail('A phone poll needs a clientId', 'bot/invalid')
+          await rt.load()
+          return ok(await rt.phoneChannel.wait(clientId))
+        }
+        case 'phone-result':
+          if (rt.phoneChannel === undefined) return fail('Phone control is off on this host', 'bot/phone-off')
+          return ok(rt.phoneChannel.result(body))
         case 'diagnostics':
           await rt.load()
           return ok(await rt.diagnostics.report(body))

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
@@ -54,6 +55,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -206,6 +208,9 @@ fun SettingsRow(
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
+    /** 局部 opt-in：长值行让标题保持单行，值按剩余宽度尾部省略。 */
+    singleLineTitle: Boolean = false,
+    maxValueWidth: Dp? = null,
 ) {
     Row(
         modifier = modifier
@@ -233,6 +238,8 @@ fun SettingsRow(
                     text = title,
                     style = Dshm.typography.settingsRowTitle,
                     color = if (enabled) Dshm.colors.textPrimary else Dshm.colors.textTertiary,
+                    maxLines = if (singleLineTitle) 1 else Int.MAX_VALUE,
+                    overflow = if (singleLineTitle) TextOverflow.Ellipsis else TextOverflow.Clip,
                 )
                 if (badge != null) {
                     Spacer(Modifier.width(Dshm.spacing.xs))
@@ -257,7 +264,9 @@ fun SettingsRow(
                 color = valueColor ?: Dshm.colors.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = Dshm.spacing.sm),
+                modifier = Modifier
+                    .padding(start = Dshm.spacing.sm)
+                    .then(if (maxValueWidth != null) Modifier.widthIn(max = maxValueWidth) else Modifier),
             )
         }
         if (trailing != null) {

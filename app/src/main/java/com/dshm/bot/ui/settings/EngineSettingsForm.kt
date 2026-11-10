@@ -42,9 +42,25 @@ fun EngineNamespaceSection(
     footer: String? = null,
     /** true：所有分组合并成一张卡（子代理页的「运行限制」那样）。 */
     singleCard: Boolean = false,
+    /** 非空时只渲染指定字段，顺序同传入列表（联网搜索页对齐 dsh-Go）。 */
+    fieldPaths: List<List<String>> = emptyList(),
+    /** 这些字段的值较长时显示单行省略号，避免把标题挤换行（只作用于本表单）。 */
+    ellipsizeValuePaths: Set<List<String>> = emptySet(),
 ) {
-    val sections = remember(namespace.schema, language) {
-        formSections(namespace.ns, namespace.schema, emptyList(), 0, language)
+    val sections = remember(namespace.schema, language, fieldPaths) {
+        if (fieldPaths.isEmpty()) {
+            formSections(namespace.ns, namespace.schema, emptyList(), 0, language)
+        } else {
+            listOf(
+                FormSection(
+                    title = null,
+                    fields = fieldPaths.mapNotNull { path ->
+                        val node = schemaAt(namespace.schema, path) ?: return@mapNotNull null
+                        FormField(path, node, fieldKindOf(node), 0)
+                    },
+                ),
+            )
+        }
     }
     val allFields = remember(sections) { sections.flatMap { it.fields } }
     if (allFields.isEmpty()) {
@@ -98,7 +114,7 @@ fun EngineNamespaceSection(
                 SettingsSection(title = if (showTitle) title else null, footer = footer) {
                     ordered.forEachIndexed { index, field ->
                         if (index > 0) SettingsRowDivider()
-                        EngineFieldRow(viewModel, namespace, field, language)
+                        EngineFieldRow(viewModel, namespace, field, language, ellipsizeValuePaths)
                     }
                 }
             }
@@ -114,7 +130,7 @@ fun EngineNamespaceSection(
                 ) {
                     visible.forEachIndexed { index, field ->
                         if (index > 0) SettingsRowDivider()
-                        EngineFieldRow(viewModel, namespace, field, language)
+                        EngineFieldRow(viewModel, namespace, field, language, ellipsizeValuePaths)
                     }
                 }
             }
@@ -131,12 +147,12 @@ fun EngineNamespaceSection(
             ) {
                 advanced.forEachIndexed { index, (_, field) ->
                     if (index > 0) SettingsRowDivider()
-                    EngineFieldRow(viewModel, namespace, field, language)
+                        EngineFieldRow(viewModel, namespace, field, language, ellipsizeValuePaths)
                 }
             }
         }
 
-        if (modifiedPaths.isNotEmpty()) {
+        if (fieldPaths.isEmpty() && modifiedPaths.isNotEmpty()) {
             SettingsSection {
                 SettingsRow(
                     title = stringResource(R.string.settings_engine_reset_all),
@@ -224,6 +240,7 @@ private fun EngineFieldRow(
     namespace: SettingsNamespace,
     field: FormField,
     language: String,
+    ellipsizeValuePaths: Set<List<String>> = emptySet(),
 ) {
     val ns = namespace.ns
     val path = field.path
@@ -244,6 +261,7 @@ private fun EngineFieldRow(
         else -> description
     }
     val label = labelOf(ns, path, node, language)
+    val compactValue = path in ellipsizeValuePaths
     val indent = if (field.depth > 0) Modifier.padding(start = Dshm.spacing.md * field.depth) else Modifier
     var sheet by remember { mutableStateOf<FieldSheet?>(null) }
 
@@ -370,6 +388,8 @@ private fun EngineFieldRow(
                 enabled = enabled,
                 onClick = { sheet = FieldSheet.TEXT },
                 modifier = indent,
+                singleLineTitle = compactValue,
+                maxValueWidth = if (compactValue) Dshm.spacing.rowMinHeight * 3 else null,
             )
             if (sheet == FieldSheet.TEXT) {
                 SettingsTextSheet(

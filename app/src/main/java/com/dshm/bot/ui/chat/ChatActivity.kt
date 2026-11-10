@@ -239,9 +239,16 @@ internal fun toolLabel(doing: JSONObject?): String? {
         "forget" -> "正在更新记忆"
         "recall" -> "正在查看记忆"
         "read_browser" -> "正在读网页"
+        "phone_screen" -> "正在看手机屏幕"
+        "phone_apps" -> "正在查看手机应用"
+        "phone_open" -> "正在打开手机应用"
+        "phone_handoff" -> "等你接手手机"
+        "phone_notify" -> "正在发手机通知"
+        "phone_clipboard" -> "正在读写剪贴板"
         else -> when {
             // 浏览器动作只在活动状态栏显示，不进对话时间线。
             tool.startsWith("browser_") -> "正在操作浏览器"
+            tool.startsWith("phone_") -> "正在操作手机"
             else -> GROUP_PHRASES[tool]
                 ?: TOOL_PHRASES.firstOrNull { (pattern, _) -> pattern.containsMatchIn(tool) }?.second
                 ?: "在做了"

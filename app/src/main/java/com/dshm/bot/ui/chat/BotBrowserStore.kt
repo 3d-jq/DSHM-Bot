@@ -7,12 +7,17 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.Environment
 import android.os.Message
 import android.view.View
 import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.WebStorage
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -24,6 +29,8 @@ import com.dshm.bot.data.runtime.RuntimeInstaller
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.thread
 
 /** 一个浏览器标签（标题 / 地址随 WebView 回调更新）。 */
 data class BotBrowserTab(
@@ -93,6 +100,7 @@ class BotBrowserSession internal constructor(
     /** 最近一次下载；完成后多留两秒再收。 */
     var download by mutableStateOf<BotDownload?>(null)
         private set
+    private val localDownloads = ConcurrentHashMap<Long, BotDownload>()
 
     /** 浏览历史：最新的在前，最多 [MAX_HISTORY] 条。 */
     val history = mutableStateListOf<BotBrowserHistory>()
@@ -173,6 +181,19 @@ class BotBrowserSession internal constructor(
         if (text.isEmpty()) return
         val view = activeWebView() ?: return
         startLoad(view, text)
+    }
+
+    /** 从对话里的网页卡片进入：优先切到已经打开这个地址的标签，否则在当前标签加载。 */
+    fun showUrl(url: String) {
+        val text = url.trim()
+        if (text.isEmpty()) return
+        val target = fixedUrl(text)
+        val existing = tabs.firstOrNull { it.url == text || it.url == target }
+        when {
+            existing != null -> select(existing.id)
+            activeId == null -> newTab(text)
+            else -> load(text)
+        }
     }
 
     fun reload() {
@@ -274,6 +295,7 @@ class BotBrowserSession internal constructor(
 
     /** 查一次下载进度。 */
     fun downloadStatus(id: Long): BotDownload? {
+        localDownloads[id]?.let { return it }
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return null
         val cursor = runCatching { manager.query(DownloadManager.Query().setFilterById(id)) }.getOrNull()
             ?: return null
@@ -295,11 +317,11 @@ class BotBrowserSession internal constructor(
         }
     }
 
-    /** 报告给引擎的「当前页」：只有真的载入了 http(s) 页面才算。 */
+    /** 报告给引擎的「当前页」：普通网页和 rootfs 里的本地页面都算。 */
     fun currentPage(): Pair<String, String>? {
         val tab = activeTab() ?: return null
         val url = tab.url
-        if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+        if (!isPageUrl(url)) return null
         return url to tab.title
     }
 
@@ -373,10 +395,10 @@ class BotBrowserSession internal constructor(
 
     // ---- 浏览历史 -----------------------------------------------------------
 
-    /** 记一条访问（http/https 才算），同一 URL 去重并挪到最前。 */
+    /** 记一条访问（网页和 rootfs 本地页都算），同一 URL 去重并挪到最前。 */
     private fun rememberVisit(url: String?, title: String?) {
         val clean = url?.trim().orEmpty()
-        if (!clean.startsWith("http://") && !clean.startsWith("https://")) return
+        if (!isPageUrl(clean)) return
         val existing = history.indexOfFirst { it.url == clean }
         val entry = BotBrowserHistory(
             url = clean,
@@ -433,6 +455,7 @@ class BotBrowserSession internal constructor(
         listOfNotNull(currentPage()?.first, activeWebView()?.url)
             .plus(history.map { it.url })
             .forEach { link ->
+                if (!link.startsWith("http://") && !link.startsWith("https://")) return@forEach
                 val host = runCatching { Uri.parse(link).host }.getOrNull()
                 if (!host.isNullOrBlank() && host !in this) add(host)
             }
@@ -585,8 +608,15 @@ class BotBrowserSession internal constructor(
                 view: WebView,
                 request: android.webkit.WebResourceRequest,
             ): Boolean {
+                val rewritten = RootfsWeb.urlFor(context, request.url.toString())
+                if (rewritten != null && rewritten != request.url.toString()) {
+                    view.loadUrl(rewritten)
+                    return true
+                }
                 val scheme = request.url.scheme.orEmpty()
-                if (scheme == "http" || scheme == "https" || scheme == "about" || scheme == "data") {
+                if (scheme == "http" || scheme == "https" || scheme == "about" ||
+                    scheme == "data" || scheme == RootfsWeb.SCHEME
+                ) {
                     return false
                 }
                 // 非网页 scheme 交给系统（mailto: / tel: / 应用深链）。
@@ -597,6 +627,12 @@ class BotBrowserSession internal constructor(
                 }
                 return true
             }
+
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest,
+            ): WebResourceResponse? =
+                RootfsWeb.intercept(context, request.url)
 
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 loadingTabId = id
@@ -624,21 +660,25 @@ class BotBrowserSession internal constructor(
         }
         view.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             runCatching {
-                val name = downloadName(url)
-                val request = DownloadManager.Request(Uri.parse(url))
-                    .setMimeType(mimeType)
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setTitle(name)
-                    // 落到应用自己的下载目录：不需要存储权限，也不会把文件写丢。
-                    .setDestinationInExternalFilesDir(
-                        context,
-                        Environment.DIRECTORY_DOWNLOADS,
-                        name,
-                    )
-                CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
-                userAgent?.let { request.addRequestHeader("User-Agent", it) }
-                val id = (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-                updateDownload(BotDownload(id, name, 0f, done = false))
+                if (url.startsWith("${RootfsWeb.SCHEME}://")) {
+                    downloadRootfsFile(url, contentDisposition, mimeType)
+                } else {
+                    val name = downloadName(url)
+                    val request = DownloadManager.Request(Uri.parse(url))
+                        .setMimeType(mimeType)
+                        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        .setTitle(name)
+                        // 落到应用自己的下载目录：不需要存储权限，也不会把文件写丢。
+                        .setDestinationInExternalFilesDir(
+                            context,
+                            Environment.DIRECTORY_DOWNLOADS,
+                            name,
+                        )
+                    CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+                    userAgent?.let { request.addRequestHeader("User-Agent", it) }
+                    val id = (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                    updateDownload(BotDownload(id, name, 0f, done = false))
+                }
             }
         }
         return view
@@ -662,13 +702,65 @@ class BotBrowserSession internal constructor(
         view.loadUrl(fixedUrl(raw))
     }
 
-    private fun fixedUrl(raw: String): String = when {
-        raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("about:") ||
-            raw.startsWith("data:") -> raw
-        raw.contains(' ') || !raw.contains('.') ->
-            "https://www.bing.com/search?q=" + Uri.encode(raw)
-        else -> "https://$raw"
+    private fun fixedUrl(raw: String): String {
+        RootfsWeb.urlFor(context, raw)?.let { return it }
+        return when {
+            raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("about:") ||
+                raw.startsWith("data:") -> raw
+            raw.contains(' ') || !raw.contains('.') ->
+                "https://www.bing.com/search?q=" + Uri.encode(raw)
+            else -> "https://$raw"
+        }
     }
+
+    private fun downloadRootfsFile(url: String, contentDisposition: String?, mimeType: String?) {
+        val source = RootfsWeb.fileFor(context, Uri.parse(url)) ?: return
+        val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            .ifBlank { downloadName(url) }
+        val id = -System.nanoTime()
+        val initial = BotDownload(id, name, 0f, done = false)
+        localDownloads[id] = initial
+        updateDownload(initial)
+        thread(name = "bot-local-download") {
+            val done = runCatching {
+                val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                dir.mkdirs()
+                val target = uniqueDownload(dir, name)
+                source.inputStream().use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+            }.fold(
+                onSuccess = { BotDownload(id, name, 1f, done = true) },
+                onFailure = { BotDownload(id, name, 0f, done = true, failed = true) },
+            )
+            localDownloads[id] = done
+            Handler(Looper.getMainLooper()).post {
+                if (download?.id == id) download = done
+                Handler(Looper.getMainLooper()).postDelayed(
+                    { localDownloads.remove(id) },
+                    15_000,
+                )
+            }
+        }
+    }
+
+    private fun uniqueDownload(dir: java.io.File, name: String): java.io.File {
+        val first = java.io.File(dir, name)
+        if (!first.exists()) return first
+        val stem = name.substringBeforeLast('.', name)
+        val ext = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+        var index = 2
+        while (true) {
+            val candidate = java.io.File(dir, "$stem ($index)$ext")
+            if (!candidate.exists()) return candidate
+            index++
+        }
+    }
+
+    private fun isPageUrl(url: String): Boolean =
+        url.startsWith("http://") ||
+            url.startsWith("https://") ||
+            url.startsWith("${RootfsWeb.SCHEME}://")
 
     private fun downloadName(url: String): String =
         Uri.parse(url).lastPathSegment?.takeIf { it.isNotEmpty() } ?: "download"

@@ -30,6 +30,7 @@ data class SettingsUiState(
     val voiceMode: VoiceMode = VoiceMode.AUTO,
     val phoneControlEnabled: Boolean = false,
     val phoneConfirmMode: PhoneConfirmMode = PhoneConfirmMode.ASK,
+    val phoneControlBotId: String? = null,
     val phoneStorageEnabled: Boolean = false,
     val dshGo: DshGoPreferences = DshGoPreferences(),
 )
@@ -53,7 +54,8 @@ class SettingsViewModel(
         repository.observePhoneControlEnabled(),
         repository.observePhoneConfirmMode(),
         repository.observePhoneStorageEnabled(),
-    ) { enabled, mode, storage -> listOf(enabled, mode, storage) }
+        repository.observePhoneControlBotId(),
+    ) { enabled, mode, storage, botId -> listOf(enabled, mode, storage, botId) }
 
     val uiState: StateFlow<SettingsUiState> = combine(
         core,
@@ -72,6 +74,7 @@ class SettingsViewModel(
             phoneControlEnabled = phoneValues[0] as Boolean,
             phoneConfirmMode = phoneValues[1] as PhoneConfirmMode,
             phoneStorageEnabled = phoneValues[2] as Boolean,
+            phoneControlBotId = phoneValues[3] as String?,
             dshGo = dshGo,
         )
     }.stateIn(
@@ -95,6 +98,8 @@ class SettingsViewModel(
     fun setPhoneControlEnabled(enabled: Boolean) = repository.setPhoneControlEnabled(enabled)
 
     fun setPhoneConfirmMode(mode: PhoneConfirmMode) = repository.setPhoneConfirmMode(mode)
+
+    fun setPhoneControlBotId(botId: String?) = repository.setPhoneControlBotId(botId)
 
     fun setPhoneStorageEnabled(enabled: Boolean) = repository.setPhoneStorageEnabled(enabled)
 

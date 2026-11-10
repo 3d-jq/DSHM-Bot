@@ -73,3 +73,16 @@ fun fileExtensionOf(path: String): String {
     if (dot <= 0 || dot == name.length - 1) return ""
     return name.substring(dot + 1).lowercase().take(8)
 }
+
+/** 只有这些扩展名算「给用户做的产物」；代码 / 配置 / 纯文本不算。 */
+fun isArtifactPath(path: String): Boolean = fileExtensionOf(path) in setOf(
+    "html", "htm", "mhtml",
+    "pdf", "doc", "docx", "odt", "rtf", "pages", "wps", "epub",
+    "xls", "xlsx", "ods", "csv", "tsv", "numbers", "et",
+    "ppt", "pptx", "odp", "key", "dps",
+    "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "zst", "apk",
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif", "avif", "tif", "tiff", "ico", "svg",
+    "mp3", "wav", "m4a", "aac", "flac", "ogg", "opus", "amr", "mid", "midi",
+    "mp4", "mov", "webm", "mkv", "avi", "m4v", "3gp",
+    "ics", "vcf",
+)

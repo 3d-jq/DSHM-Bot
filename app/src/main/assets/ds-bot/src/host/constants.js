@@ -66,6 +66,9 @@ export const TEAM_TOOLS = [
   'create_group', 'update_group', 'delete_group', 'post_to_group', 'ask_user', 'show_view',
   'request_secret', 'list_secrets', 'group_relay', 'read_own_chat',
   'read_group_chat', 'remember', 'forget', 'recall', 'read_browser',
+  'phone_screen', 'phone_tap', 'phone_type', 'phone_scroll', 'phone_key',
+  'phone_tap_xy', 'phone_apps', 'phone_open', 'phone_handoff',
+  'phone_notify', 'phone_clipboard',
   'list_capabilities', 'save_capability', 'delete_capability',
   'attach_capability', 'detach_capability',
 ]

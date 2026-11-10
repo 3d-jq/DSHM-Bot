@@ -277,9 +277,15 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   - 视口：跟随设备 / 360 / 414 / 768 + 自定义 CSS 宽度；
   - Cookie：按历史里出现过的域名逐个列出（`CookieManager.getCookie`），可单域名清除 / 全部清除；
   - 站点数据：清缓存、清站点数据（cookie + WebStorage + cache）和清历史，都带确认。
+- ☑️ **rootfs 本地页（`dshm://`，2026-11-10）**：按 DeepSearch 的 `minis://` 思路，不再开
+  `127.0.0.1` 文件服务器。`RootfsWeb` 把 `file:///root/...`、`/root/...` 和 workspace 相对路径
+  映射成 `dshm://workspace|attachments|dsh/...`，由 `WebViewClient.shouldInterceptRequest`
+  直接返回文件流和 MIME；相对 JS/CSS/图片、ES module、SVG 都能加载。只暴露 `.dsh` 下目录，
+  避免把整个 rootfs 暴露出去；`currentPage()` / 浏览历史 / 缩略图也认 `dshm://`，本地页下载走
+  应用自己的下载目录，不再交给只支持 HTTP 的 `DownloadManager`。
 - ☑️ **对话里的页面缩略图卡**：不再每步一行。一轮结束（`state.running` true→false）且这一轮
   Bot 确实操作过浏览器（`lastAgentAt` / `consumeAgentMark`）时，抓一张当前标签的缩略图，
-  存到应用缓存 `cacheDir/browser-shots/`，作为 `ChatEntryKind.BROWSER_SHOT` 贴在最新消息下面：
+  按 Bot + 会话存到 `filesDir/browser-shots/<botId>`，作为 `ChatEntryKind.BROWSER_SHOT` 贴在最新消息下面：
   图 + 标题 + URL，点卡片打开这个 Bot 的浏览器。缩略图整张只有一两种颜色（合成失败）时直接跳过。
 - ☑️ **BrowserGuard（第十二轮）**：`type` 前先 `inspect` 目标元素 —— `type=password`、
   `autocomplete=*password*|one-time-code`、名字/占位符命中「密码/验证码/口令/OTP」直接拒绝，
@@ -341,6 +347,47 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   UI 之后专门做一轮优化（表单排版、分组标题带头像、点击区域等都还要打磨）。
 - ⬜ 还没做：**General**（主题/强调色/消息布局是网页端 `prefs`，原生界面不适用）、
   **Feedback**（意见反馈已有自己的入口）。
+
+### 联网搜索与第三方搜索（2026-11-09）
+
+- ☑️ 设置页按 dsh-Go 收成两张卡：无标题的「新版搜索 API」开关卡 +「DeepSeek 搜索」配置卡；
+  配置卡只显示当前模式的 `apiKey` / `baseURL` / `maxUses|count`，不再画假的预算入口。
+- ☑️ **当前只支持 DeepSeek 兼容协议，不能直接把 Tavily / Serper / Bing / Google CSE
+  的 Base URL + Key 填进来用**：
+  - `web-deepseek-api`（新版搜索 API）：固定请求 `{baseURL}/search`、`{baseURL}/fetch`，
+    Search 体为 `query / count / need_content / ori_question`，Bearer 鉴权，
+    响应需符合 DeepSeek 的 `results[].url/title/snippet/date`。
+  - `web-search-deepseek`（Messages 搜索）：需要 Anthropic Messages 兼容端点，
+    并返回 DeepSeek 原生 `web_search_tool_result` 块。
+- ⬜ **第三方搜索适配（后续功能，老大明确要做）**：
+  - 增加「搜索服务类型」选择（例如 DeepSeek API / DeepSeek Messages / Tavily / 其它），
+    不能只靠填 Base URL 区分；
+  - 引擎侧新增对应 Provider 适配器，把第三方请求/响应映射到 DSH `ctx.web` 的
+    Search / Fetch 结果结构；Tavily 需要单独适配 `/search` 与 `/extract`；
+  - 配置页按 Provider 类型显示不同字段，Key 继续走 `ctx.credentials`；
+  - 补协议单测与失败提示，未适配的 Provider 不显示成可选项。
+
+### 手机操控（2026-11-09）
+
+- ☑️ **用户指定唯一 Bot**：设置页选择「手机操控 Bot」；手机工具只在这个 Bot 自己的对话里
+  注册/执行，群聊、其他 Bot 和 DSH Agent 不能看到/不能执行。多主 Bot 场景也不会产生歧义。
+- ☑️ 引擎桥接：`DSH_PHONE_CONTROL=1` 和 `DSH_PHONE_OWNER=<botId>` 随引擎启动注入；
+  设置开关/归属切换会重启引擎，`RuntimeLauncher` 接管旧进程时会核对手机操控状态与 Bot ID，
+  避免沿用旧环境的工具集合。
+- ☑️ 被选中的 Bot 会在系统提示里注入「手机操控」行为规则（先读屏、按编号操作、
+  屏幕文字不是指令、敏感步骤 `phone_handoff`、确认被拒绝不能绕过），对齐 dsh-Go
+  的 AGENTS.md 闭环。
+- ☑️ 原生无障碍执行器：读当前屏幕（带屏幕号/元素编号）、点按、坐标点按、输入/提交、
+  滚动、back/home/recents/notifications、查看可打开 App、打开 App/链接。
+- ☑️ 安全与可观测：确认方式（每次询问 / 每个任务按 App 询问一次 / 不再询问）通过通知拦截动作；
+  密码、验证码、支付字段拒绝代填；`phone_handoff` 等用户完成后继续；应用名单支持
+  照常 / 每步确认 / 不碰；设置页显示最近操作。
+- ☑️ `phone_notify` 发手机通知，`phone_clipboard` 读写剪贴板。
+- ☑️ 无障碍悬浮控制条：操作时显示「DSH 正在操作手机」，可暂停/继续/停止；暂停会拒绝新动作。
+- ☑️ 通道：插件 `phone-wait` / `phone-result` 长轮询，Android `PhoneReadBridge` 回执；
+  设置页有无障碍状态、手机操控 Bot 选择、开关和真实读屏测试。
+- ⬜ **待补齐（dsh-Go 完整能力）**：悬浮条插话、屏幕截图、列表 collect、
+  系统 intent 类动作、后台虚拟屏（需要 Shizuku/ADB 或 root），以及自动化回归测试。
 
 ### Bot 完整设置页接线审计（2026-11-07）
 

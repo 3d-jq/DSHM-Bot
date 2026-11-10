@@ -67,6 +67,8 @@ import com.dshm.bot.ui.components.FloatingIconButton
 fun BotBrowserScreen(
     botId: String?,
     botName: String?,
+    initialUrl: String? = null,
+    onInitialUrlConsumed: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -75,6 +77,12 @@ fun BotBrowserScreen(
     val session = remember(botId) { botId?.let { store.session(it) } }
     // 浏览器自己的两个子页（历史 / 设置）：不新增导航路由，返回键先回浏览器。
     var page by remember(botId) { mutableStateOf<BrowserPage?>(null) }
+
+    LaunchedEffect(initialUrl, session) {
+        val url = initialUrl ?: return@LaunchedEffect
+        session?.showUrl(url)
+        onInitialUrlConsumed()
+    }
 
     BackHandler(enabled = page != null) { page = null }
 

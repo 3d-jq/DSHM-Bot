@@ -140,14 +140,14 @@ fun BotChatScreen(
     endpoint: RuntimeEndpoint?,
     onBack: () -> Unit,
     onDetails: () -> Unit = {},
-    onOpenBrowser: () -> Unit = {},
+    onOpenBrowser: (String?) -> Unit = {},
     onOpenMember: (String) -> Unit = {},
     fontScale: Float = 1f,
     voiceMode: VoiceMode = VoiceMode.AUTO,
     modifier: Modifier = Modifier,
     viewModel: BotChatViewModel = viewModel(
         key = "bot-chat:${bot.id}:${endpoint?.baseUrl.orEmpty()}:${endpoint?.token.orEmpty()}",
-        factory = BotChatViewModel.factory(bot.id, bot.name, bot.isGroup, endpoint),
+        factory = BotChatViewModel.factory(bot.id, bot.name, bot.isGroup, endpoint, LocalContext.current.applicationContext),
     ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -173,7 +173,7 @@ fun BotChatScreen(
         val bitmap = session.captureThumbnail() ?: return@LaunchedEffect
         val file = withContext(Dispatchers.IO) {
             runCatching {
-                val dir = File(attachContext.cacheDir, "browser-shots").apply { mkdirs() }
+                val dir = File(attachContext.filesDir, "browser-shots/${bot.id}").apply { mkdirs() }
                 val target = File(dir, "shot-${System.currentTimeMillis()}.png")
                 target.outputStream().use { out ->
                     bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 85, out)
@@ -623,7 +623,7 @@ fun BotChatScreen(
                     quickSettings = false
                     onDetails()
                 },
-                onBrowser = onOpenBrowser,
+                onBrowser = { onOpenBrowser(null) },
                 onCopyTranscript = { copyTranscript() },
             )
         }
@@ -717,7 +717,7 @@ private fun ChatMessages(
     onOpenMember: (String) -> Unit = {},
     /** 点事件行打开「Bot 间对话」（DS Bot `openExchange`）。 */
     onOpenExchange: (String) -> Unit = {},
-    onOpenBrowser: () -> Unit = {},
+                onOpenBrowser: (String?) -> Unit = {},
     onLoadEarlier: () -> Unit = {},
     /** 长按用户气泡 → 编辑：把内容填回输入框。 */
     onEditMessage: (String) -> Unit = {},
@@ -988,7 +988,7 @@ private fun ChatMessages(
 
                     ChatEntryKind.BROWSER_SHOT -> BrowserShotCard(
                         shot = entry.shot,
-                        onClick = onOpenBrowser,
+                        onClick = { onOpenBrowser(entry.shot?.url) },
                     )
 
                     // 网页版 `chat` items 的另外三种 kind：分隔线 / 只读视图卡 / 问答回执。
@@ -1491,7 +1491,7 @@ private fun BotBubble(
         LaunchedEffect(selectionController, messageId, text) {
             if (messageId.isNotEmpty()) selectionController?.rememberMessageMarkdown(messageId, text)
         }
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.wrapContentWidth(Alignment.Start)) {
             Column(
                 modifier = Modifier
                     .clip(RoundedCornerShape(Dshm.radius.lg))
@@ -1514,6 +1514,7 @@ private fun BotBubble(
                         fontScale = fontScale,
                         mentionMembers = members,
                         messageId = messageId,
+                        fillWidth = false,
                     )
                 }
                 if (collapsible) {
@@ -1550,7 +1551,7 @@ private fun BotBubble(
     }
 
     if (!isGroup) {
-        Column(modifier = Modifier.fillMaxWidth()) { bubble() }
+        Column(modifier = Modifier.wrapContentWidth(Alignment.Start)) { bubble() }
         return
     }
 

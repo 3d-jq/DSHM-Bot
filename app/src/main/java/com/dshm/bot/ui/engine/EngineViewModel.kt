@@ -52,6 +52,13 @@ private val BROWSER_GUEST_ENV = listOf(
     "NODE_COMPILE_CACHE=/root/.cache/node-compile-cache",
 )
 
+private fun phoneGuestEnv(enabled: Boolean, ownerBotId: String?): List<String> =
+    if (enabled && !ownerBotId.isNullOrBlank()) {
+        BROWSER_GUEST_ENV + listOf("DSH_PHONE_CONTROL=1", "DSH_PHONE_OWNER=$ownerBotId")
+    } else {
+        BROWSER_GUEST_ENV
+    }
+
 /** 本机引擎页状态层：安装/状态交给 RuntimeManager，启动/停止交给 RuntimeLauncher。 */
 class EngineViewModel(
     private val appContext: Context,
@@ -60,6 +67,14 @@ class EngineViewModel(
     private val installer: RuntimeInstaller,
     private val manifest: RuntimeManifest,
 ) : ViewModel() {
+
+    private fun phoneControlEnabled(): Boolean =
+        appContext.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
+            .getBoolean("phone_control_enabled", false)
+
+    private fun phoneControlOwner(): String? =
+        appContext.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
+            .getString("phone_control_bot_id", null)
 
     private val _state = MutableStateFlow(manager.state.value)
     val state: StateFlow<RuntimeState> = _state.asStateFlow()
@@ -114,7 +129,7 @@ class EngineViewModel(
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
                         .onFailure { EngineLog.log("ds-bot install failed: ${it.message}") }
-                    launcher.start(manifest, BROWSER_GUEST_ENV)
+                    launcher.start(manifest, phoneGuestEnv(phoneControlEnabled(), phoneControlOwner()))
                 }
             }
                 .onSuccess { _state.value = RuntimeState.Running(it) }
@@ -130,7 +145,7 @@ class EngineViewModel(
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
                         .onFailure { EngineLog.log("ds-bot install failed: ${it.message}") }
-                    launcher.start(manifest, BROWSER_GUEST_ENV)
+                    launcher.start(manifest, phoneGuestEnv(phoneControlEnabled(), phoneControlOwner()))
                 }
             }
                 .onSuccess { _state.value = RuntimeState.Running(it) }
