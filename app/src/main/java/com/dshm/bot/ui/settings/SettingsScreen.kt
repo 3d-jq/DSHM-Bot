@@ -265,13 +265,6 @@ fun SettingsScreen(
 
         item {
             SettingsSection(title = stringResource(R.string.settings_group_general)) {
-                SettingsRow(
-                    title = stringResource(R.string.settings_interface),
-                    icon = R.drawable.ic_lucide_layout_dashboard,
-                    value = interfaceLabel(uiState.interfaceMode),
-                    onClick = { onOpenPage(SettingsPageId.INTERFACE) },
-                )
-                SettingsRowDivider()
                 Box(Modifier.onGloballyPositioned { languageAnchorHeight = it.size.height }) {
                     SettingsRow(
                         title = stringResource(R.string.settings_language),

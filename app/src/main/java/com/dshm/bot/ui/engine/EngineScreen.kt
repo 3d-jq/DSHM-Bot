@@ -109,7 +109,7 @@ fun EngineScreen(
         title = stringResource(R.string.engine_title),
         onBack = { onBack?.invoke() },
         actions = {
-            // dsh-Go：顶栏右侧是「网页」按钮，引擎跑着才可点。
+            // 保留一个小的「网页版」入口：引擎跑着才可点。
             FloatingIconButton(
                 icon = R.drawable.ic_lucide_globe,
                 contentDescription = stringResource(R.string.engine_open_web),

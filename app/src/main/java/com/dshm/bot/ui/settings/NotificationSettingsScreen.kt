@@ -74,19 +74,24 @@ fun NotificationSettingsScreen(
         onBack = onBack,
     ) {
         item {
-            SettingsSection(
-                title = stringResource(R.string.settings_notifications_events),
-                footer = stringResource(R.string.settings_notify_hint),
-            ) {
+            SettingsSection {
                 SettingsSwitchRow(
-                    title = stringResource(R.string.settings_notifications_engine_ready),
-                    subtitle = stringResource(R.string.settings_notifications_engine_ready_hint),
+                    title = stringResource(R.string.settings_notifications),
+                    subtitle = stringResource(R.string.settings_notifications_master_hint),
                     checked = enabled,
                     onCheckedChange = { setEnabled(it) },
                 )
-                SettingsRowDivider()
+            }
+        }
+
+        item {
+            SettingsSection(
+                title = stringResource(R.string.settings_notifications_events),
+                footer = stringResource(R.string.settings_notifications_hint),
+            ) {
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_notify_turn_done),
+                    subtitle = stringResource(R.string.settings_notify_turn_done_hint),
                     checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_TURN_DONE),
                     onCheckedChange = {
                         settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_TURN_DONE, it)
@@ -96,6 +101,7 @@ fun NotificationSettingsScreen(
                 SettingsRowDivider()
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_notify_error),
+                    subtitle = stringResource(R.string.settings_notify_error_hint),
                     checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_ERROR),
                     onCheckedChange = {
                         settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_ERROR, it)
@@ -105,6 +111,7 @@ fun NotificationSettingsScreen(
                 SettingsRowDivider()
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_notify_approval),
+                    subtitle = stringResource(R.string.settings_notify_approval_hint),
                     checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_APPROVAL),
                     onCheckedChange = {
                         settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_APPROVAL, it)
@@ -114,6 +121,7 @@ fun NotificationSettingsScreen(
                 SettingsRowDivider()
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_notify_question),
+                    subtitle = stringResource(R.string.settings_notify_question_hint),
                     checked = state.dshGo.flag(DshGoPreferences.KEY_NOTIFY_QUESTION),
                     onCheckedChange = {
                         settingsVm.setDshGoPreference(DshGoPreferences.KEY_NOTIFY_QUESTION, it)
@@ -124,24 +132,21 @@ fun NotificationSettingsScreen(
         }
 
         item {
-            SettingsSection(title = stringResource(R.string.settings_notifications_system)) {
+            SettingsSection(
+                title = stringResource(R.string.settings_notifications_system),
+                footer = stringResource(R.string.settings_notifications_system_footer),
+            ) {
                 SettingsRow(
                     title = stringResource(R.string.settings_notifications_system_status),
+                    subtitle = stringResource(R.string.settings_notifications_open_system_hint),
                     value = when (systemAllowed) {
                         true -> stringResource(R.string.settings_notifications_allowed)
                         false -> stringResource(R.string.settings_notifications_blocked)
                         null -> null
                     },
                     valueColor = if (systemAllowed == false) Dshm.colors.warning else null,
+                    onClick = { openSystemSettings() },
                 )
-                if (systemAllowed == false) {
-                    SettingsRowDivider()
-                    SettingsRow(
-                        title = stringResource(R.string.settings_notifications_open_system),
-                        subtitle = stringResource(R.string.settings_notifications_open_system_hint),
-                        onClick = { openSystemSettings() },
-                    )
-                }
             }
         }
 

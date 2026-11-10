@@ -546,6 +546,14 @@
     <string name="notify_channel_engine">Local engine</string>
     <string name="notify_engine_ready_title">Local engine ready</string>
     <string name="notify_engine_ready_body">DSHM Bot can talk to DSH now.</string>
+    <string name="notify_channel_chat">Chat</string>
+    <string name="notify_channel_attention">Needs attention</string>
+    <string name="notify_done_title">%1$s finished</string>
+    <string name="notify_done_body">Open to see the reply</string>
+    <string name="notify_error_title">%1$s failed</string>
+    <string name="notify_stopped_body">This run was stopped.</string>
+    <string name="notify_approval_title">%1$s needs approval</string>
+    <string name="notify_question_title">%1$s has a question</string>
     <string name="voice_hint_auto">Uses the voice model when it’s ready, otherwise the phone’s service</string>
     <string name="voice_hint_system">Use the recognition service selected on this phone</string>
     <string name="voice_hint_engine">Recognizes speech with the engine’s voice model</string>
@@ -701,8 +709,14 @@
     <string name="settings_permission_confirm_full">Full access lets the AI run commands without asking. Only use it with sources you trust.</string>
     <string name="settings_permission_confirm_auto">Auto review lets the AI skip some confirmations. Review the risks before continuing.</string>
 
-    <string name="settings_notifications_events">Notifications</string>
+    <string name="settings_notifications_events">Alerts</string>
     <string name="settings_notifications_hint">The app only notifies you when the local engine becomes ready.</string>
+    <string name="settings_notifications_master_hint">Notifications and banners</string>
+    <string name="settings_notify_turn_done_hint">Reply is ready, with a preview</string>
+    <string name="settings_notify_error_hint">Errors or stopped runs</string>
+    <string name="settings_notify_approval_hint">Waiting for your approval</string>
+    <string name="settings_notify_question_hint">Questions waiting for you</string>
+    <string name="settings_notifications_system_footer">Lock-screen privacy is controlled by Android; notification content may appear on the lock screen.</string>
     <string name="settings_notifications_engine_ready">Engine ready</string>
     <string name="settings_notifications_engine_ready_hint">Notify when the local engine has started.</string>
     <string name="settings_notifications_system">System</string>

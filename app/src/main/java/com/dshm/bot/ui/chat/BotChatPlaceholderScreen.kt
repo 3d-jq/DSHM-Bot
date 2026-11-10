@@ -61,8 +61,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -113,6 +113,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.FileProvider
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.VoiceMode
@@ -156,6 +157,7 @@ fun BotChatScreen(
     val attachContext = LocalContext.current
     val attachScope = rememberCoroutineScope()
     var cameraFile by remember { mutableStateOf<File?>(null) }
+    LaunchedEffect(bot.id) { ChatNotifier.cancel(attachContext, bot.id) }
 
     // 一轮浏览器操作结束后，往对话里贴一张页面缩略图（这一轮只贴一张，抓不到就跳过）。
     val browserStore = remember { BotBrowserStore.of(attachContext) }

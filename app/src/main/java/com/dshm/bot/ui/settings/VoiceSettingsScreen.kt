@@ -1,19 +1,27 @@
 package com.dshm.bot.ui.settings
 
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.remote.SpeechProvider
 import com.dshm.bot.domain.model.VoiceMode
+import java.util.Locale
 
 // dsh-Go 设置 › 通用 › 语音输入：识别方式，以及引擎语音模型。
 // 对齐 dsh-Go：引擎模型由 DSH 的语音输入插件提供，speech/catalog 读目录，
@@ -86,20 +94,16 @@ fun VoiceSettingsScreen(
                 footer = stringResource(R.string.voice_model_footer),
             ) {
                 when {
-                    state.speechLoading && provider == null -> SettingsRow(
-                        title = "SenseVoice",
-                        subtitle = stringResource(R.string.voice_model_loading),
-                        enabled = false,
+                    state.speechLoading && provider == null -> VoiceModelPlaceholder(
+                        note = stringResource(R.string.voice_model_loading),
                     )
 
-                    provider == null -> SettingsRow(
-                        title = "SenseVoice",
-                        subtitle = stringResource(R.string.voice_model_plugin_off),
-                        value = stringResource(R.string.voice_model_unavailable),
-                        enabled = false,
+                    provider == null -> VoiceModelPlaceholder(
+                        note = stringResource(R.string.voice_model_plugin_off),
+                        status = stringResource(R.string.voice_model_unavailable),
                     )
 
-                    else -> VoiceProviderRow(
+                    else -> VoiceModelCard(
                         provider = provider,
                         preparing = state.speechPreparing,
                         onDownload = viewModel::prepareSpeech,
@@ -108,72 +112,138 @@ fun VoiceSettingsScreen(
                 }
             }
         }
+    }
+}
 
-        if (provider != null && provider.busy) {
-            item {
-                LinearProgressIndicator(
-                    progress = { provider.fraction ?: 0f },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
-                    color = Dshm.colors.accent,
-                    trackColor = Dshm.colors.surfaceMuted,
-                )
-            }
+@Composable
+private fun VoiceModelCard(
+    provider: SpeechProvider,
+    preparing: Boolean,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val busy = provider.busy || preparing
+    val status = voicePhaseText(provider)
+    val statusColor = when {
+        provider.usable -> Dshm.colors.success
+        provider.phase == "failed" -> Dshm.colors.danger
+        busy -> Dshm.colors.accent
+        else -> Dshm.colors.textTertiary
+    }
+    val note = when {
+        provider.phase == "downloading" -> voiceBytesText(provider)
+        else -> listOfNotNull(provider.message, provider.downloadReason).joinToString(" · ").ifBlank { null }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = provider.name,
+                style = Dshm.typography.settingsRowTitle,
+                color = Dshm.colors.textPrimary,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = status,
+                style = Dshm.typography.rowPreview,
+                color = statusColor,
+                maxLines = 1,
+            )
         }
-
-        // 离线语音模型等未接入能力：不可用，不放假开关。
-        item {
-            SettingsSection(
-                title = stringResource(R.string.settings_voice_other_capabilities),
-                footer = stringResource(R.string.settings_engine_required),
-            ) {
-                listOf(
-                    stringResource(R.string.settings_voice_offline_model),
-                    stringResource(R.string.settings_voice_custom_words),
-                ).forEachIndexed { index, label ->
-                    if (index > 0) SettingsRowDivider()
-                    SettingsRow(
-                        title = label,
-                        enabled = false,
-                        subtitle = stringResource(R.string.settings_unavailable_hint),
-                        value = stringResource(R.string.settings_unavailable),
-                    )
+        if (busy) {
+            Spacer(Modifier.size(Dshm.spacing.sm))
+            LinearProgressIndicator(
+                progress = { provider.fraction ?: 0f },
+                modifier = Modifier.fillMaxWidth(),
+                color = Dshm.colors.accent,
+                trackColor = Dshm.colors.surfaceMuted,
+            )
+        }
+        if (note != null) {
+            Spacer(Modifier.size(Dshm.spacing.xs))
+            Text(
+                text = note,
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textTertiary,
+            )
+        }
+        when {
+            busy -> {
+                Spacer(Modifier.size(Dshm.spacing.md))
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.voice_action_cancel))
                 }
+            }
+            !provider.usable -> {
+                Spacer(Modifier.size(Dshm.spacing.md))
+                SettingsPrimaryButton(
+                    text = if (provider.phase == "failed") {
+                        stringResource(R.string.voice_action_retry)
+                    } else {
+                        stringResource(R.string.voice_action_download)
+                    },
+                    onClick = onDownload,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun VoiceProviderRow(
-    provider: SpeechProvider,
-    preparing: Boolean,
-    onDownload: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    val status = voicePhaseText(provider)
-    val action = when {
-        provider.busy || preparing -> stringResource(R.string.voice_action_cancel)
-        provider.usable -> stringResource(R.string.voice_state_ready)
-        else -> if (provider.phase == "failed") {
-            stringResource(R.string.voice_action_retry)
-        } else {
-            stringResource(R.string.voice_action_download)
-        }
-    }
-    SettingsRow(
-        title = provider.name,
-        subtitle = listOfNotNull(status, provider.message, provider.downloadReason).joinToString(" · "),
-        value = action,
-        enabled = true,
-        onClick = {
-            when {
-                provider.busy || preparing -> onCancel()
-                !provider.usable -> onDownload()
+private fun VoiceModelPlaceholder(note: String, status: String? = null) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "SenseVoice",
+                style = Dshm.typography.settingsRowTitle,
+                color = Dshm.colors.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            if (status != null) {
+                Text(
+                    text = status,
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textTertiary,
+                )
             }
-        },
-    )
+        }
+        Spacer(Modifier.size(Dshm.spacing.xs))
+        Text(
+            text = note,
+            style = Dshm.typography.rowPreview,
+            color = Dshm.colors.textTertiary,
+        )
+    }
+}
+
+private fun voiceBytesText(provider: SpeechProvider): String? {
+    val total = provider.totalBytes?.takeIf { it > 0L } ?: return null
+    fun megabytes(bytes: Long): String =
+        String.format(Locale.US, "%.0f MB", bytes / 1024.0 / 1024.0)
+    val done = provider.completedBytes?.takeIf { it > 0L }
+    return if (done != null) {
+        "${megabytes(done)} / ${megabytes(total)}"
+    } else {
+        "约 ${megabytes(total)}"
+    }
 }
 
 @Composable

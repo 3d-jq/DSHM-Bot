@@ -1,5 +1,6 @@
 package com.dshm.bot
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -25,8 +26,42 @@ import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.ui.settings.SettingsViewModel
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_OPEN_BOT_ID = "open_bot_id"
+
+        @Volatile
+        var isForeground: Boolean = false
+            private set
+
+        @Volatile
+        private var pendingOpenBotId: String? = null
+
+        fun consumePendingOpenBot(): String? {
+            val value = pendingOpenBotId
+            pendingOpenBotId = null
+            return value
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        isForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isForeground = false
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingOpenBotId = intent.getStringExtra(EXTRA_OPEN_BOT_ID)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingOpenBotId = intent?.getStringExtra(EXTRA_OPEN_BOT_ID)
         setContent {
             val settingsViewModel: SettingsViewModel = viewModel(
                 factory = SettingsViewModel.factory(applicationContext),

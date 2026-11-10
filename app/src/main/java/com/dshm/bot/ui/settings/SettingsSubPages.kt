@@ -3,7 +3,6 @@ package com.dshm.bot.ui.settings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
-import com.dshm.bot.domain.model.InterfaceMode
 import com.dshm.bot.domain.model.ThemeMode
 import com.dshm.bot.domain.model.VoiceMode
 
@@ -23,7 +22,6 @@ enum class SettingsPageId {
     CONNECTORS,
     CAPABILITIES,
     USAGE,
-    INTERFACE,
     NOTIFICATIONS,
     BACKGROUND,
     PRIVACY,
@@ -37,14 +35,6 @@ internal fun themeLabel(mode: ThemeMode): String = stringResource(
         ThemeMode.SYSTEM -> R.string.theme_system
         ThemeMode.LIGHT -> R.string.theme_light
         ThemeMode.DARK -> R.string.theme_dark
-    },
-)
-
-@Composable
-internal fun interfaceLabel(mode: InterfaceMode): String = stringResource(
-    when (mode) {
-        InterfaceMode.NATIVE -> R.string.settings_value_native
-        InterfaceMode.WEB -> R.string.interface_web
     },
 )
 

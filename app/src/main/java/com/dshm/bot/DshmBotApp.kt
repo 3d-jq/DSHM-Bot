@@ -38,6 +38,7 @@ import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.account.AccountScreen
 import com.dshm.bot.ui.account.AccountViewModel
 import com.dshm.bot.ui.chat.BotBrowserScreen
+import com.dshm.bot.ui.chat.ChatAlertViewModel
 import com.dshm.bot.ui.chat.BotBrowserStore
 import com.dshm.bot.ui.chat.BrowserGuardStore
 import com.dshm.bot.ui.chat.BrowserHandOverStore
@@ -72,7 +73,6 @@ import com.dshm.bot.ui.settings.UsageScreen
 import com.dshm.bot.ui.settings.ChatFontScreen
 import com.dshm.bot.ui.settings.EngineSettingsScreen
 import com.dshm.bot.ui.settings.EngineSettingsViewModel
-import com.dshm.bot.ui.settings.InterfaceSettingsScreen
 import com.dshm.bot.ui.settings.LanguageScreen
 import com.dshm.bot.ui.settings.LicensesScreen
 import com.dshm.bot.ui.settings.ModelProvidersScreen
@@ -93,7 +93,6 @@ import com.dshm.bot.ui.settings.WebSearchScreen
 import com.dshm.bot.ui.settings.chatFontLabel
 import com.dshm.bot.ui.settings.languageLabel
 import com.dshm.bot.domain.model.DshGoPreferences
-import com.dshm.bot.domain.model.InterfaceMode
 import com.dshm.bot.domain.model.scale
 
 private const val SCREEN_HOME = "home"
@@ -107,12 +106,12 @@ private const val SCREEN_LANGUAGE = "language"
 private const val SCREEN_ACCOUNT = "account"
 private const val SCREEN_SETTINGS_PAGE = "settings-page"
 private const val SCREEN_NEW_BOT = "new-bot"
-private const val SCREEN_WEB = "web"
 private const val SCREEN_DIAGNOSTICS = "diagnostics"
 private const val CHAT_PREFIX = "chat:"
 private const val BOT_DETAILS_PREFIX = "bot-details:"
 private const val ROOM_DETAILS_PREFIX = "room-details:"
 private const val SCREEN_BOT_BROWSER = "bot-browser"
+private const val SCREEN_WEB = "web"
 
 /**
  * 应用外壳：主界面 ↔ 搜索 ↔ 设置 ↔ Bot 对话。
@@ -160,6 +159,12 @@ fun DshmBotApp(
     val botPrefsViewModel: BotPrefsViewModel = viewModel(
         key = "bot-prefs:${(engineState as? RuntimeState.Running)?.endpoint?.baseUrl.orEmpty()}",
         factory = BotPrefsViewModel.factory((engineState as? RuntimeState.Running)?.endpoint),
+    )
+    val chatAlertEndpoint = (engineState as? RuntimeState.Running)?.endpoint
+    @Suppress("UNUSED_VARIABLE")
+    val chatAlertViewModel: ChatAlertViewModel = viewModel(
+        key = "chat-alerts:${chatAlertEndpoint?.baseUrl.orEmpty()}:${chatAlertEndpoint?.token.orEmpty()}",
+        factory = ChatAlertViewModel.factory(appContext, chatAlertEndpoint),
     )
     LaunchedEffect(engineState) {
         if (engineState is RuntimeState.Running && settingsUiState.notificationsEnabled) {
@@ -209,7 +214,7 @@ fun DshmBotApp(
     var languageOpen by rememberSaveable { mutableStateOf(false) }
     var accountOpen by rememberSaveable { mutableStateOf(false) }
     var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
-    // 从本机引擎页直接打开网页版（不用先切「界面模式」）。
+    // 引擎页顶栏保留的小入口：用 WebView 打开本机 DSH Web。
     var webOpen by rememberSaveable { mutableStateOf(false) }
     // 设置子页用栈保存，返回时回到上一页而不是直接回设置首页。
     var settingsStack by rememberSaveable { mutableStateOf(ArrayList<String>()) }
@@ -219,7 +224,22 @@ fun DshmBotApp(
         }
     }
     var navForward by remember { mutableStateOf(true) }
-    val webMode = settingsUiState.interfaceMode == InterfaceMode.WEB && engineState is RuntimeState.Running
+
+    // 点对话通知回到对应 Bot：通知栏把 botId 带进来，这里消费掉并打开聊天。
+    LaunchedEffect(Unit) {
+        while (true) {
+            MainActivity.consumePendingOpenBot()?.let { id ->
+                openBotId = id
+                botDetailsOpen = false
+                botBrowserOpen = false
+                settingsOpen = false
+                engineOpen = false
+                searchOpen = false
+                settingsStack = ArrayList()
+            }
+            kotlinx.coroutines.delay(400)
+        }
+    }
     val systemAnimationsOff = runCatching {
         android.provider.Settings.Global.getFloat(
             appContext.contentResolver,
@@ -265,7 +285,6 @@ fun DshmBotApp(
     val screenKey = when {
         !onboardingDone -> SCREEN_ONBOARDING
         newBotOpen -> SCREEN_NEW_BOT
-        webMode && !settingsOpen && openBotId == null && !searchOpen -> SCREEN_WEB
         webOpen -> SCREEN_WEB
         // 诊断页是引擎页推出来的：它要先判，否则 engineOpen 会把诊断页挡住。
         diagnosticsOpen -> SCREEN_DIAGNOSTICS
@@ -299,7 +318,7 @@ fun DshmBotApp(
 
     // 系统返回手势/返回键：先在 App 内部逐层返回，最后才交给系统退出。
     // 开屏引导期间拦截返回：必须完成安装+启动才能进入。
-    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || newBotOpen || newGroupOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || diagnosticsOpen || settingsStack.isNotEmpty() || webMode || webOpen || !onboardingDone) {
+    BackHandler(enabled = openBotId != null || botDetailsOpen || botBrowserOpen || newBotOpen || newGroupOpen || searchOpen || settingsOpen || engineOpen || appearanceOpen || chatFontOpen || languageOpen || accountOpen || diagnosticsOpen || settingsStack.isNotEmpty() || webOpen || !onboardingDone) {
         navForward = false
         when {
             !onboardingDone -> Unit
@@ -311,6 +330,7 @@ fun DshmBotApp(
                 diagnosticsOpen = false
                 engineOpen = true
             }
+            webOpen -> webOpen = false
             engineOpen -> engineOpen = false
             appearanceOpen -> appearanceOpen = false
             chatFontOpen -> chatFontOpen = false
@@ -327,9 +347,6 @@ fun DshmBotApp(
                 searchOpen = false
                 homeViewModel.setQuery("")
             }
-            // 网页模式是主界面本身：内部页面都关掉后才退出网页模式。
-            webOpen -> webOpen = false
-            webMode -> settingsViewModel.setInterfaceMode(InterfaceMode.NATIVE)
         }
     }
 
@@ -589,7 +606,8 @@ fun DshmBotApp(
                 onOpenWeb = {
                     navForward = true
                     webOpen = true
-                },                onOpenBackground = {
+                },
+                onOpenBackground = {
                     // 「后台运行」是设置里的一个子页，从引擎页进去后仍能原路返回。
                     navForward = true
                     engineOpen = false
@@ -653,13 +671,6 @@ fun DshmBotApp(
                     settingsOpen = true
                 }
                 when (page) {
-                    SettingsPageId.INTERFACE -> InterfaceSettingsScreen(
-                        current = settingsUiState.interfaceMode,
-                        onSelect = settingsViewModel::setInterfaceMode,
-                        engineSettings = engineSettingsViewModel,
-                        onBack = close,
-                    )
-
                     SettingsPageId.NOTIFICATIONS -> NotificationSettingsScreen(
                         enabled = settingsUiState.notificationsEnabled,
                         onChange = settingsViewModel::setNotificationsEnabled,

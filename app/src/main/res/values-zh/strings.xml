@@ -546,6 +546,14 @@
     <string name="notify_channel_engine">本机引擎</string>
     <string name="notify_engine_ready_title">本机引擎已就绪</string>
     <string name="notify_engine_ready_body">DSHM Bot 现在可以连接 DSH 了。</string>
+    <string name="notify_channel_chat">对话</string>
+    <string name="notify_channel_attention">待处理</string>
+    <string name="notify_done_title">%1$s 回复好了</string>
+    <string name="notify_done_body">点开查看回复</string>
+    <string name="notify_error_title">%1$s 出错了</string>
+    <string name="notify_stopped_body">这一轮已经被停止。</string>
+    <string name="notify_approval_title">%1$s 等你批准</string>
+    <string name="notify_question_title">%1$s 有问题</string>
     <string name="voice_hint_auto">有语音模型时用它，否则用系统识别</string>
     <string name="voice_hint_system">使用手机设置中的识别服务</string>
     <string name="voice_hint_engine">用引擎里的语音模型识别</string>
@@ -781,8 +789,14 @@
     <string name="settings_permission_confirm_full">完全权限会让 AI 不询问就执行命令，只在你信任来源时使用。</string>
     <string name="settings_permission_confirm_auto">自动审查会让 AI 跳过部分确认，继续前请确认风险。</string>
 
-    <string name="settings_notifications_events">通知</string>
+    <string name="settings_notifications_events">提醒</string>
     <string name="settings_notifications_hint">App 目前只在本机引擎就绪时提醒。</string>
+    <string name="settings_notifications_master_hint">通知和横幅</string>
+    <string name="settings_notify_turn_done_hint">回复好了，带正文预览</string>
+    <string name="settings_notify_error_hint">出错或被中途停止</string>
+    <string name="settings_notify_approval_hint">等待你批准或确认</string>
+    <string name="settings_notify_question_hint">有问题等你回答</string>
+    <string name="settings_notifications_system_footer">锁屏隐私由 Android 控制；通知内容可能显示在锁屏上。</string>
     <string name="settings_notifications_engine_ready">引擎就绪</string>
     <string name="settings_notifications_engine_ready_hint">本机引擎启动完成时通知。</string>
     <string name="settings_notifications_system">系统</string>

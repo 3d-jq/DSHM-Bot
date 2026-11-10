@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.R
 import com.dshm.bot.data.remote.BotFeedEvent
 import com.dshm.bot.data.remote.DsBotParser
 import com.dshm.bot.domain.model.ChatApproval
@@ -31,9 +32,13 @@ import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.RemoteSpeechRepository
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import com.dshm.bot.data.notify.ChatNotifier
+import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
+import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.ui.home.RoomMemberUi
 import com.dshm.bot.ui.home.TeamRoomUi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -289,6 +294,26 @@ class BotChatViewModel(
     appContext: Context? = null,
 ) : ViewModel() {
 
+    private val notifyContext: Context? = appContext
+    private val settingsRepository = notifyContext?.let { SharedPrefsSettingsRepository(it) }
+    private var notifyEnabled = true
+    private var notifyPrefs = DshGoPreferences()
+
+    init {
+        settingsRepository?.let { repo ->
+            viewModelScope.launch {
+                combine(
+                    repo.observeNotificationsEnabled(),
+                    repo.observeDshGoPreferences(),
+                ) { enabled, prefs -> enabled to prefs }
+                    .collect { (enabled, prefs) ->
+                        notifyEnabled = enabled
+                        notifyPrefs = prefs
+                    }
+            }
+        }
+    }
+
     private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
     private val rawClient: DshClient? = endpoint?.let { DshClients.of(it) }
     /** 语音输入：页面/输入框只依赖接口。 */
@@ -349,6 +374,8 @@ class BotChatViewModel(
      * 任何一个到了就撤掉它，界面才不会「模型早答完了还挂着状态行」。
      */
     private var optimisticRun = false
+    /** 这一轮是不是用户按了停止：结束通知要算「被停下」，不是「回复好了」。 */
+    private var userStoppedRun = false
     /** 会话事件里最近一次 `turn/start` / `turn/end` 的 seq：最后的边界是哪一边。 */
     private var lastTurnStartSeq = 0L
     private var lastTurnEndSeq = 0L
@@ -757,6 +784,24 @@ class BotChatViewModel(
      * 用缓存重算卡片。事件流和 state 谁先到都不影响结果：
      * 审批只认 DS Bot 的 `answerable`，事件流只补提问。
      */
+    private fun canNotify(kind: ChatNotifier.Kind): Boolean = notifyEnabled && when (kind) {
+        ChatNotifier.Kind.DONE -> notifyPrefs.notifyTurnDone
+        ChatNotifier.Kind.ERROR -> notifyPrefs.notifyError
+        ChatNotifier.Kind.APPROVAL -> notifyPrefs.notifyApproval
+        ChatNotifier.Kind.QUESTION -> notifyPrefs.notifyQuestion
+    }
+
+    private fun pushNotification(kind: ChatNotifier.Kind, title: String, text: String) {
+        val context = notifyContext ?: return
+        if (!canNotify(kind)) return
+        ChatNotifier.notify(context, botId, kind, title, text)
+    }
+
+    private fun notificationPreview(text: String): String {
+        val clean = text.replace('\n', ' ').trim()
+        return if (clean.length <= 120) clean else clean.take(120) + "…"
+    }
+
     private fun recomputeApprovals() {
         val merged = mergeChatApprovals(
             botEntries = botApprovals,
@@ -847,6 +892,7 @@ class BotChatViewModel(
         if ((text.isEmpty() && attachments.isEmpty()) || _uiState.value.sending) return
         val requestId = UUID.randomUUID().toString()
         optimisticRun = true
+        userStoppedRun = false
         val bubble = ChatEntry(
             id = "user:$requestId",
             kind = ChatEntryKind.USER,
@@ -1539,6 +1585,7 @@ class BotChatViewModel(
         val connection = client ?: return
         optimisticRun = false
         // 本地先认「已经停下」：引擎的会话状态事件随后会确认，不让停止键闪回来。
+        userStoppedRun = true
         sessionId?.let { sessionRunningById[it] = false }
         clearStreaming()
         runningWatchJob?.cancel()
@@ -1605,7 +1652,34 @@ class BotChatViewModel(
             // 一轮结束却一个字都没产出：多半是模型调用失败（DS Bot 只写诊断不写 chat），
             // 查一次诊断，找到就把失败贴成一行，别让「失败」和「正常做完」长得一样。
             val produced = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT } > botEntriesAtStart
-            if (!produced) reportTurnFailure(connection, watchStartedAt)
+            val context = notifyContext
+            if (produced) {
+                if (context != null) {
+                    val last = _uiState.value.entries.lastOrNull { it.kind == ChatEntryKind.BOT }?.text.orEmpty()
+                    pushNotification(
+                        if (userStoppedRun) ChatNotifier.Kind.ERROR else ChatNotifier.Kind.DONE,
+                        context.getString(
+                            if (userStoppedRun) R.string.notify_error_title else R.string.notify_done_title,
+                            botName,
+                        ),
+                        if (userStoppedRun) {
+                            context.getString(R.string.notify_stopped_body)
+                        } else {
+                            notificationPreview(last.ifBlank { context.getString(R.string.notify_done_body) })
+                        },
+                    )
+                }
+            } else {
+                val failure = reportTurnFailure(connection, watchStartedAt)
+                if (failure != null && context != null) {
+                    pushNotification(
+                        ChatNotifier.Kind.ERROR,
+                        context.getString(R.string.notify_error_title, botName),
+                        notificationPreview(failure),
+                    )
+                }
+            }
+            userStoppedRun = false
         }
     }
 
@@ -1697,9 +1771,9 @@ class BotChatViewModel(
      * DS Bot 的 `turns.js noteTurnFailure` 只把模型调用失败写进 diagnostics（不写 chat 行），
      * 所以界面上「失败」跟「正常做完」长得一样。这里补一条错误事件行。
      */
-    private suspend fun reportTurnFailure(connection: DshRemoteApi, sinceMs: Long) {
-        val report = runCatching { connection.bot("diagnostics") }.getOrNull() ?: return
-        val entries = report.optJSONArray("entries") ?: return
+    private suspend fun reportTurnFailure(connection: DshRemoteApi, sinceMs: Long): String? {
+        val report = runCatching { connection.bot("diagnostics") }.getOrNull() ?: return null
+        val entries = report.optJSONArray("entries") ?: return null
         val mine = sessionId?.takeIf { it.isNotEmpty() } ?: botId
         for (index in 0 until entries.length()) {
             val entry = entries.optJSONObject(index) ?: continue
@@ -1710,13 +1784,14 @@ class BotChatViewModel(
             if (time in 1 until sinceMs) continue
             val code = entry.optString("code").takeIf { it.isNotEmpty() }
             val id = "turnfail:$time"
-            if (!seen.add(id)) return
+            if (!seen.add(id)) return null
+            val label = "$botName 没能回答：${failureLabel(code, entry.optString("text"))}"
             _uiState.update { state ->
                 state.copy(
                     entries = state.entries + ChatEntry(
                         id = id,
                         kind = ChatEntryKind.EVENT,
-                        text = "$botName 没能回答：${failureLabel(code, entry.optString("text"))}",
+                        text = label,
                         author = botName,
                         botId = botId,
                         eventKind = "failed",
@@ -1725,8 +1800,9 @@ class BotChatViewModel(
                     ),
                 )
             }
-            return
+            return label
         }
+        return null
     }
 
     private fun parseItem(item: JSONObject, scope: String, fallbackId: String): ChatEntry? {
