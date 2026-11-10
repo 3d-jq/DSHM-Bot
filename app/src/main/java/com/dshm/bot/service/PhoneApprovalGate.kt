@@ -29,6 +29,8 @@ object PhoneApprovalGate {
     private const val CHANNEL = "phone_control_approval"
     private val pending = ConcurrentHashMap<String, Pending>()
     private val counter = AtomicInteger(7000)
+    @Volatile
+    private var latest: String? = null
 
     /**
      * @return true 允许，false 拒绝/超时，null 没有通知权限或通知发不出去。
@@ -50,6 +52,7 @@ object PhoneApprovalGate {
         val notificationId = counter.get()
         val result = CompletableDeferred<Boolean>()
         pending[id] = Pending(notificationId, result)
+        latest = id
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannel(context, manager)
         val allow = action(context, id, notificationId, true, allowLabel, notificationId + 1)
@@ -75,12 +78,27 @@ object PhoneApprovalGate {
             null
         } finally {
             pending.remove(id)
+            if (latest == id) latest = null
             manager.cancel(notificationId)
         }
     }
 
     fun complete(id: String, allowed: Boolean) {
         pending[id]?.result?.complete(allowed)
+    }
+
+    /** 浮条上直接点了「允许」。 */
+    fun allowLatest(): Boolean {
+        val id = latest ?: return false
+        complete(id, true)
+        return true
+    }
+
+    /** 浮条上直接点了「拒绝」。 */
+    fun denyLatest(): Boolean {
+        val id = latest ?: return false
+        complete(id, false)
+        return true
     }
 
     private fun action(

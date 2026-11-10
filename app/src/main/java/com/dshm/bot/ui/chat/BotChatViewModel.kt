@@ -35,6 +35,8 @@ import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
 import com.dshm.bot.domain.model.DshGoPreferences
+import com.dshm.bot.service.PhoneControlSession
+import com.dshm.bot.service.PhoneOverlay
 import com.dshm.bot.ui.home.RoomMemberUi
 import com.dshm.bot.ui.home.TeamRoomUi
 import kotlinx.coroutines.Job
@@ -1665,6 +1667,11 @@ class BotChatViewModel(
             }
             optimisticRun = false
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
+            // 手机操控这一轮真正结束：照 DeepSearch 的 finally 闭环，
+            // 收起浮层并把 DSHM Bot 拉回前台。只由调用手机工具的 Bot 触发。
+            if (PhoneControlSession.consumeFor(botId)) {
+                PhoneOverlay.finishAndReturn(notifyContext)
+            }
             // 群成员跑在自己会话里，产物（`present`）也就落在那边：这一轮结束后
             // 去插件收一次，没人 `present` 时就退回「本轮被改动的文件」。
             if (isGroup) {

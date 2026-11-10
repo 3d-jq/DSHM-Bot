@@ -45,17 +45,22 @@ object PhoneControlBridge {
     )
 
     private var sequence = 0
+    private var step = 0
     @Volatile
     private var captured: Captured? = null
     private val taskApprovedUntil = mutableMapOf<String, Long>()
+    private const val TAP_SETTLE_MS = 700L
+    private const val SWIPE_SETTLE_MS = 850L
+    private const val OPEN_SETTLE_MS = 1_200L
 
     suspend fun handle(context: Context, request: JSONObject): JSONObject {
         val service = DshmAccessibilityService.current
             ?: return failure("无障碍服务没有连上。请到系统设置 → 无障碍里打开 DSHM Bot。")
         PhoneControlSession.blockedReason()?.let { return failure(it) }
-        PhoneOverlay.show(service, "DSH 正在操作手机")
+        val kind = request.optString("kind")
+        PhoneControlSession.engage(request.optString("botId").takeIf { it.isNotBlank() })
+        PhoneOverlay.working(service, ++step, describe(kind))
         return try {
-            val kind = request.optString("kind")
             val denied = confirmIfNeeded(context, service, kind)
             if (denied != null) return denied
             when (kind) {
@@ -98,6 +103,7 @@ object PhoneControlBridge {
         ) {
             return null
         }
+        PhoneOverlay.approval(service, "要${describe(kind)}")
         val allowed = PhoneApprovalGate.request(
             context = context,
             title = context.getString(com.dshm.bot.R.string.phone_approval_title),
@@ -110,6 +116,7 @@ object PhoneControlBridge {
             return failure(context.getString(com.dshm.bot.R.string.phone_approval_unavailable))
         }
         if (!allowed) return failure(context.getString(com.dshm.bot.R.string.phone_approval_denied))
+        PhoneOverlay.working(service, step, "继续${describe(kind)}")
         if (mode == "TASK") {
             taskApprovedUntil[key] = System.currentTimeMillis() + 10 * 60 * 1000L
         }
@@ -132,6 +139,7 @@ object PhoneControlBridge {
         request: JSONObject,
     ): JSONObject {
         val reason = request.optString("reason").ifBlank { "请完成当前步骤。" }
+        PhoneOverlay.takeOver(service, reason)
         val allowed = PhoneApprovalGate.request(
             context = context,
             title = context.getString(com.dshm.bot.R.string.phone_handoff_title),
@@ -143,7 +151,8 @@ object PhoneControlBridge {
         if (allowed == null) return failure(context.getString(com.dshm.bot.R.string.phone_approval_unavailable))
         if (!allowed) return failure(context.getString(com.dshm.bot.R.string.phone_handoff_stopped))
         PhoneActionLog.record(context, "交给用户操作手机")
-        delay(150)
+        delay(400)
+        PhoneOverlay.working(service, step, "继续操作手机")
         return success(
             context.getString(com.dshm.bot.R.string.phone_handoff_done) + "\n\n" +
                 render(capture(service) ?: return failure("用户完成后，新的屏幕读不到。")),
@@ -159,6 +168,7 @@ object PhoneControlBridge {
     private suspend fun tap(service: DshmAccessibilityService, request: JSONObject): JSONObject {
         val element = resolve(request)
             ?: return failure("屏幕已经变化或编号不存在，请重新调用 phone_screen。")
+        if (isStale(element)) return stale(service)
         if (element.password || isSensitive(element.label)) {
             return failure("这是密码 / 验证码 / 支付相关控件，手机操控 Bot 不能代点。请使用 phone_handoff 让用户自己操作。")
         }
@@ -168,21 +178,41 @@ object PhoneControlBridge {
         } else {
             AccessibilityNodeInfo.ACTION_CLICK
         }
-        val accepted = performOnNode(element.node, action) ||
-            service.tap(
+        // 点按真正可点击的那一层；标签叶子节点有时只占按钮里的一小块，
+        // 直接点叶子中心在部分 ROM 上会落到按钮边缘外。
+        val point = actionPoint(element, long)
+        val x = point.first
+        val y = point.second
+        PhoneOverlay.dodge(service, x.toInt(), y.toInt())
+        val label = element.label.ifBlank { element.role }
+        PhoneStage.aim(x.toInt(), y.toInt(), if (long) "长按「$label」" else "点按「$label」")
+        if (long) PhoneStage.hold(550L)
+        delay(260)
+        PhoneOverlay.passThrough(service, true)
+        delay(100)
+        val accepted = try {
+            performOnNode(
+                element.node,
+                action,
+                long,
                 element.bounds.exactCenterX(),
                 element.bounds.exactCenterY(),
-                if (long) 550L else 60L,
-            )
+            ) ||
+                service.tap(x, y, if (long) 550L else 60L)
+        } finally {
+            PhoneStage.ripple(x.toInt(), y.toInt())
+            PhoneOverlay.passThrough(service, false)
+        }
         if (!accepted) return failure("系统没有接受这次点按：${element.label.ifBlank { element.role }}")
         PhoneActionLog.record(service, "点按「${element.label.ifBlank { element.role }}」")
-        delay(280)
+        delay(TAP_SETTLE_MS)
         return success(render(capture(service) ?: return failure("动作已执行，但新的屏幕读不到。")))
     }
 
     private suspend fun type(service: DshmAccessibilityService, request: JSONObject): JSONObject {
         val element = resolve(request)
             ?: return failure("屏幕已经变化或编号不存在，请重新调用 phone_screen。")
+        if (isStale(element)) return stale(service)
         val target = editableNode(element.node)
             ?: return failure("[${
                 element.index
@@ -192,6 +222,11 @@ object PhoneControlBridge {
         }
         val text = request.optString("text")
         if (text.length > 2_000) return failure("一次最多输入 2000 个字。")
+        PhoneStage.aim(
+            element.bounds.exactCenterX().toInt(),
+            element.bounds.exactCenterY().toInt(),
+            "输入文字",
+        )
         target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = android.os.Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
@@ -199,6 +234,10 @@ object PhoneControlBridge {
         if (!target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
             return failure("这个输入框不接受代填。请让用户自己输入，或先点一下输入框再试。")
         }
+        PhoneStage.ripple(
+            element.bounds.exactCenterX().toInt(),
+            element.bounds.exactCenterY().toInt(),
+        )
         PhoneActionLog.record(service, "在输入框输入了 ${text.length} 个字符")
         if (request.optBoolean("submit", false)) {
             val submitted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -214,7 +253,7 @@ object PhoneControlBridge {
                 )
             }
         }
-        delay(220)
+        delay(TAP_SETTLE_MS)
         return success(render(capture(service) ?: return failure("动作已执行，但新的屏幕读不到。")))
     }
 
@@ -243,29 +282,55 @@ object PhoneControlBridge {
             val cy = bounds.exactCenterY()
             val dx = bounds.width() * 0.25f
             val dy = bounds.height() * 0.20f
-            val swiped = when (direction) {
-                "up" -> service.swipe(cx, cy - dy, cx, cy + dy)
-                "left" -> service.swipe(cx - dx, cy, cx + dx, cy)
-                "right" -> service.swipe(cx + dx, cy, cx - dx, cy)
-                else -> service.swipe(cx, cy + dy, cx, cy - dy)
+            val (fromX, fromY, toX, toY) = when (direction) {
+                "up" -> listOf(cx, cy - dy, cx, cy + dy)
+                "left" -> listOf(cx - dx, cy, cx + dx, cy)
+                "right" -> listOf(cx + dx, cy, cx - dx, cy)
+                else -> listOf(cx, cy + dy, cx, cy - dy)
+            }
+            val label = when (direction) {
+                "up" -> "向上滚动"
+                "left" -> "向左滚动"
+                "right" -> "向右滚动"
+                else -> "向下滚动"
+            }
+            PhoneOverlay.dodge(service, fromX.toInt(), fromY.toInt())
+            PhoneStage.sweep(fromX.toInt(), fromY.toInt(), toX.toInt(), toY.toInt(), 60L, 300L, label)
+            delay(120)
+            PhoneOverlay.passThrough(service, true)
+            delay(100)
+            val swiped = try {
+                service.swipe(fromX, fromY, toX, toY)
+            } finally {
+                PhoneOverlay.passThrough(service, false)
             }
             if (!swiped) return failure("没有可滚动的区域，可能已经到头了。")
+        } else {
+            PhoneStage.say("滚动屏幕（$direction）")
         }
         PhoneActionLog.record(service, "滚动屏幕（$direction）")
-        delay(280)
+        delay(SWIPE_SETTLE_MS)
         return success(render(capture(service) ?: return failure("动作已执行，但新的屏幕读不到。")))
     }
 
     private suspend fun key(service: DshmAccessibilityService, request: JSONObject): JSONObject {
-        val accepted = when (request.optString("key")) {
+        val key = request.optString("key").ifBlank { "back" }
+        val label = when (key) {
+            "home" -> "回到桌面"
+            "recents" -> "打开最近任务"
+            "notifications" -> "下拉通知栏"
+            else -> "返回上一页"
+        }
+        PhoneStage.say(label)
+        val accepted = when (key) {
             "home" -> service.home()
             "recents" -> service.recents()
             "notifications" -> service.notifications()
             else -> service.back()
         }
         if (!accepted) return failure("系统没有执行这个按键。")
-        PhoneActionLog.record(service, "按了 ${request.optString("key").ifBlank { "back" }} 键")
-        delay(320)
+        PhoneActionLog.record(service, "按了 $key 键")
+        delay(SWIPE_SETTLE_MS)
         return success(render(capture(service) ?: return failure("动作已执行，但新的屏幕读不到。")))
     }
 
@@ -274,14 +339,26 @@ object PhoneControlBridge {
         if (current != null && current.id != request.optString("screen")) {
             return failure("屏幕已经变化，请重新调用 phone_screen。")
         }
-        val accepted = service.tap(
-            request.optDouble("x", -1.0).toFloat(),
-            request.optDouble("y", -1.0).toFloat(),
-            60L,
-        )
+        val x = request.optDouble("x", -1.0).toFloat()
+        val y = request.optDouble("y", -1.0).toFloat()
+        val label = current?.elements
+            ?.firstOrNull { it.bounds.contains(x.toInt(), y.toInt()) }
+            ?.let { it.label.ifBlank { it.role } }
+            ?: "按坐标点按"
+        PhoneOverlay.dodge(service, x.toInt(), y.toInt())
+        PhoneStage.aim(x.toInt(), y.toInt(), "点按「$label」")
+        delay(260)
+        PhoneOverlay.passThrough(service, true)
+        delay(100)
+        val accepted = try {
+            service.tap(x, y, 60L)
+        } finally {
+            PhoneStage.ripple(x.toInt(), y.toInt())
+            PhoneOverlay.passThrough(service, false)
+        }
         if (!accepted) return failure("系统没有接受这次坐标点按。")
         PhoneActionLog.record(service, "按坐标点按")
-        delay(280)
+        delay(TAP_SETTLE_MS)
         return success(render(capture(service) ?: return failure("动作已执行，但新的屏幕读不到。")))
     }
 
@@ -333,8 +410,9 @@ object PhoneControlBridge {
         }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }
             .onFailure { return failure("打开失败：${it.message ?: "系统拒绝了这个 Intent"}") }
+        PhoneStage.say(if (url.isNotEmpty()) "打开链接" else "打开「$app」")
         PhoneActionLog.record(context, if (url.isNotEmpty()) "打开了链接" else "打开了「$app」")
-        delay(700)
+        delay(OPEN_SETTLE_MS)
         return success(render(capture(service) ?: return failure("已发出打开请求，但新的屏幕读不到。")))
     }
 
@@ -460,14 +538,71 @@ object PhoneControlBridge {
         return current.elements.firstOrNull { it.index == request.optInt("id", -1) }
     }
 
-    private fun performOnNode(start: AccessibilityNodeInfo, action: Int): Boolean {
-        var node: AccessibilityNodeInfo? = start
-        repeat(8) {
-            val current = node ?: return false
-            if (current.isClickable && current.performAction(action)) return true
-            node = current.parent
+    /**
+     * dsh-Go 的 stale 检查：上一屏的编号还在列表里，但节点可能已经被列表滚动、
+     * 页面切换或弹窗替换。执行前刷新节点，位置明显变了就拒绝，并回传新屏幕。
+     */
+    private fun isStale(element: Element): Boolean {
+        if (!element.node.refresh() || !element.node.isVisibleToUser) return true
+        val now = Rect().also { element.node.getBoundsInScreen(it) }
+        if (now.isEmpty) return true
+        val dx = kotlin.math.abs(now.exactCenterX() - element.bounds.exactCenterX())
+        val dy = kotlin.math.abs(now.exactCenterY() - element.bounds.exactCenterY())
+        return dx > 12f || dy > 12f
+    }
+
+    private fun stale(service: DshmAccessibilityService): JSONObject {
+        val fresh = capture(service)
+        val tail = if (fresh != null) "\n\n" + render(fresh) else ""
+        return failure("屏幕已经变化或这个元素移动了，没有执行。请按新屏幕重新选。$tail")
+    }
+
+    private fun performOnNode(
+        start: AccessibilityNodeInfo,
+        action: Int,
+        long: Boolean,
+        centerX: Float,
+        centerY: Float,
+    ): Boolean {
+        fun able(node: AccessibilityNodeInfo) =
+            node.isEnabled && if (long) node.isLongClickable else node.isClickable
+        if (able(start) && start.performAction(action)) return true
+        // 文本节点在可点击行里：只有父级范围真的覆盖文本中心时才替它点。
+        var node: AccessibilityNodeInfo? = start.parent
+        val bounds = Rect()
+        var depth = 0
+        while (node != null && depth < 4) {
+            node.getBoundsInScreen(bounds)
+            if (able(node) && bounds.contains(centerX.toInt(), centerY.toInt())) {
+                if (node.performAction(action)) return true
+                break
+            }
+            node = node.parent
+            depth++
         }
         return false
+    }
+
+    private fun actionPoint(element: Element, long: Boolean): Pair<Float, Float> {
+        fun able(node: AccessibilityNodeInfo) =
+            node.isEnabled && if (long) node.isLongClickable else node.isClickable
+        if (able(element.node)) {
+            return element.bounds.exactCenterX() to element.bounds.exactCenterY()
+        }
+        val cx = element.bounds.exactCenterX()
+        val cy = element.bounds.exactCenterY()
+        var node: AccessibilityNodeInfo? = element.node.parent
+        val bounds = Rect()
+        var depth = 0
+        while (node != null && depth < 4) {
+            node.getBoundsInScreen(bounds)
+            if (able(node) && bounds.contains(cx.toInt(), cy.toInt())) {
+                return bounds.exactCenterX() to bounds.exactCenterY()
+            }
+            node = node.parent
+            depth++
+        }
+        return cx to cy
     }
 
     private fun editableNode(start: AccessibilityNodeInfo): AccessibilityNodeInfo? {
