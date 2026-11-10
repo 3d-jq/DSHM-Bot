@@ -326,6 +326,10 @@
     <string name="team_connectors_connect_title">Connect %1$s</string>
     <string name="team_connectors_disconnect">Disconnect</string>
     <string name="team_connectors_retry">Retry</string>
+    <string name="team_connectors_connecting">Connecting…</string>
+    <string name="team_connectors_error">Could not connect: %1$s</string>
+    <string name="team_connectors_about">Repositories, issues, pull requests and code search.</string>
+    <string name="team_connectors_create_token">Create a token on GitHub</string>
     <string name="team_connectors_token">Access token</string>
     <string name="team_connectors_token_hint">Paste a GitHub token with repo access. It is kept as a secret.</string>
     <string name="team_connectors_note">The token is saved as a secret; Bots only reach it through their tools.</string>

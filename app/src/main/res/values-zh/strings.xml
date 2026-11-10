@@ -326,6 +326,10 @@
     <string name="team_connectors_connect_title">连接 %1$s</string>
     <string name="team_connectors_disconnect">断开</string>
     <string name="team_connectors_retry">重试</string>
+    <string name="team_connectors_connecting">连接中…</string>
+    <string name="team_connectors_error">连接失败：%1$s</string>
+    <string name="team_connectors_about">仓库、Issue、PR 与代码搜索。</string>
+    <string name="team_connectors_create_token">去 GitHub 生成 token</string>
     <string name="team_connectors_token">Access token</string>
     <string name="team_connectors_token_hint">粘贴一个有 repo 权限的 GitHub token，会存成密钥。</string>
     <string name="team_connectors_note">token 会存成密钥，Bot 只能通过工具访问它。</string>

@@ -35,7 +35,8 @@ data class TeamConnector(
     val account: String?,
     val error: String?,
 ) {
-    val connected: Boolean get() = state == "connected" || account != null
+    val connected: Boolean get() = state == "ready" || state == "connected" || (state == "idle" && account != null)
+    val connecting: Boolean get() = state == "connecting"
 }
 
 data class TeamMember(val id: String, val name: String)
@@ -146,13 +147,22 @@ class TeamSettingsViewModel(private val endpoint: RuntimeEndpoint?) : ViewModel(
                     val item = array.optJSONObject(index) ?: continue
                     val id = item.optString("id")
                     if (id.isEmpty()) continue
+                    val stateName = item.optString("state").ifEmpty { "off" }
+                    val account = item.opt("account")
+                        ?.takeIf { it != JSONObject.NULL }
+                        ?.toString()
+                        ?.takeIf { it.isNotBlank() && it != "null" }
+                    val errorMessage = item.opt("error")
+                        ?.takeIf { it != JSONObject.NULL }
+                        ?.toString()
+                        ?.takeIf { it.isNotBlank() && it != "null" }
                     add(
                         TeamConnector(
                             id = id,
                             name = item.optString("name").ifEmpty { id },
-                            state = item.optString("state").ifEmpty { "idle" },
-                            account = item.optString("account").takeIf { it.isNotEmpty() },
-                            error = item.optString("error").takeIf { it.isNotEmpty() },
+                            state = stateName,
+                            account = account,
+                            error = errorMessage,
                         ),
                     )
                 }
@@ -418,13 +428,45 @@ class TeamSettingsViewModel(private val endpoint: RuntimeEndpoint?) : ViewModel(
     ) {
         viewModelScope.launch {
             _ui.update { it.copy(busy = true) }
-            val error = runCatching { connection.bot(endpoint, body) }
-                .exceptionOrNull()
-                ?.message
-            _ui.update { it.copy(busy = false) }
-            if (error == null) load()
+            val result = runCatching { connection.botValue(endpoint, body) }
+            val error = result.exceptionOrNull()?.message
+            if (error == null && endpoint.startsWith("connector-")) {
+                (result.getOrNull() as? JSONArray)?.let(::applyConnectors)
+            }
+            _ui.update { it.copy(busy = false, error = error) }
+            if (error == null && !endpoint.startsWith("connector-")) load()
             onDone(error)
         }
+    }
+
+    /** `connector-connect/disconnect/retry` 直接返回 connectorsView 数组。 */
+    private fun applyConnectors(array: JSONArray) {
+        val connectors = buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val id = item.optString("id")
+                if (id.isEmpty()) continue
+                val stateName = item.optString("state").ifEmpty { "off" }
+                val account = item.opt("account")
+                    ?.takeIf { it != JSONObject.NULL }
+                    ?.toString()
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+                val errorMessage = item.opt("error")
+                    ?.takeIf { it != JSONObject.NULL }
+                    ?.toString()
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+                add(
+                    TeamConnector(
+                        id = id,
+                        name = item.optString("name").ifEmpty { id },
+                        state = stateName,
+                        account = account,
+                        error = errorMessage,
+                    ),
+                )
+            }
+        }
+        _ui.update { it.copy(connectors = connectors) }
     }
 
     /** `null` = 所有 Bot；空列表也是「所有」之外的空集合，按 DS Bot 的约定发 `all`。 */

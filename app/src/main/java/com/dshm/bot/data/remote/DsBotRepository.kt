@@ -55,10 +55,24 @@ class DsBotRepository(
     }
 
     suspend fun fetch(): List<BotSummary> {
-        val state = client.bot("state")
-        cache?.save(state)
-        val bots = DsBotParser.parseState(state)
-        return withPreviews(bots)
+        return coroutineScope {
+            // 预览要问 `chat`，那是另一跳往返：用上一次的 Bot 名单先把预览请求发出去，
+            // 和 `state` 并行跑，首屏就不用等「先 usage 再 chat」两跳。
+            val cachedIds = cache?.load().orEmpty()
+                .filter { !it.isGroup }
+                .map { it.id }
+            val stateDeferred = async { client.bot("state") }
+            val previewDeferred = if (cachedIds.isEmpty()) {
+                null
+            } else {
+                async { fillPreviews(cachedIds) }
+            }
+            val state = stateDeferred.await()
+            cache?.save(state)
+            val bots = DsBotParser.parseState(state)
+            previewDeferred?.await()
+            withPreviews(bots)
+        }
     }
 
     /**
@@ -71,23 +85,8 @@ class DsBotRepository(
      */
     private suspend fun withPreviews(bots: List<BotSummary>): List<BotSummary> =
         coroutineScope {
-            // 用 `usage` 知道哪些 Bot 聊过 —— 只问这些，
-            // 不用对每个 Bot 都发一次 `chat`（Bot 多的时候差别很大）。
-            val active = runCatching {
-                BotPreview.activeBotIds(client.bot("usage"))
-            }.getOrDefault(emptySet())
-            val missing = bots.filter {
-                !it.isGroup && previews[it.id].isNullOrBlank() && (active.isEmpty() || it.id in active)
-            }
-            // 并行补齐冷启动的预览 —— 串行的话 Bot 一多主页就要等很久。
-            missing.map { bot ->
-                async {
-                    val preview = runCatching {
-                        BotPreview.fromChatPage(client.bot("chat", JSONObject().put("botId", bot.id)))
-                    }.getOrNull()
-                    if (!preview.isNullOrBlank()) previews[bot.id] = BotPreview.oneLine(preview)
-                }
-            }.awaitAll()
+            val missing = bots.filter { !it.isGroup && previews[it.id].isNullOrBlank() }
+            fillPreviews(missing.map { it.id })
             previewCache?.save(previews)
             bots.map { bot ->
                 if (bot.isGroup) return@map bot
@@ -100,6 +99,20 @@ class DsBotRepository(
                 }
             }
         }
+
+    /** 并行问 `chat` 补预览；已经有缓存的直接跳过。 */
+    private suspend fun fillPreviews(botIds: List<String>) = coroutineScope {
+        val missing = botIds.filter { previews[it].isNullOrBlank() }
+        if (missing.isEmpty()) return@coroutineScope
+        missing.map { id ->
+                async {
+                    val preview = runCatching {
+                        BotPreview.fromChatPage(client.bot("chat", JSONObject().put("botId", id)))
+                    }.getOrNull()
+                    if (!preview.isNullOrBlank()) previews[id] = BotPreview.oneLine(preview)
+                }
+            }.awaitAll()
+    }
 
     suspend fun hello(offeredApi: List<Int>? = null): DsBotHello {
         val payload = JSONObject()

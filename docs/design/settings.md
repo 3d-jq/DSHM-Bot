@@ -199,3 +199,31 @@ ui/settings/*Screen
 - 内容区只消费 `innerPadding`，**禁止**再加 `statusBarsPadding()`；也不要让 header 跟内容一起滚动。
 - 否则会出现顶栏被状态栏压住（重叠）或整体下移（双重 inset）。
 - 新页面一律使用 `SettingsPageScaffold`（`ui/settings/SettingsPageScaffold.kt`），不要手写 Scaffold + 顶栏。
+
+## 底部栏写法（必读，2026-11-10 定）
+
+设置/详情里的底部弹层一律走 `ui/settings/SettingsSheets.kt` 的 `SettingsSheet`，
+不要各页面自己写 `ModalBottomSheet`。规矩如下（都来自这次踩坑）：
+
+- **没有半屏锚点**：`rememberModalBottomSheetState(skipPartiallyExpanded = true)`。
+  默认的 `false` 会多出「半屏 ↔ 全屏」两态，一往上拖 sheet 变高、内容跟着变高，
+  看起来像「面板能一直往上拉」。对话名字胶囊面板（`BotSettingsSheet` / `RoomSettingsSheet`）
+  一直是这样写的，照抄它。
+- **定高用绝对高度**：要固定占屏高就写 `Modifier.height(屏幕高 × 比例)`
+  （名字胶囊 86%、密钥面板 50%）。**不要**用 `fillMaxHeight(比例)` —— 那个比例是相对
+  sheet 自身高度，sheet 一撑它跟着撑。
+- **内容自适应**：不指定高度时面板高度由内容决定（连接器、名字胶囊那些面板都是这样）。
+  内容超出就在内部滚动。
+- **底部操作区**：`SettingsSheet(bottomBar = { … })` 把「取消 / 确定」固定在面板底部，
+  内容区自己滚动；两者之间留 `spacing.md`（16dp），不要贴着。
+- **底部按钮**：等宽等高 —— 每个按钮 `weight(1f)` + `heightIn(min = spacing.iconButton)`，
+  圆角统一 `radius.md`；主按钮用 `SettingsPrimaryButton`，次按钮用 `TextButton` 但要显式
+  给同样的高度和圆角，否则大小不一、也不居中对称。
+- **输入框**：用 `SettingsInput`（圆角 `radius.md` + 细描边 + 铺满宽度），不要用 M3 的
+  `OutlinedTextField` —— 后者描边直角、右侧留白，和本项目其它输入框不一致。
+- **选择器**：用无搜索 Combobox（`ExposedDropdownMenuBox` + `OutlinedTextField(readOnly)`，
+  圆角 `radius.md`，菜单 `radius.lg` + `colors.surface` + 细描边），
+  和 `BotModelComboBox` 同款；**不支持搜索输入**。
+
+反面例子（2026-11-10 修掉）：密钥面板原来用 `fillMaxHeight(0.5f)` + 系统 `AlertDialog`，
+结果既能往上无限拉、输入框还是直角、取消/确定大小不一。

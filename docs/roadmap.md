@@ -139,6 +139,10 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 
 ## 设置页按 dsh-Go 重做（2026-11-05，☑️ 本轮）
 
+- ☑️ 底部栏写法已固化到 [design/settings.md](design/settings.md) 的「底部栏写法」一节
+  （`skipPartiallyExpanded = true` + 绝对高度 + `SettingsInput` + 无搜索 Combobox +
+  底部按钮等宽等高），后续新面板照抄，别再各写各的。
+
 - ☑️ 设置首页补六组分组标题，修正主题行文案误用；**不加搜索入口**
 - ☑️ 13 个子页按 `dsh-Go/docs/guide/zh/10-settings.md` 重排结构与行，保留全部已接 DSH RPC 的逻辑
 - ☑️ 未接入能力统一标注「当前版本不可用」，杜绝可点却无效的假开关

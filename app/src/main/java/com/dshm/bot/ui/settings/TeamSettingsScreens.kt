@@ -1,6 +1,8 @@
 package com.dshm.bot.ui.settings
 
+import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,8 +14,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,6 +34,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +48,9 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.ui.components.FloatingIconButton
 import org.json.JSONArray
+
+private const val GITHUB_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
+private val GitHubBrand = Color(0xFF181717)
 
 /**
  * 「密钥」页（对齐 DS Bot `SecretsPage`）：列出名字/用途/范围，能改用途与范围、能换值、能删。
@@ -53,6 +67,7 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<TeamSecret?>(null) }
     var deleting by remember { mutableStateOf<TeamSecret?>(null) }
+    var sheetError by remember { mutableStateOf<String?>(null) }
 
     SettingsPage(title = stringResource(R.string.team_secrets_title), onBack = onBack) {
         state.error?.let { message ->
@@ -86,7 +101,10 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
                 SettingsRowDivider()
                 SettingsRow(
                     title = stringResource(R.string.team_secrets_add),
-                    onClick = { adding = true },
+                    onClick = {
+                        sheetError = null
+                        adding = true
+                    },
                 )
             }
         }
@@ -105,10 +123,19 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
             existing = null,
             members = state.members,
             busy = state.busy,
-            onDismiss = { adding = false },
+            error = sheetError,
+            onDismiss = {
+                adding = false
+                sheetError = null
+            },
             onSave = { name, value, purpose, scope ->
                 viewModel.addSecret(name, value, purpose, scope) { error ->
-                    if (error == null) adding = false
+                    if (error == null) {
+                        adding = false
+                        sheetError = null
+                    } else {
+                        sheetError = error
+                    }
                 }
             },
         )
@@ -118,13 +145,26 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
             existing = secret,
             members = state.members,
             busy = state.busy,
-            onDismiss = { editing = null },
+            error = sheetError,
+            onDismiss = {
+                editing = null
+                sheetError = null
+            },
             onSave = { _, value, purpose, scope ->
                 viewModel.updateSecret(secret, purpose, scope, value) { error ->
-                    if (error == null) editing = null
+                    if (error == null) {
+                        editing = null
+                        sheetError = null
+                    } else {
+                        sheetError = error
+                    }
                 }
             },
-            onDelete = { deleting = secret; editing = null },
+            onDelete = {
+                deleting = secret
+                editing = null
+                sheetError = null
+            },
         )
     }
     deleting?.let { secret ->
@@ -160,6 +200,7 @@ fun ConnectorsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
     )
     val state by viewModel.ui.collectAsStateWithLifecycle()
     var connecting by remember { mutableStateOf<TeamConnector?>(null) }
+    var connectError by remember { mutableStateOf<String?>(null) }
 
     SettingsPage(title = stringResource(R.string.team_connectors_title), onBack = onBack) {
         state.error?.let { message ->
@@ -183,27 +224,36 @@ fun ConnectorsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
                     state.connectors.forEachIndexed { index, connector ->
                         if (index > 0) SettingsRowDivider()
                         SettingsRow(
+                            leading = { ConnectorBrandMark(connector) },
                             title = connector.name,
                             subtitle = when {
-                                connector.error != null -> connector.error
+                                connector.error != null -> stringResource(
+                                    R.string.team_connectors_error,
+                                    connector.error.orEmpty(),
+                                )
+                                connector.connecting -> stringResource(R.string.team_connectors_connecting)
                                 connector.connected -> connector.account?.let {
                                     stringResource(R.string.team_connectors_connected_as, it)
                                 } ?: stringResource(R.string.team_connectors_connected)
 
-                                else -> stringResource(R.string.team_connectors_not_connected)
+                                else -> stringResource(R.string.team_connectors_about)
                             },
                             value = when {
+                                connector.connecting -> stringResource(R.string.team_connectors_connecting)
                                 connector.connected -> stringResource(R.string.team_connectors_disconnect)
                                 connector.error != null -> stringResource(R.string.team_connectors_retry)
                                 else -> stringResource(R.string.team_connectors_connect)
                             },
                             valueColor = if (connector.error != null) Dshm.colors.danger else null,
-                            enabled = !state.busy,
+                            enabled = !connector.connecting && (!connector.connected || !state.busy),
                             onClick = {
                                 when {
                                     connector.connected -> viewModel.disconnect(connector)
                                     connector.error != null -> viewModel.retry(connector)
-                                    else -> connecting = connector
+                                    else -> {
+                                        connectError = null
+                                        connecting = connector
+                                    }
                                 }
                             },
                         )
@@ -225,10 +275,19 @@ fun ConnectorsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
         ConnectorTokenDialog(
             connector = connector,
             busy = state.busy,
-            onDismiss = { connecting = null },
+            error = connectError,
+            onDismiss = {
+                connecting = null
+                connectError = null
+            },
             onConnect = { token ->
                 viewModel.connect(connector, token) { error ->
-                    if (error == null) connecting = null
+                    if (error == null) {
+                        connecting = null
+                        connectError = null
+                    } else {
+                        connectError = error
+                    }
                 }
             },
         )
@@ -636,6 +695,7 @@ private fun SecretDialog(
     existing: TeamSecret?,
     members: List<TeamMember>,
     busy: Boolean,
+    error: String?,
     onDismiss: () -> Unit,
     onSave: (name: String, value: String, purpose: String, scope: List<String>?) -> Unit,
     onDelete: (() -> Unit)? = null,
@@ -644,171 +704,282 @@ private fun SecretDialog(
     var value by remember { mutableStateOf("") }
     var purpose by remember { mutableStateOf(existing?.purpose.orEmpty()) }
     val initialScope = remember { scopeIds(existing) }
-    var allBots by remember { mutableStateOf(initialScope == null) }
-    var picked by remember { mutableStateOf(initialScope.orEmpty()) }
+    // null = 所有 Bot；否则只有这一个 Bot 能用。
+    var pickedBotId by remember { mutableStateOf(initialScope?.firstOrNull()) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                stringResource(
-                    if (existing == null) R.string.team_secrets_add else R.string.team_secrets_edit,
-                ),
+    SettingsSheet(
+        title = stringResource(
+            if (existing == null) R.string.team_secrets_add else R.string.team_secrets_edit,
+        ),
+        onDismiss = onDismiss,
+        heightFraction = 0.5f,
+        bottomBar = {
+            SecretSheetActions(
+                busy = busy,
+                canSave = name.isNotBlank() && (existing != null || value.isNotBlank()),
+                onDelete = onDelete,
+                onDismiss = onDismiss,
+                onSave = {
+                    onSave(
+                        name.trim(),
+                        value,
+                        purpose,
+                        pickedBotId?.let { listOf(it) },
+                    )
+                },
             )
         },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
-                OutlinedTextField(
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
+                SettingsInput(
                     value = name,
-                    onValueChange = { name = it.uppercase() },
-                    singleLine = true,
-                    enabled = existing == null,
-                    label = { Text(stringResource(R.string.team_secrets_name)) },
+                    onValueChange = { if (existing == null) name = it.uppercase() },
+                    placeholder = stringResource(R.string.team_secrets_name),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                SettingsInput(
                     value = value,
                     onValueChange = { value = it },
-                    singleLine = true,
+                    placeholder = stringResource(
+                        if (existing == null) R.string.team_secrets_value else R.string.team_secrets_value_keep,
+                    ),
                     visualTransformation = PasswordVisualTransformation(),
-                    label = {
-                        Text(
-                            stringResource(
-                                if (existing == null) {
-                                    R.string.team_secrets_value
-                                } else {
-                                    R.string.team_secrets_value_keep
-                                },
-                            ),
-                        )
-                    },
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                SettingsInput(
                     value = purpose,
                     onValueChange = { purpose = it },
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.team_secrets_purpose)) },
+                    placeholder = stringResource(R.string.team_secrets_purpose),
+                    modifier = Modifier.fillMaxWidth(),
                 )
+                SecretScopeComboBox(
+                    members = members,
+                    selectedBotId = pickedBotId,
+                    onSelect = { pickedBotId = it },
+                )
+            if (error != null) {
                 Text(
-                    text = stringResource(R.string.team_secrets_who),
-                    style = Dshm.typography.settingsSectionTitle,
-                    color = Dshm.colors.textSecondary,
+                    text = error,
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.danger,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xs)) {
-                    ScopeChip(stringResource(R.string.team_secrets_scope_all), allBots) {
-                        allBots = true
-                    }
-                    ScopeChip(stringResource(R.string.team_secrets_scope_some), !allBots) {
-                        allBots = false
-                    }
-                }
-                if (!allBots) {
-                    members.forEach { member ->
-                        val on = member.id in picked
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(Dshm.radius.sm))
-                                .clickable {
-                                    picked = if (on) picked - member.id else picked + member.id
-                                }
-                                .padding(vertical = Dshm.spacing.xs, horizontal = Dshm.spacing.xs),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = member.name,
-                                style = Dshm.typography.rowPreview,
-                                color = if (on) Dshm.colors.accent else Dshm.colors.textPrimary,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = if (on) "✓" else "",
-                                style = Dshm.typography.rowPreview,
-                                color = Dshm.colors.accent,
-                            )
-                        }
-                    }
-                }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = !busy && name.isNotBlank() && (existing != null || value.isNotBlank()),
+        }
+    }
+}
+
+/**
+ * 密钥作用范围：和模型选择同款无搜索 Combobox。
+ * 选项就是「所有 Bot」+ 团队里的每一个 Bot —— 选中某个 Bot 即「只有它能用」。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SecretScopeComboBox(
+    members: List<TeamMember>,
+    selectedBotId: String?,
+    onSelect: (String?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = selectedBotId
+        ?.let { id -> members.firstOrNull { it.id == id }?.name }
+        ?: stringResource(R.string.team_secrets_scope_all)
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text(stringResource(R.string.team_secrets_who)) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            shape = RoundedCornerShape(Dshm.radius.md),
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(Dshm.radius.lg),
+            containerColor = Dshm.colors.surface,
+            border = BorderStroke(Dshm.spacing.hairline, Dshm.colors.divider),
+            shadowElevation = Dshm.spacing.cardElevation,
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.team_secrets_scope_all)) },
                 onClick = {
-                    onSave(name.trim(), value, purpose, if (allBots) null else picked)
+                    expanded = false
+                    onSelect(null)
                 },
+            )
+            members.forEach { member ->
+                DropdownMenuItem(
+                    text = { Text(member.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    onClick = {
+                        expanded = false
+                        onSelect(member.id)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** 底部动作：等高、等宽、圆角一致，固定在 50% 面板底部。 */
+@Composable
+private fun SecretSheetActions(
+    busy: Boolean,
+    canSave: Boolean,
+    onDelete: (() -> Unit)?,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = Dshm.spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onDelete != null) {
+            TextButton(
+                onClick = onDelete,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = Dshm.spacing.iconButton),
+                shape = RoundedCornerShape(Dshm.radius.md),
             ) {
-                Text(stringResource(android.R.string.ok))
+                Text(stringResource(R.string.team_secrets_delete), color = Dshm.colors.danger)
             }
-        },
-        dismissButton = {
-            Row {
-                if (onDelete != null) {
-                    TextButton(onClick = onDelete) {
-                        Text(stringResource(R.string.team_secrets_delete), color = Dshm.colors.danger)
-                    }
-                }
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            }
-        },
-    )
+        }
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = Dshm.spacing.iconButton),
+            shape = RoundedCornerShape(Dshm.radius.md),
+        ) {
+            Text(stringResource(android.R.string.cancel))
+        }
+        SettingsPrimaryButton(
+            text = stringResource(android.R.string.ok),
+            enabled = !busy && canSave,
+            onClick = onSave,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 @Composable
 private fun ConnectorTokenDialog(
     connector: TeamConnector,
     busy: Boolean,
+    error: String?,
     onDismiss: () -> Unit,
     onConnect: (String) -> Unit,
 ) {
     var token by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.team_connectors_connect_title, connector.name)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    label = { Text(stringResource(R.string.team_connectors_token)) },
-                )
+    val context = LocalContext.current
+    SettingsSheet(
+        title = stringResource(R.string.team_connectors_connect_title, connector.name),
+        onDismiss = onDismiss,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
+            ConnectorBrandMark(connector, size = Dshm.spacing.settingsAvatar)
+            Text(
+                text = stringResource(R.string.team_connectors_about),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textSecondary,
+            )
+            if (connector.id == "github") {
                 Text(
-                    text = stringResource(R.string.team_connectors_token_hint),
+                    text = stringResource(R.string.team_connectors_create_token),
                     style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.textSecondary,
+                    color = Dshm.colors.accent,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Dshm.radius.xs))
+                        .clickable {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, android.net.Uri.parse(GITHUB_TOKEN_URL)),
+                                )
+                            }
+                        }
+                        .padding(vertical = Dshm.spacing.xs),
                 )
             }
-        },
-        confirmButton = {
-            TextButton(enabled = !busy && token.isNotBlank(), onClick = { onConnect(token) }) {
-                Text(stringResource(R.string.team_connectors_connect))
+            SettingsInput(
+                value = token,
+                onValueChange = { token = it },
+                placeholder = stringResource(R.string.team_connectors_token),
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = stringResource(R.string.team_connectors_token_hint),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textSecondary,
+            )
+            if (error != null) {
+                Text(
+                    text = error,
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.danger,
+                )
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.cancel))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.team_connectors_connect),
+                    enabled = !busy && token.isNotBlank(),
+                    onClick = { onConnect(token) },
+                    modifier = Modifier.weight(1f),
+                )
             }
-        },
-    )
+        }
+    }
 }
 
+/** DeepSearch 同款 GitHub 品牌件；其他连接器暂用中性占位。 */
 @Composable
-private fun ScopeChip(label: String, picked: Boolean, onClick: () -> Unit) {
-    Text(
-        text = label,
-        style = Dshm.typography.rowPreview,
-        color = if (picked) Dshm.colors.accent else Dshm.colors.textSecondary,
+private fun ConnectorBrandMark(
+    connector: TeamConnector,
+    size: androidx.compose.ui.unit.Dp = Dshm.spacing.avatar,
+) {
+    val github = connector.id.equals("github", ignoreCase = true)
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(Dshm.radius.pill))
-            .background(if (picked) Dshm.colors.accent.copy(alpha = 0.12f) else Dshm.colors.surfaceMuted)
-            .clickable(onClick = onClick)
-            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.xs),
-    )
+            .size(size)
+            .clip(RoundedCornerShape(Dshm.radius.sm))
+            .background(if (github) GitHubBrand else Dshm.colors.surfaceMuted),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (github) {
+            Icon(
+                painter = painterResource(R.drawable.ic_connector_github),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(size * 0.58f),
+            )
+        } else {
+            Text(
+                text = connector.name.take(1).uppercase(),
+                style = Dshm.typography.rowTitle,
+                color = Dshm.colors.textSecondary,
+            )
+        }
+    }
 }
 
 /** 副标题：用途 · 谁能用。 */
