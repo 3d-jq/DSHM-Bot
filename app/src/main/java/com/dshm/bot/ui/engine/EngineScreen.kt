@@ -3,6 +3,14 @@ package com.dshm.bot.ui.engine
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,11 +27,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -38,21 +45,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.data.runtime.shortRuntimeVersion
 import com.dshm.bot.ui.components.FloatingIconButton
-import com.dshm.bot.ui.settings.SettingsDangerButton
 import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsSection
 import com.dshm.bot.ui.settings.SettingsRow
@@ -119,7 +130,7 @@ fun EngineScreen(
         },
     ) {
         item {
-            EngineHeroCard(
+            EngineHero(
                 state = state,
                 version = version,
                 nodeVersion = nodeVersion,
@@ -197,15 +208,7 @@ fun EngineScreen(
                 SettingsRow(
                     title = stringResource(R.string.engine_version),
                     icon = R.drawable.ic_lucide_box,
-                    value = shortRuntimeVersion(installedVersion)
-                        ?: stringResource(R.string.settings_value_not_set),
-                    trailing = {},
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.engine_bundled_version),
-                    icon = R.drawable.ic_lucide_package,
-                    value = shortRuntimeVersion(bundledVersion),
+                    value = shortRuntimeVersion(installedVersion ?: bundledVersion),
                     trailing = {},
                 )
                 SettingsRowDivider()
@@ -221,18 +224,21 @@ fun EngineScreen(
         if (!missing) {
             item {
                 SettingsSection {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Spacer(Modifier.height(Dshm.spacing.sm))
-                        SettingsDangerButton(
-                            text = stringResource(R.string.engine_reset),
-                            icon = R.drawable.ic_lucide_trash_2,
-                            onClick = { showResetDialog = true },
-                        )
-                        Spacer(Modifier.height(Dshm.spacing.sm))
-                    }
+                    SettingsRow(
+                        title = stringResource(R.string.engine_reset),
+                        subtitle = stringResource(R.string.engine_reset_hint),
+                        enabled = state !is RuntimeState.Starting && state !is RuntimeState.Installing,
+                        onClick = { showResetDialog = true },
+                        leading = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_lucide_trash_2),
+                                contentDescription = null,
+                                tint = Dshm.colors.danger,
+                                modifier = Modifier.size(Dshm.spacing.icon - Dshm.spacing.xxs),
+                            )
+                        },
+                        trailing = {},
+                    )
                 }
             }
         }
@@ -378,9 +384,9 @@ private fun ResetKeepOption(
     }
 }
 
-/** Hero 状态卡：状态环 + 名称 + 当前状态 + 两个版本统计。 */
+/** 引擎状态白卡：状态环 + 名称 + 当前状态，DSH / Node.js 两列左右对称。 */
 @Composable
-private fun EngineHeroCard(
+private fun EngineHero(
     state: RuntimeState,
     version: String,
     nodeVersion: String,
@@ -399,52 +405,115 @@ private fun EngineHeroCard(
         RuntimeState.NotInstalled -> stringResource(R.string.engine_value_not_installed)
     }
     SettingsSection {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                // 卡片内左右 16dp、上下 12dp（设计文档 §8.1）。
-                .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier.padding(
+                horizontal = Dshm.spacing.lg,
+                vertical = Dshm.spacing.md,
+            ),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(Dshm.spacing.settingsAvatar)
-                    .clip(CircleShape)
-                    .border(Dshm.spacing.ringStroke, tone, CircleShape),
-                contentAlignment = Alignment.Center,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_lucide_server),
-                    contentDescription = null,
-                    tint = tone,
-                    modifier = Modifier.size(Dshm.spacing.icon),
-                )
+                EngineStatusRing(state = state, tone = tone)
+                Spacer(Modifier.width(Dshm.spacing.lg))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.engine_local_title),
+                        style = Dshm.typography.pageTitle,
+                        color = Dshm.colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = detail,
+                        style = Dshm.typography.rowPreview,
+                        color = if (state is RuntimeState.Failed) Dshm.colors.danger else Dshm.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Spacer(Modifier.width(Dshm.spacing.md))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.engine_local_title),
-                    style = Dshm.typography.sheetTitle,
-                    color = Dshm.colors.textPrimary,
+            Spacer(Modifier.height(Dshm.spacing.xl))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.md),
+            ) {
+                EngineStat(value = "v$version", label = "DSH", modifier = Modifier.weight(1f))
+                EngineStat(value = "v$nodeVersion", label = "Node.js", modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** dsh-Go 的 EngineRing：运行时呼吸，启动/安装时转弧，停止时留一圈灰环。 */
+@Composable
+private fun EngineStatusRing(
+    state: RuntimeState,
+    tone: Color,
+    size: Dp = Dshm.spacing.settingsAvatar,
+) {
+    val busy = state is RuntimeState.Starting || state is RuntimeState.Installing
+    val running = state is RuntimeState.Running
+    val strokeWidth = Dshm.spacing.ringStroke
+    val transition = rememberInfiniteTransition(label = "engine-ring")
+    val spin by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_100, easing = LinearEasing),
+        ),
+        label = "engine-ring-spin",
+    )
+    val breath by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_200),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "engine-ring-breath",
+    )
+    Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.matchParentSize()) {
+            val stroke = strokeWidth.toPx()
+            drawArc(
+                color = tone.copy(alpha = 0.16f),
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            when {
+                busy -> drawArc(
+                    color = tone,
+                    startAngle = spin,
+                    sweepAngle = 72f,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
                 )
-                Text(
-                    text = detail,
-                    style = Dshm.typography.rowPreview,
-                    color = if (state is RuntimeState.Failed) Dshm.colors.danger else Dshm.colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                running -> drawArc(
+                    color = tone.copy(alpha = breath),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                else -> drawArc(
+                    color = tone,
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
                 )
             }
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = Dshm.spacing.lg, end = Dshm.spacing.lg, bottom = Dshm.spacing.md),
-            horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xxl),
-        ) {
-            EngineStat(value = "v$version", label = "DSH")
-            EngineStat(value = "v$nodeVersion", label = "Node.js")
-        }
+        Icon(
+            painter = painterResource(R.drawable.ic_lucide_server),
+            contentDescription = null,
+            tint = tone,
+            modifier = Modifier.size(Dshm.spacing.icon),
+        )
     }
 }
 
@@ -458,8 +527,11 @@ private fun engineTone(state: RuntimeState): Color = when (state) {
 }
 
 @Composable
-private fun EngineStat(value: String, label: String) {
-    Column {
+private fun EngineStat(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(text = value, style = Dshm.typography.rowTitle, color = Dshm.colors.textPrimary)
         Text(text = label, style = Dshm.typography.rowTime, color = Dshm.colors.textTertiary)
     }
@@ -539,8 +611,10 @@ private fun EngineCapsule(
         Dshm.colors.textPrimary.copy(alpha = 0.06f)
     }
     val ink = if (primary && enabled) Dshm.colors.onAccent else Dshm.colors.textPrimary
+    val opacity = if (enabled || busy) 1f else 0.42f
     Row(
         modifier = modifier
+            .alpha(opacity)
             .heightIn(min = Dshm.spacing.iconButton)
             .clip(RoundedCornerShape(Dshm.radius.pill))
             .background(fill)
@@ -580,22 +654,42 @@ private fun EngineCapsule(
     }
 }
 
-/** 日志终端井：深色底、等宽字、最新一条在最下面。 */
+/** 日志终端：深色底、等宽字、去掉 ANSI 色码，最新一条在最下面。 */
 @Composable
 private fun EngineLogCard(logs: String) {
+    val context = LocalContext.current
     val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     var copied by remember { mutableStateOf(false) }
-    val lines = remember(logs) { logs.lines().filter { it.isNotBlank() } }
-    val logState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val lines = remember(logs) {
+        logs.replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .lineSequence()
+            .map(::stripAnsi)
+            .filter { it.isNotBlank() }
+            .toList()
+    }
+    val logState = rememberLazyListState()
     LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) logState.scrollToItem(lines.lastIndex)
+        if (lines.isNotEmpty() && logState.firstVisibleItemIndex <= 1) {
+            logState.scrollToItem(0)
+        }
+    }
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1_500)
+            copied = false
+        }
     }
     // 高度跟着屏幕走：约 42%，但不低于 260、不高于 520（对齐 dsh-Go 的 logHeight）。
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val wellHeight = (screenHeight * LOG_HEIGHT_FRACTION)
         .coerceIn(Dshm.spacing.logWellMin, Dshm.spacing.logWellMax)
-    // 圆角和其它设置卡一致（设计文档 §4：设置页分组卡一律 settingsCard）。
     val shape = RoundedCornerShape(Dshm.radius.settingsCard)
+    val mono = Dshm.typography.rowPreview.copy(
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -605,9 +699,8 @@ private fun EngineLogCard(logs: String) {
         Row(
             modifier = Modifier.padding(
                 start = Dshm.spacing.lg,
-                end = Dshm.spacing.md,
-                top = Dshm.spacing.sm,
-                bottom = Dshm.spacing.xs,
+                end = Dshm.spacing.xs,
+                top = Dshm.spacing.xxs,
             ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -620,61 +713,117 @@ private fun EngineLogCard(logs: String) {
             Text(
                 text = stringResource(R.string.engine_lines, lines.size),
                 style = Dshm.typography.rowTime,
-                color = Dshm.colors.textTertiary,
+                color = Dshm.colors.terminalText.copy(alpha = 0.45f),
             )
+            if (copied) {
+                Spacer(Modifier.width(Dshm.spacing.xs))
+                Text(
+                    text = stringResource(R.string.engine_logs_copied),
+                    style = Dshm.typography.rowTime,
+                    color = Dshm.colors.accent,
+                )
+            }
             Spacer(Modifier.weight(1f))
-            Text(
-                text = if (copied) {
-                    stringResource(R.string.engine_logs_copied)
-                } else {
-                    stringResource(R.string.engine_logs_copy)
+            EngineLogAction(
+                icon = R.drawable.ic_lucide_copy,
+                label = stringResource(R.string.engine_logs_copy),
+                enabled = lines.isNotEmpty(),
+                onClick = {
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText("engine-log", lines.joinToString("\n")),
+                    )
+                    copied = true
                 },
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.accent,
-                modifier = Modifier
-                    .clickable {
-                        clipboard.setPrimaryClip(ClipData.newPlainText("engine-log", logs))
-                        copied = true
+            )
+            EngineLogAction(
+                icon = R.drawable.ic_lucide_share_2,
+                label = stringResource(R.string.engine_logs_share),
+                enabled = lines.isNotEmpty(),
+                onClick = {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, lines.joinToString("\n"))
                     }
-                    .padding(Dshm.spacing.xs),
+                    context.startActivity(
+                        Intent.createChooser(send, context.getString(R.string.engine_logs_share)),
+                    )
+                },
             )
         }
         LazyColumn(
             state = logState,
+            reverseLayout = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(wellHeight)
-                .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-            verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
+                .padding(
+                    start = Dshm.spacing.lg,
+                    end = Dshm.spacing.lg,
+                    top = Dshm.spacing.xxs,
+                    bottom = Dshm.spacing.md,
+                ),
         ) {
             if (lines.isEmpty()) {
                 item {
                     Text(
                         text = stringResource(R.string.engine_logs_empty),
-                        style = Dshm.typography.rowPreview.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = Dshm.typography.rowTime.fontSize,
-                            lineHeight = Dshm.typography.rowTime.lineHeight,
-                        ),
+                        style = mono,
                         color = Dshm.colors.textTertiary,
                     )
                 }
             } else {
-                items(lines.size) { index ->
+                items(lines.asReversed()) { line ->
                     SelectionContainer {
                         Text(
-                            text = lines[index],
-                            style = Dshm.typography.rowPreview.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = Dshm.typography.rowTime.fontSize,
-                                lineHeight = Dshm.typography.rowTime.lineHeight,
-                            ),
-                            color = Dshm.colors.terminalText,
+                            text = line,
+                            style = mono,
+                            color = logLineColor(line),
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun EngineLogAction(
+    icon: Int,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(Dshm.spacing.iconButton)
+            .clip(CircleShape)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = label,
+            tint = if (enabled) {
+                Dshm.colors.terminalText
+            } else {
+                Dshm.colors.terminalText.copy(alpha = 0.3f)
+            },
+            modifier = Modifier.size(Dshm.spacing.topBarIcon - Dshm.spacing.xxs),
+        )
+    }
+}
+
+private val ANSI_ESCAPE = Regex("""\u001B\[[0-9;?]*[ -/]*[@-~]""")
+
+private fun stripAnsi(line: String): String = line.replace(ANSI_ESCAPE, "")
+
+@Composable
+private fun logLineColor(line: String): Color {
+    val lower = line.lowercase()
+    return when {
+        line.startsWith("[dsh-app]") || line.startsWith("[dshm]") -> Dshm.colors.accent
+        "error" in lower || "fatal" in lower || "exception" in lower -> Dshm.colors.danger
+        else -> Dshm.colors.terminalText
     }
 }
 

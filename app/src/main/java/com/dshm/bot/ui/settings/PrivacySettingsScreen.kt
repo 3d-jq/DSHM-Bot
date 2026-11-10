@@ -1,16 +1,12 @@
 package com.dshm.bot.ui.settings
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
-import com.dshm.bot.core.design.Dshm
 
-// 隐私与分享：本机数据说明 + dsh-Go 未接入项标注 + 引擎的对话日志上传开关。
+// 隐私与分享：当前只接引擎真实支持的「向 DeepSeek 上传对话日志」。
 @Composable
 fun PrivacySettingsScreen(
     engineSettings: EngineSettingsViewModel,
@@ -24,49 +20,6 @@ fun PrivacySettingsScreen(
         title = stringResource(R.string.settings_privacy),
         onBack = onBack,
     ) {
-        item {
-            SettingsSection(title = stringResource(R.string.settings_privacy_local)) {
-                Text(
-                    text = stringResource(R.string.info_privacy),
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.textSecondary,
-                    modifier = Modifier.padding(Dshm.spacing.lg),
-                )
-            }
-        }
-
-        item {
-            SettingsSection {
-                SettingsRow(
-                    title = stringResource(R.string.settings_privacy_share_links),
-                    enabled = false,
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.settings_privacy_share_config),
-                    enabled = false,
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.settings_privacy_usage),
-                    enabled = false,
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.settings_privacy_upload_logs),
-                    enabled = false,
-                    subtitle = stringResource(R.string.settings_unavailable_hint),
-                    value = stringResource(R.string.settings_unavailable),
-                )
-            }
-        }
-
         if (logNamespace != null) {
             item {
                 EngineNamespaceSection(
@@ -75,6 +28,7 @@ fun PrivacySettingsScreen(
                     language = language,
                     title = stringResource(R.string.settings_privacy_log),
                     footer = stringResource(R.string.settings_privacy_log_hint),
+                    fieldPaths = listOf(listOf("enabled")),
                 )
             }
         } else {

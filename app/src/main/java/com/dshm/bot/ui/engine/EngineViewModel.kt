@@ -197,20 +197,11 @@ class EngineViewModel(
         connection = connection,
     )
 
-    /** 完整运行日志：stdout 的 engine.log + DSH 自己写下的全部日志文件，供日志卡展示/复制。 */
+    /** 运行日志：与 dsh-Go 一样只展示当前引擎进程的 stdout 流，避免多份文件拼接后顺序混乱。 */
     fun logText(): String = runCatching {
         val engineLog = File(appContext.filesDir, "engine.log")
             .takeIf { it.isFile }?.readText().orEmpty()
-        // DSH 的运行日志比 stdout 丰富；目录里可能有多份，按修改时间全部拼上。
-        val dshLogs = File(appContext.filesDir, "runtime/rootfs/root/.dsh/logs")
-            .listFiles()
-            ?.filter { it.isFile }
-            ?.sortedBy { it.lastModified() }
-            ?.joinToString("\n") { file ->
-                "===== ${file.name} =====\n" + file.readText()
-            }
-            .orEmpty()
-        TextMasking.maskSecrets((engineLog + "\n" + dshLogs).trim().takeLast(300_000))
+        TextMasking.maskSecrets(engineLog.trim().takeLast(300_000))
     }.getOrDefault("")
 
     override fun onCleared() {
