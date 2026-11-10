@@ -7,6 +7,8 @@
     <string name="plugins_market_index_none">No index configured</string>
     <string name="plugins_market_loading">Reading the plugin index…</string>
     <string name="plugins_market_empty">The plugin index has no plugins.</string>
+    <string name="plugins_market_search">Search plugins</string>
+    <string name="plugins_market_no_results">No matching plugins.</string>
     <string name="plugins_market_error_engine">The local engine is not running.</string>
     <string name="plugins_market_error_index">Could not read the plugin index: %1$s</string>
     <string name="plugins_market_error_action">Operation failed: %1$s</string>

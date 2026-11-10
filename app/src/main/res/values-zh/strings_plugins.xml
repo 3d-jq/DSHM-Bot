@@ -7,6 +7,8 @@
     <string name="plugins_market_index_none">没有配置索引</string>
     <string name="plugins_market_loading">正在读取插件索引…</string>
     <string name="plugins_market_empty">插件索引里没有插件。</string>
+    <string name="plugins_market_search">搜索插件</string>
+    <string name="plugins_market_no_results">没有匹配的插件。</string>
     <string name="plugins_market_error_engine">本机引擎未运行。</string>
     <string name="plugins_market_error_index">读取插件索引失败：%1$s</string>
     <string name="plugins_market_error_action">操作失败：%1$s</string>

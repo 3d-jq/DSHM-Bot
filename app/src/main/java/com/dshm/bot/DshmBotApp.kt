@@ -746,7 +746,7 @@ fun DshmBotApp(
                         viewModel = engineSettingsViewModel,
                         onBack = close,
                         onRestartEngine = engineViewModel::restart,
-
+                        marketViewModel = pluginMarketViewModel,
                     )
 
                     SettingsPageId.ENGINE_PARAMS -> EngineSettingsScreen(

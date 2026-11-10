@@ -234,7 +234,7 @@ fun PluginMarketPanel(
 
 /** 一次装 / 卸之后的一次性提示（文案走 stringResource）。 */
 @Composable
-private fun noticeText(notice: PluginMarketNotice): String = when (notice) {
+internal fun noticeText(notice: PluginMarketNotice): String = when (notice) {
     is PluginMarketNotice.Installed -> stringResource(R.string.plugins_market_installed_notice, notice.pluginName)
     is PluginMarketNotice.Removed -> stringResource(R.string.plugins_market_removed_notice, notice.pluginName)
     PluginMarketNotice.InstallCancelled -> stringResource(R.string.plugins_market_install_cancelled)
@@ -245,7 +245,7 @@ private fun noticeText(notice: PluginMarketNotice): String = when (notice) {
  * 市场里的一个插件：名字、描述、版本/作者、装没装、有没有风险标记，右侧是动作。
  */
 @Composable
-private fun PluginMarketRow(
+internal fun PluginMarketRow(
     plugin: MarketPlugin,
     language: String,
     installed: Boolean,
@@ -296,6 +296,130 @@ private fun PluginMarketRow(
             }
         },
     )
+}
+
+/**
+ * 市场读 / 装 / 卸过程中要弹的三个确认框。
+ *
+ * 列表本身由调用方的 `LazyListScope` 懒渲染（8021 个插件不能一次性全画），
+ * 这里只负责和状态层交互的弹窗。
+ */
+@Composable
+fun PluginMarketDialogs(
+    viewModel: PluginMarketViewModel,
+    uninstalling: MarketPlugin?,
+    onDismissUninstall: () -> Unit,
+) {
+    val state by viewModel.ui.collectAsStateWithLifecycle()
+    val language = settingsLanguage()
+
+    if (uninstalling != null) {
+        AlertDialog(
+            onDismissRequest = onDismissUninstall,
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(
+                        R.string.plugins_market_uninstall_confirm_title,
+                        uninstalling.displayTitle(language),
+                    ),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.plugins_market_uninstall_confirm_body),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = uninstalling
+                    onDismissUninstall()
+                    viewModel.uninstall(target.name)
+                }) {
+                    Text(stringResource(R.string.plugins_market_uninstall), color = Dshm.colors.danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissUninstall) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
+    }
+
+    val pendingInstall = state.pendingInstall
+    if (pendingInstall != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearNotice() },
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(R.string.plugins_market_build_approval_title),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(
+                        R.string.plugins_market_build_approval_body,
+                        pendingInstall.approvedBuilds.joinToString("、"),
+                    ),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.confirmInstall() }) {
+                    Text(stringResource(R.string.plugins_market_build_approval_action), color = Dshm.colors.accent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearNotice() }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
+    }
+
+    val pendingApproval = state.pendingApproval
+    if (pendingApproval != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearNotice() },
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(R.string.plugins_market_build_approval_title),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(
+                        R.string.plugins_market_build_approval_body,
+                        pendingApproval.pendingBuilds.joinToString("、"),
+                    ),
+                    style = Dshm.typography.rowPreview,
+                    color = Dshm.colors.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.approvePendingBuilds() }) {
+                    Text(stringResource(R.string.plugins_market_build_approval_action), color = Dshm.colors.accent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearNotice() }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
+    }
 }
 
 /**

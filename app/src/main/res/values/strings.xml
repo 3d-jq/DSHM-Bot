@@ -628,6 +628,10 @@
     <string name="plugins_read_only_badge">Read only</string>
     <string name="plugins_not_installed">Not installed</string>
     <string name="plugins_official_hint">Official plugins ship with DSH and can only be switched on or off.</string>
+    <string name="plugins_detail_title">Plugin details</string>
+    <string name="plugins_detail_enable">Enable plugin</string>
+    <string name="plugins_detail_source">Source</string>
+    <string name="plugins_detail_components">Components</string>
     <string name="settings_plugin_count">%1$d plugins</string>
     <string name="settings_plugins_read_only">This engine version only exposes the plugin list here.</string>
     <string name="settings_plugins_managed_hint">Plugin settings follow the engine inventory.</string>

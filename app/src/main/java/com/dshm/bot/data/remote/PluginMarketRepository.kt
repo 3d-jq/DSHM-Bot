@@ -93,15 +93,18 @@ class PluginMarketRepository(private val client: DshClient) {
 
     /**
      * 市场索引地址的候选：
-     * 1. `pluginManager/registries` 的 `resolved`（宿主最终生效的地址）；
-     * 2. `plugin-market` 设置里配的索引列表。
+     * 1. `plugin-market` 设置里配的第三方索引；
+     * 2. dshfind 全量索引（对齐 dsh-Go `dshfindIndexUrl`）；
+     * 3. 官方索引兜底。
      *
      * 挨个试，第一个能读成格式 1 的就是它。
+     *
+     * 注意：`pluginManager/registries` 是 **npm 包注册表**（pnpm 装包用），
+     * 不是插件市场索引，不能拿来当 `format: 1` 的 JSON 读。
      */
     suspend fun marketIndexCandidates(): List<String> {
-        val fromRegistries = runCatching { registries().resolved }.getOrNull()
         val fromSettings = runCatching { pluginMarketIndexes() }.getOrDefault(emptyList())
-        return MarketIndexParser.marketIndexCandidates(fromRegistries, fromSettings)
+        return (fromSettings + DEFAULT_MARKET_INDEXES).distinct()
     }
 
     /** `settings/describe` 里 `plugin-market` 命名空间的 `indexes`（索引地址列表）。 */
@@ -157,6 +160,14 @@ class PluginMarketRepository(private val client: DshClient) {
 
     companion object {
         const val PLUGIN_MARKET_NAMESPACE = "plugin-market"
+
+        /** dshfind 的全量索引（dsh-Go `dshfindIndexUrl`）。 */
+        const val DEFAULT_MARKET_INDEX = "https://api.dshfind.com/market/dsh-index.json"
+
+        /** 官方索引兜底（dsh-Go `officialIndexUrl`）。 */
+        const val OFFICIAL_MARKET_INDEX = "https://go.dshtui.com/market/index.json"
+
+        private val DEFAULT_MARKET_INDEXES = listOf(DEFAULT_MARKET_INDEX, OFFICIAL_MARKET_INDEX)
 
         /** 装一次要跑 pnpm + 激活，给 30 分钟。 */
         const val INSTALL_TIMEOUT_MS = 30 * 60 * 1000
