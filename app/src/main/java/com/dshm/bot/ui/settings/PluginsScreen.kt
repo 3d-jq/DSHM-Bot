@@ -616,7 +616,7 @@ private fun OfficialBadge() {
 }
 
 @Composable
-private fun PluginAvatar(
+internal fun PluginAvatar(
     name: String,
     title: String,
     icon: String? = null,

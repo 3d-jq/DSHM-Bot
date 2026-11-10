@@ -58,7 +58,8 @@ import com.dshm.bot.ui.engine.OnboardingScreen
 import com.dshm.bot.ui.home.HomeScreen
 import com.dshm.bot.ui.home.HomeViewModel
 import com.dshm.bot.ui.home.SearchScreen
-import com.dshm.bot.ui.settings.AboutScreen
+import com.dshm.bot.ui.settings.AppVersionScreen
+import com.dshm.bot.ui.settings.DshVersionScreen
 import com.dshm.bot.ui.settings.AgentPresetsScreen
 import com.dshm.bot.ui.settings.AppearanceScreen
 import com.dshm.bot.ui.settings.BackgroundSettingsScreen
@@ -811,15 +812,10 @@ fun DshmBotApp(
 
                     SettingsPageId.LICENSES -> LicensesScreen(onBack = close)
 
-                    SettingsPageId.ABOUT -> AboutScreen(
+                    SettingsPageId.APP_VERSION -> AppVersionScreen(onBack = close)
+
+                    SettingsPageId.DSH_VERSION -> DshVersionScreen(
                         dshVersion = engineViewModel.version,
-                        engineStatus = engineStatusText,
-                        onOpenLicenses = {
-                            navForward = true
-                            settingsStack = ArrayList(settingsStack).apply {
-                                add(SettingsPageId.LICENSES.name)
-                            }
-                        },
                         onBack = close,
                     )
 

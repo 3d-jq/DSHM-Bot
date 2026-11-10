@@ -641,6 +641,9 @@
     <string name="plugins_detail_enable">Enable plugin</string>
     <string name="plugins_detail_source">Source</string>
     <string name="plugins_detail_components">Components</string>
+    <string name="plugins_detail_condition">Enable condition</string>
+    <string name="plugins_detail_provided_by">Provided by preset</string>
+    <string name="plugins_detail_meta_error">Couldn’t read plugin info: %1$s</string>
     <string name="settings_plugin_count">%1$d plugins</string>
     <string name="settings_plugins_read_only">This engine version only exposes the plugin list here.</string>
     <string name="settings_plugins_managed_hint">Plugin settings follow the engine inventory.</string>
@@ -872,6 +875,9 @@
     <string name="settings_about_diagnostics">Diagnostics</string>
     <string name="settings_about_check_update">Check for updates</string>
     <string name="settings_about_auto_update">Check automatically</string>
+    <string name="settings_project_url">Project page</string>
+    <string name="settings_harness_url">DeepSeek Harness page</string>
+    <string name="info_open_source_thanks">Thanks to dsh-Go, DS-Bot, DeepSeek Harness, proot and other open-source projects. Tap a project name to open its source.</string>
     <string name="settings_model_test_connection">Test connection</string>
     <string name="settings_model_settings">Model settings</string>
     <string name="settings_model_credential_locked">This credential comes from the launch environment</string>

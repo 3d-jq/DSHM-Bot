@@ -523,6 +523,8 @@ data class PluginInventoryEntry(
     val enabled: Boolean,
     val fiberPhase: String?,
     val meta: PluginDisplayMeta?,
+    /** 预设行上的启用条件；全局条目通常为 null。 */
+    val condition: String? = null,
 ) {
     /** 设置 namespace 用的行 id（`include:subagent` → `subagent`）。 */
     val rowId: String get() = entryId.removePrefix("include:")

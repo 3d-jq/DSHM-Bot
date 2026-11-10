@@ -25,8 +25,9 @@ enum class SettingsPageId {
     NOTIFICATIONS,
     BACKGROUND,
     PRIVACY,
+    APP_VERSION,
+    DSH_VERSION,
     LICENSES,
-    ABOUT,
 }
 
 @Composable

@@ -721,6 +721,9 @@
     <string name="plugins_detail_enable">启用插件</string>
     <string name="plugins_detail_source">来源</string>
     <string name="plugins_detail_components">组件</string>
+    <string name="plugins_detail_condition">启用条件</string>
+    <string name="plugins_detail_provided_by">预设提供</string>
+    <string name="plugins_detail_meta_error">插件信息读取失败：%1$s</string>
     <string name="settings_plugin_count">%1$d 个插件</string>
     <string name="settings_plugins_read_only">当前引擎版本只在这里提供插件清单。</string>
     <string name="settings_plugins_managed_hint">插件设置跟随引擎清单。</string>
@@ -952,6 +955,9 @@
     <string name="settings_about_diagnostics">诊断</string>
     <string name="settings_about_check_update">检查更新</string>
     <string name="settings_about_auto_update">自动检查更新</string>
+    <string name="settings_project_url">项目地址</string>
+    <string name="settings_harness_url">DeepSeek Harness 地址</string>
+    <string name="info_open_source_thanks">感谢 dsh-Go、DS-Bot、DeepSeek Harness、proot 等开源项目：点击项目名称可打开对应源码地址。</string>
     <string name="settings_model_test_connection">测试连接</string>
     <string name="settings_model_settings">模型设置</string>
     <string name="settings_model_credential_locked">该凭据由启动环境提供，无法在这里修改</string>

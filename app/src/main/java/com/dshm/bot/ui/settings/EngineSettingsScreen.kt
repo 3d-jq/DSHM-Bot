@@ -93,7 +93,6 @@ fun EngineSettingsScreen(
                             )
                         }
                         if (agentLoop != null) {
-                            if (subagent != null) SettingsRowDivider()
                             SettingsRow(
                                 title = SettingsCopy.namespaceTitle("agent-loop", language),
                                 icon = R.drawable.ic_lucide_code,
@@ -102,7 +101,6 @@ fun EngineSettingsScreen(
                             )
                         }
                         if (shellNs != null) {
-                            if (subagent != null || agentLoop != null) SettingsRowDivider()
                             SettingsRow(
                                 title = SettingsCopy.namespaceTitle(shellNs, language),
                                 icon = R.drawable.ic_lucide_terminal,
@@ -123,38 +121,25 @@ fun EngineSettingsScreen(
                                 .firstOrNull { bundle -> bundle.name == ns }?.meta?.title?.resolve(language)
                             ?: SettingsCopy.namespaceTitle(ns, language)
                     }
-                    SettingsSection(
-                        title = stringResource(R.string.engine_settings_plugins),
-                        footer = if (state.plugins?.managementAvailable == false) {
-                            stringResource(R.string.settings_plugins_read_only)
-                        } else {
-                            stringResource(R.string.settings_plugins_managed_hint)
-                        },
-                    ) {
+                    SettingsSection(title = stringResource(R.string.engine_settings_plugins)) {
                         SettingsRow(
                             title = stringResource(R.string.settings_plugin_inventory),
                             icon = R.drawable.ic_lucide_puzzle,
                             onClick = { openInventory = true },
                         )
                         configs.forEach { ns ->
-                            SettingsRowDivider()
                             SettingsRow(
                                 title = titleOf(ns.ns),
                                 icon = R.drawable.ic_lucide_puzzle,
-                                subtitle = ns.schema.meta.description?.resolve(language),
+                                subtitle = if (!ns.writable) {
+                                    stringResource(R.string.settings_engine_read_only)
+                                } else {
+                                    null
+                                },
                                 onClick = { openNs = ns.ns },
                             )
                         }
                     }
-                }
-
-                item {
-                    SettingsHint(
-                        stringResource(
-                            R.string.settings_engine_revision,
-                            state.description?.namespaces?.size ?: 0,
-                        ),
-                    )
                 }
             }
         }

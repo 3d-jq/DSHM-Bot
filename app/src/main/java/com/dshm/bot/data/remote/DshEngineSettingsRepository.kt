@@ -67,6 +67,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
                         enabled = item.optBoolean("enabled", false),
                         fiberPhase = item.anyOrNull("fiberPhase") as? String,
                         meta = PluginDisplayMeta.fromJson(item.optJSONObject("meta")),
+                        condition = item.optString("condition").takeIf { it.isNotEmpty() },
                     ),
                 )
             }
@@ -92,6 +93,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
                                 enabled = row.optBoolean("enabled", false),
                                 fiberPhase = row.anyOrNull("fiberPhase") as? String,
                                 meta = PluginDisplayMeta.fromJson(row.optJSONObject("meta")),
+                                condition = row.optString("condition").takeIf { it.isNotEmpty() },
                             ),
                         )
                     }

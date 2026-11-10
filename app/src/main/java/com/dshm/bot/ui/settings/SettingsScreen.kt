@@ -353,14 +353,14 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_version),
                     icon = R.drawable.ic_lucide_info,
                     value = BuildConfig.VERSION_NAME,
-                    onClick = { onOpenPage(SettingsPageId.ABOUT) },
+                    onClick = { onOpenPage(SettingsPageId.APP_VERSION) },
                 )
                 SettingsRowDivider()
                 SettingsRow(
                     title = stringResource(R.string.settings_dsh_version),
                     icon = R.drawable.ic_lucide_bot,
                     value = dshVersion ?: stringResource(R.string.settings_value_not_linked),
-                    onClick = { onOpenPage(SettingsPageId.ABOUT) },
+                    onClick = { onOpenPage(SettingsPageId.DSH_VERSION) },
                 )
                 SettingsRowDivider()
                 SettingsRow(
