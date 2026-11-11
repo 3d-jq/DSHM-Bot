@@ -10,10 +10,6 @@
 > 当前工作重点是继续对齐 DS Bot 网页端细节并打磨稳定性，见 [docs/roadmap.md](docs/roadmap.md) 的「当前工作重点」。
 > 尚未完成的缺口与已知风险同样列在路线图和 [docs/architecture.md](docs/architecture.md)，文档一律以代码为准。
 
-<p align="center">
-  <img src="docs/images/main-screen.png" width="320" alt="主界面" />
-</p>
-
 ## 技术栈
 
 | 层 | 选型 |
