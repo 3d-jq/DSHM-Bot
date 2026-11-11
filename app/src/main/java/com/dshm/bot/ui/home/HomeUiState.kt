@@ -21,6 +21,8 @@ data class ChatRowUi(
     val roomAdmin: String? = null,
     /** 实时状态：`running` 干活中 / `waiting` 等你批准 / null 空闲（主页行的头像状态环）。 */
     val activity: String? = null,
+    /** 是不是主 Bot（长按菜单据此显示「设为主 Bot / 取消主 Bot」）。 */
+    val isMain: Boolean = false,
 )
 
 data class RoomMemberUi(

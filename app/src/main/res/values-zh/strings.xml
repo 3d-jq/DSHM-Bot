@@ -76,6 +76,8 @@
     <string name="bot_settings_main_hint">这是唯一的主 Bot，负责调度整个团队。</string>
     <string name="bot_settings_make_main">设为主 Bot</string>
     <string name="bot_settings_make_main_hint">把团队交给这个 Bot</string>
+    <string name="bot_settings_remove_main">取消主 Bot</string>
+    <string name="bot_settings_main_only_hint">唯一的主 Bot，不能取消。要换人，先去另一个 Bot 设置里把它设为主 Bot。</string>
     <string name="bot_settings_change">更换</string>
     <string name="bot_settings_privacy">隐私</string>
     <string name="bot_settings_private">隐私 Bot</string>

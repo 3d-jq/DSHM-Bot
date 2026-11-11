@@ -174,6 +174,13 @@ fun DshmBotApp(
             }
         }
     }
+    val homeSetMain: (com.dshm.bot.ui.home.ChatRowUi, Boolean) -> Unit = { row, main ->
+        homeViewModel.setMain(row.id, main) { error ->
+            if (error != null) {
+                android.widget.Toast.makeText(appContext, error, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val engineState by engineViewModel.state.collectAsStateWithLifecycle()
@@ -525,6 +532,7 @@ fun DshmBotApp(
                         onCreateGroup = { newGroupOpen = true },
                         onTogglePin = homeTogglePin,
                         onDelete = homeDelete,
+                        onSetMain = homeSetMain,
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -579,6 +587,7 @@ fun DshmBotApp(
                         onCreateGroup = { newGroupOpen = true },
                         onTogglePin = homeTogglePin,
                         onDelete = homeDelete,
+                        onSetMain = homeSetMain,
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -640,6 +649,7 @@ fun DshmBotApp(
                         onCreateGroup = { newGroupOpen = true },
                         onTogglePin = homeTogglePin,
                         onDelete = homeDelete,
+                        onSetMain = homeSetMain,
                         onOpenSearch = {
                             navForward = true
                             searchOpen = true
@@ -989,6 +999,7 @@ fun DshmBotApp(
                 onCreateGroup = { newGroupOpen = true },
                 onTogglePin = homeTogglePin,
                 onDelete = homeDelete,
+                        onSetMain = homeSetMain,
                 onOpenSearch = {
                     navForward = true
                     searchOpen = true

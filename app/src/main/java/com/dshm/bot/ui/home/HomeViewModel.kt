@@ -138,6 +138,26 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * 主界面长按面板：设为主 Bot / 取消主 Bot（`set-main`，DS Bot 同一套）。
+     *
+     * 团队至少要留一个主 Bot，服务端会拒绝把最后一个取消掉；
+     * 这里先不本地改状态，等 `state` 回来再刷新，避免界面和真相不一致。
+     */
+    fun setMain(id: String, main: Boolean, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            val error = runCatching {
+                connection.bot(
+                    "set-main",
+                    JSONObject().put("id", id).put("main", main),
+                )
+            }.exceptionOrNull()?.message
+            if (error == null) refreshNow()
+            onDone(error)
+        }
+    }
+
     /** 主界面长按面板：删除（Bot 走 `delete-bot`，群聊走 `delete-room`）。 */
     fun delete(id: String, isGroup: Boolean, onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
@@ -194,6 +214,7 @@ class HomeViewModel(
                     roomMembers = bot.roomMembers,
                     roomAdmin = bot.roomAdmin,
                     activity = bot.activity,
+                    isMain = bot.isMain,
                 )
             }
     }

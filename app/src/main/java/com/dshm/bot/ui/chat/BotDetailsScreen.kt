@@ -298,18 +298,26 @@ fun BotDetailsScreen(
 
         item {
             SettingsSection(title = stringResource(R.string.bot_settings_main)) {
-                if (state.isMain) {
-                    SettingsRow(
+                when {
+                    // 唯一的主 Bot 不能取消：先让另一个 Bot 也当主 Bot（DS Bot 同一规则）。
+                    state.isMain && state.mainBotIds.size <= 1 -> SettingsRow(
                         title = stringResource(R.string.bot_settings_main_badge),
-                        subtitle = stringResource(R.string.bot_settings_main_hint),
+                        subtitle = stringResource(R.string.bot_settings_main_only_hint),
                         enabled = false,
                     )
-                } else {
-                    SettingsRow(
+                    state.isMain -> SettingsRow(
+                        title = stringResource(R.string.bot_settings_main_badge),
+                        subtitle = stringResource(R.string.bot_settings_main_hint),
+                        value = stringResource(R.string.bot_settings_remove_main),
+                        valueColor = Dshm.colors.danger,
+                        enabled = !state.saving,
+                        onClick = { viewModel.setMain(main = false) },
+                    )
+                    else -> SettingsRow(
                         title = stringResource(R.string.bot_settings_make_main),
                         subtitle = stringResource(R.string.bot_settings_make_main_hint),
                         value = stringResource(R.string.bot_settings_change),
-                        onClick = { viewModel.setMain() },
+                        onClick = { viewModel.setMain(main = true) },
                     )
                 }
             }
@@ -336,14 +344,17 @@ fun BotDetailsScreen(
         }
 
         item {
-            SettingsSection(title = stringResource(R.string.bot_settings_danger)) {
-                SettingsRow(
-                    title = stringResource(R.string.bot_settings_delete),
-                    subtitle = stringResource(R.string.bot_settings_delete_hint),
-                    value = stringResource(R.string.bot_settings_delete),
-                    valueColor = Dshm.colors.danger,
-                    onClick = { confirmDelete = true },
-                )
+            // 主 Bot 删不了（服务端会拒绝）：和 DS Bot 一样，这一栏整个不出现。
+            if (!state.isMain) {
+                SettingsSection(title = stringResource(R.string.bot_settings_danger)) {
+                    SettingsRow(
+                        title = stringResource(R.string.bot_settings_delete),
+                        subtitle = stringResource(R.string.bot_settings_delete_hint),
+                        value = stringResource(R.string.bot_settings_delete),
+                        valueColor = Dshm.colors.danger,
+                        onClick = { confirmDelete = true },
+                    )
+                }
             }
         }
     }

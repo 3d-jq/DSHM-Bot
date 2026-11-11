@@ -64,6 +64,14 @@ object DsBotParser {
         val now = System.currentTimeMillis()
         val botLooks = teamMembers(state).associateBy { it.id }
         val live = liveStatusOf(state)
+        // DS Bot 可以有多主 Bot（`mainBotIds`），行上要知道自己是不是其中之一。
+        val mainIds = state.optJSONArray("mainBotIds")?.let { list ->
+            buildSet {
+                for (at in 0 until list.length()) {
+                    list.optString(at).takeIf { it.isNotEmpty() }?.let(::add)
+                }
+            }
+        }.orEmpty()
 
         state.optJSONArray("bots")?.let { array ->
             for (index in 0 until array.length()) {
@@ -85,6 +93,7 @@ object DsBotParser {
                         // 没有自定义形状的 Bot 由 id 决定默认角色（DS Bot 同一套规则）。
                         avatarShape = (avatar?.anyOrNull("shape") as? String)
                             ?: BotShapeDefaults.shapeFor(id),
+                        isMain = id in mainIds,
                         activity = live.bots[id],
                     ),
                 )

@@ -696,3 +696,18 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   （`DshmBotApp.kt` 新增 `bot-page:<id>:<page>` 这一层）。设置页里点「记忆 / 定时任务 /
   工作文件夹」和群公告都推整屏页，不再弹底部面板；**名称 / 角色仍然是底部面板**
   （单行输入不值得做成整页）。名字胶囊弹出的面板维持底部面板不变。
+
+### 主 Bot 全链路补齐（2026-11-11，第二十五轮）
+
+- ☑️ 数据链路：`state.mainBotIds` 解析到 `BotSummary.isMain` → `ChatRowUi.isMain`
+  （DS Bot 允许**同时多个**主 Bot，`mainBotIds` 是数组）。
+- ☑️ 主界面长按面板：普通 Bot 显示「设为主 Bot」；主 Bot 且团队里不止一个时显示
+  「取消主 Bot」；主 Bot 不再显示「删除」（服务端也会拒绝删主 Bot）。
+  新增 `HomeViewModel.setMain`（`set-main {id, main}`）与 `DshmBotApp.homeSetMain`，四个
+  `HomeScreen` 调用点全部接上。
+- ☑️ 设置页「主 Bot」一档改成三态：唯一主 Bot → 只读提示「要换人去另一个 Bot 设置里设它为主」
+  （对齐 DS Bot `onlyMain` 的「Change」）；多主 Bot 之一 → 可「取消主 Bot」；
+  普通 Bot → 「设为主 Bot」（设为主时排到第一位 `primary:true`）。
+  `BotDetailsViewModel.setMain` 支持 `main` 开关；主 Bot 的「删除」栏整段隐藏。
+- ⬜ 差异（有意保留）：DS Bot 用 Switch 行、行上还有「Main Bot」标签和头像主色环；
+  我们用行式按钮 + 文案提示，主界面行暂不加主 Bot 标记。

@@ -76,6 +76,8 @@
     <string name="bot_settings_main_hint">This is the only Main Bot. It runs the team.</string>
     <string name="bot_settings_make_main">Make Main Bot</string>
     <string name="bot_settings_make_main_hint">Hand the team over to this Bot</string>
+    <string name="bot_settings_remove_main">Remove Main Bot role</string>
+    <string name="bot_settings_main_only_hint">The only Main Bot. To hand the role over, make another Bot a Main Bot first.</string>
     <string name="bot_settings_change">Change</string>
     <string name="bot_settings_privacy">Privacy</string>
     <string name="bot_settings_private">Private Bot</string>

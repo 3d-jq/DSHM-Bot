@@ -67,6 +67,8 @@ fun HomeScreen(
     onTogglePin: (ChatRowUi) -> Unit = {},
     /** 长按面板：删除（上层再调 `delete-bot` / `delete-room`）。 */
     onDelete: (ChatRowUi) -> Unit = {},
+    /** 长按面板：设为主 Bot / 取消主 Bot（`set-main`）。 */
+    onSetMain: (ChatRowUi, Boolean) -> Unit = { _, _ -> },
     engineLabel: String? = null,
     /** 引擎正在启动（还没连上）：首屏先出骨架，别显示「还没有内容」。 */
     engineBooting: Boolean = false,
@@ -118,6 +120,11 @@ fun HomeScreen(
                 onDelete = {
                     rowMenu = null
                     pendingDelete = row
+                },
+                canRemoveMain = uiState.rows.count { it.isMain } > 1,
+                onSetMain = { main ->
+                    rowMenu = null
+                    onSetMain(row, main)
                 },
             )
         }
@@ -209,6 +216,9 @@ private fun RowActionSheet(
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
+    /** 团队里不止一个主 Bot 时才能取消。 */
+    canRemoveMain: Boolean = false,
+    onSetMain: (Boolean) -> Unit = {},
 ) {
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -236,12 +246,30 @@ private fun RowActionSheet(
                 label = stringResource(if (row.pinned) R.string.home_unpin else R.string.home_pin),
                 onClick = onTogglePin,
             )
-            MenuAction(
-                icon = R.drawable.ic_lucide_trash_2,
-                label = stringResource(R.string.home_delete),
-                danger = true,
-                onClick = onDelete,
-            )
+            // 主 Bot 的「设为主 / 取消主」：团队至少要留一个主 Bot（对齐 DS Bot 的行菜单）。
+            if (!row.isGroup) {
+                when {
+                    !row.isMain -> MenuAction(
+                        icon = R.drawable.ic_lucide_star,
+                        label = stringResource(R.string.bot_settings_make_main),
+                        onClick = { onSetMain(true) },
+                    )
+                    canRemoveMain -> MenuAction(
+                        icon = R.drawable.ic_lucide_star,
+                        label = stringResource(R.string.bot_settings_remove_main),
+                        onClick = { onSetMain(false) },
+                    )
+                }
+            }
+            // 主 Bot 不能直接删（服务端会拒绝），先取消主 Bot 角色。
+            if (row.isGroup || !row.isMain) {
+                MenuAction(
+                    icon = R.drawable.ic_lucide_trash_2,
+                    label = stringResource(R.string.home_delete),
+                    danger = true,
+                    onClick = onDelete,
+                )
+            }
         }
     }
 }

@@ -503,14 +503,18 @@ class BotDetailsViewModel(
         }
     }
 
-    fun setMain(onDone: (String?) -> Unit = {}) {
+    /** 设为主 Bot / 取消主 Bot（`set-main {id, main}`）。取消时服务端要求团队至少留一个主 Bot。 */
+    fun setMain(main: Boolean = true, onDone: (String?) -> Unit = {}) {
         val connection = client ?: return
         _ui.update { it.copy(saving = true) }
         viewModelScope.launch {
             runCatching {
                 connection.bot(
                     "set-main",
-                    JSONObject().put("id", botId).put("main", true).put("primary", true),
+                    JSONObject().put("id", botId).put("main", main).apply {
+                        // 设为主 Bot 时排到第一位（侧栏第一格），取消时不用带。
+                        if (main) put("primary", true)
+                    },
                 )
             }.onSuccess {
                 _ui.update { it.copy(saving = false) }
