@@ -4,9 +4,10 @@
 界面与产品定位按 Bot 来做（参考 [DS-Bot](https://github.com/Fei2411/DS-Bot)），底层接入 DSH
 （参考 [dsh-Go](https://github.com/ccch1mneyyy/dsh-Go) 的引擎与协议实现）。
 
-> **状态（2026-11-05 校订）**：M0 工程化已跑通，M1 / M2 主体也已落地 —— 本机 PRoot 引擎、
+> **状态（2026-11-11 校订）**：M0 工程化已跑通，M1 / M2 主体也已落地 —— 本机 PRoot 引擎、
 > DS Bot `/api/bot` + SSE 真实数据、聊天与流式输出、完整设置体系都已接通，**数据层不再是演示实现**。
-> 当前工作重点是修 dsh / dsh bot 设置相关的 bug，见 [docs/roadmap.md](docs/roadmap.md) 的「当前工作重点」。
+> 手机操控也已完成从读屏、点击、输入、交接、审批到「eta 风格结果卡 + 回到界面」的本机闭环。
+> 当前工作重点是继续对齐 DS Bot 网页端细节并打磨稳定性，见 [docs/roadmap.md](docs/roadmap.md) 的「当前工作重点」。
 > 尚未完成的缺口与已知风险同样列在路线图和 [docs/architecture.md](docs/architecture.md)，文档一律以代码为准。
 
 <p align="center">
@@ -36,7 +37,7 @@ app/                          Android 单模块
     data/remote/              DSH HTTP/SSE 客户端、DS Bot 解析、引擎设置、语音、账号、缓存
     data/settings/            SharedPreferences、API Key（加密存储）、个性化
     data/notify/              引擎就绪通知
-    service/                  无障碍手机操控
+    service/                  无障碍手机操控（eta 风格点击校验、鼠标指针、结果卡）
     ui/home/                  主界面、搜索、列表行、顶栏
     ui/chat/                  对话、输入器、Markdown、Bot 详情 / 浏览器、语音
     ui/engine/                开屏安装引导、引擎状态页
@@ -79,6 +80,18 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21.0.10'
   开启前先跑一次 `:app:lintDebug` 按报告逐条修净。
 - **targetSdk 28**：为绕开 Android 10+ 对 PRoot 执行原生二进制的限制而有意保留，
   lint 里显式豁免 `ExpiredTargetSdkVersion`。**上架 Play / 提高 targetSdk 前必须重新评估本机引擎方案**，详见架构文档。
+
+## 手机操控
+
+手机操控由用户指定唯一 Bot 使用，采用 Android 无障碍服务执行，不依赖 Root：
+
+- **读屏与定位**：按屏幕快照输出可操作元素编号；动作前重新校验活动窗口、包名、节点身份和可见区域，
+  目标移动或界面切换时拒绝旧编号，避免点到错误位置。
+- **输入**：优先对焦点输入框执行 `ACTION_SET_TEXT`，回读不一致时点击聚焦重试，最后才用系统剪贴板粘贴兜底。
+- **悬浮胶囊**：显示当前 Bot 头像、真实动作文案、停止 / 继续 / 允许 / 拒绝；点击指示使用鼠标指针效果，
+  不再显示步数、三色呼吸环或活动条。
+- **完成态**：任务结束后显示 eta 风格底部结果卡，展示本轮结果，并提供「回到界面」「关闭」。
+- **安全边界**：密码、验证码、支付类控件拒绝代填；敏感或高风险动作走确认门，可通过「不碰名单」排除应用。
 
 ## 图标
 
