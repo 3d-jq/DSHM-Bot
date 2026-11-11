@@ -40,6 +40,7 @@ import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
 import com.dshm.bot.ui.settings.SettingsSegmentedPill
+import com.dshm.bot.ui.settings.SettingsSheet
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -51,6 +52,8 @@ fun RoomSettingsScreen(
     onBack: () -> Unit,
     onDeleted: () -> Unit,
     onOpenMember: (String) -> Unit = {},
+    /** 设置页里的二级整屏页（记忆 / 工作文件夹 / 公告），由外层导航 push。 */
+    onOpenPage: (String) -> Unit = {},
     viewModel: RoomSettingsViewModel = viewModel(
         key = "room-settings:${row.id}:${endpoint?.baseUrl.orEmpty()}",
         factory = RoomSettingsViewModel.factory(row.id, endpoint),
@@ -64,11 +67,8 @@ fun RoomSettingsScreen(
         onDispose { viewModel.stopStatusPolling() }
     }
     var editName by rememberSaveable { mutableStateOf(false) }
-    var editNotice by rememberSaveable { mutableStateOf(false) }
-    var editFolder by rememberSaveable { mutableStateOf(false) }
     var pickAdmin by rememberSaveable { mutableStateOf(false) }
     var addMember by rememberSaveable { mutableStateOf(false) }
-    var memoryOpen by rememberSaveable { mutableStateOf(false) }
     var permissionOpen by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
@@ -130,13 +130,13 @@ fun RoomSettingsScreen(
                     title = stringResource(R.string.room_settings_notice),
                     subtitle = info?.notice?.takeIf { it.isNotBlank() }
                         ?: stringResource(R.string.room_settings_notice_empty),
-                    onClick = { editNotice = true },
+                    onClick = { onOpenPage(BOT_PAGE_NOTICE) },
                 )
                 SettingsRowDivider()
                 SettingsRow(
                     title = stringResource(R.string.bot_settings_workdir),
                     subtitle = info?.workDir ?: stringResource(R.string.bot_settings_workdir_default),
-                    onClick = { editFolder = true },
+                    onClick = { onOpenPage(BOT_PAGE_FOLDER) },
                 )
             }
         }
@@ -303,7 +303,7 @@ fun RoomSettingsScreen(
                             stringResource(R.string.bot_settings_memory_count, state.memory.size)
                         },
                         value = stringResource(R.string.bot_settings_manage),
-                        onClick = { memoryOpen = true },
+                        onClick = { onOpenPage(BOT_PAGE_MEMORY) },
                     )
                 }
             }
@@ -382,42 +382,6 @@ fun RoomSettingsScreen(
             },
         )
     }
-    if (editNotice && info != null) {
-        TextEditDialog(
-            title = stringResource(R.string.room_settings_notice),
-            initial = info.notice,
-            multiline = true,
-            placeholder = stringResource(R.string.room_settings_notice_hint),
-            onDismiss = { editNotice = false },
-            onSave = { value ->
-                editNotice = false
-                viewModel.updateRoom(
-                    patch = JSONObject().put("notice", value),
-                    optimistic = { it.copy(notice = value) },
-                )
-            },
-        )
-    }
-    if (editFolder && info != null) {
-        // 与 Bot 详情同一套：已知目录 + 浏览 + 系统选择器 + 手动输入（`folders` / `folder-list` / `folder-pick`）。
-        FolderPickerDialog(
-            value = info.workDir,
-            fallback = state.teamFolder,
-            folders = state.folders,
-            picker = state.folderPicker,
-            onLoad = { viewModel.loadFolders { } },
-            onList = { path, then -> viewModel.listFolders(path, then) },
-            onPickNative = { then -> viewModel.pickFolder(then) },
-            onChoose = { value ->
-                editFolder = false
-                viewModel.updateRoom(
-                    patch = JSONObject().put("workDir", value),
-                    optimistic = { it.copy(workDir = value?.takeIf { path -> path.isNotEmpty() }) },
-                )
-            },
-            onDismiss = { editFolder = false },
-        )
-    }
     if (pickAdmin && info != null) {
         ListPickDialog(
             title = stringResource(R.string.room_settings_admin),
@@ -460,21 +424,6 @@ fun RoomSettingsScreen(
             },
         )
     }
-    if (memoryOpen) {
-        MemoryPanelDialog(
-            ownerName = info?.name ?: row.name,
-            group = true,
-            entries = state.memory,
-            sizes = state.memorySizes,
-            summary = state.memorySummary,
-            summarizing = state.memorySummarizing,
-            fresh = state.memoryFresh,
-            onAdd = { scope, topic, text -> viewModel.addMemory(scope, topic, text) },
-            onEdit = { entry, next, topic -> viewModel.editMemory(entry, next, topic) },
-            onForget = { entry -> viewModel.forgetMemory(entry) },
-            onDismiss = { memoryOpen = false },
-        )
-    }
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
@@ -504,37 +453,33 @@ private fun ListPickDialog(
     onDismiss: () -> Unit,
     onSelect: (RoomMemberOption) -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                if (options.isEmpty()) {
-                    Text(stringResource(R.string.room_settings_no_options))
-                } else {
-                    options.forEach { option ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelect(option) }
-                                .padding(vertical = Dshm.spacing.sm),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = false, onClick = null)
-                            Text(
-                                text = option.name,
-                                style = Dshm.typography.rowTitle,
-                                modifier = Modifier.padding(start = Dshm.spacing.sm),
-                            )
-                        }
-                    }
+    // 和其它选择项一致：整行可点，选中即回填（底部面板）。
+    SettingsSheet(title = title, onDismiss = onDismiss) {
+        if (options.isEmpty()) {
+            Text(
+                text = stringResource(R.string.room_settings_no_options),
+                style = Dshm.typography.rowPreview,
+                color = Dshm.colors.textTertiary,
+            )
+        } else {
+            options.forEach { option ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(option) }
+                        .padding(vertical = Dshm.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = false, onClick = null)
+                    Text(
+                        text = option.name,
+                        style = Dshm.typography.rowTitle,
+                        modifier = Modifier.padding(start = Dshm.spacing.sm),
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
-        },
-    )
+        }
+    }
 }
 
 /** 新建群聊：至少两名 Bot，先选管理员，再选其他成员。 */

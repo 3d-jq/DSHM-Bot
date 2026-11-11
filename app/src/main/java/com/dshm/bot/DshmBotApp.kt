@@ -49,6 +49,14 @@ import com.dshm.bot.ui.chat.BrowserReadBridge
 import com.dshm.bot.service.PhoneReadBridge
 import com.dshm.bot.ui.chat.BotChatScreen
 import com.dshm.bot.ui.chat.BotDetailsScreen
+import com.dshm.bot.ui.chat.BotFolderPage
+import com.dshm.bot.ui.chat.BotMemoryPage
+import com.dshm.bot.ui.chat.BotNoticePage
+import com.dshm.bot.ui.chat.BotSchedulesPage
+import com.dshm.bot.ui.chat.BOT_PAGE_FOLDER
+import com.dshm.bot.ui.chat.BOT_PAGE_MEMORY
+import com.dshm.bot.ui.chat.BOT_PAGE_NOTICE
+import com.dshm.bot.ui.chat.BOT_PAGE_SCHEDULES
 import com.dshm.bot.ui.chat.NewGroupDialog
 import com.dshm.bot.ui.chat.NewBotScreen
 import com.dshm.bot.ui.chat.RoomMemberOption
@@ -114,6 +122,7 @@ private const val SCREEN_DIAGNOSTICS = "diagnostics"
 private const val CHAT_PREFIX = "chat:"
 private const val BOT_DETAILS_PREFIX = "bot-details:"
 private const val ROOM_DETAILS_PREFIX = "room-details:"
+private const val BOT_PAGE_PREFIX = "bot-page:"
 private const val SCREEN_BOT_BROWSER = "bot-browser"
 private const val SCREEN_WEB = "web"
 
@@ -237,6 +246,12 @@ fun DshmBotApp(
         }
     }
     var navForward by remember { mutableStateOf(true) }
+    // Bot / 群设置页里推出来的二级整屏页（记忆 / 定时任务 / 工作文件夹 / 说明）。
+    var botSubPage by rememberSaveable { mutableStateOf<String?>(null) }
+    // 退出设置页或换 Bot 时，把二级页清掉，免得下次进来还停在那。
+    LaunchedEffect(openBotId, botDetailsOpen) {
+        if (!botDetailsOpen || openBotId == null) botSubPage = null
+    }
 
     // 点对话通知回到对应 Bot：通知栏把 botId 带进来，这里消费掉并打开聊天。
     LaunchedEffect(Unit) {
@@ -308,6 +323,9 @@ fun DshmBotApp(
         accountOpen -> SCREEN_ACCOUNT
         settingsStack.isNotEmpty() -> "$SCREEN_SETTINGS_PAGE:${settingsStack.last()}"
         botBrowserOpen -> SCREEN_BOT_BROWSER
+        // 设置页里的二级整屏页：要排在设置页前面，否则会被设置页挡住。
+        botDetailsOpen && openBotId != null && botSubPage != null ->
+            "$BOT_PAGE_PREFIX${openBotId}:$botSubPage"
         botDetailsOpen && openBotId != null -> {
             val openBot = uiState.rows.firstOrNull { it.id == openBotId }
             if (openBot?.isGroup == true) ROOM_DETAILS_PREFIX + openBotId else BOT_DETAILS_PREFIX + openBotId
@@ -339,6 +357,7 @@ fun DshmBotApp(
             newBotOpen -> newBotOpen = false
             newGroupOpen -> newGroupOpen = false
             botBrowserOpen -> botBrowserOpen = false
+            botSubPage != null -> botSubPage = null
             botDetailsOpen -> botDetailsOpen = false
             diagnosticsOpen -> {
                 diagnosticsOpen = false
@@ -441,6 +460,30 @@ fun DshmBotApp(
                 },
             )
 
+            key.startsWith(BOT_PAGE_PREFIX) -> {
+                val rest = key.removePrefix(BOT_PAGE_PREFIX)
+                val botId = rest.substringBeforeLast(':')
+                val page = rest.substringAfterLast(':')
+                val openRow = uiState.rows.firstOrNull { it.id == botId }
+                val back = {
+                    navForward = false
+                    botSubPage = null
+                }
+                if (openRow == null) {
+                    // 找不到就退回设置页，别停在空白屏。
+                    LaunchedEffect(Unit) { botSubPage = null }
+                } else {
+                    val endpoint = (engineState as? RuntimeState.Running)?.endpoint
+                    when (page) {
+                        BOT_PAGE_MEMORY -> BotMemoryPage(openRow, endpoint, onBack = back)
+                        BOT_PAGE_SCHEDULES -> BotSchedulesPage(openRow, endpoint, onBack = back)
+                        BOT_PAGE_FOLDER -> BotFolderPage(openRow, endpoint, onBack = back)
+                        BOT_PAGE_NOTICE -> BotNoticePage(openRow, endpoint, onBack = back)
+                        else -> LaunchedEffect(Unit) { botSubPage = null }
+                    }
+                }
+            }
+
             key.startsWith(ROOM_DETAILS_PREFIX) -> {
                 val roomId = key.removePrefix(ROOM_DETAILS_PREFIX)
                 val openRoom = uiState.rows.firstOrNull { it.id == roomId }
@@ -461,6 +504,10 @@ fun DshmBotApp(
                             navForward = true
                             openBotId = memberId
                             botDetailsOpen = false
+                        },
+                        onOpenPage = { page ->
+                            navForward = true
+                            botSubPage = page
                         },
                     )
                 } else {
@@ -511,6 +558,10 @@ fun DshmBotApp(
                             navForward = false
                             botDetailsOpen = false
                             openBotId = null
+                        },
+                        onOpenPage = { page ->
+                            navForward = true
+                            botSubPage = page
                         },
                     )
                 } else {

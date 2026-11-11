@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,9 +35,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.components.FloatingIconButton
 import com.dshm.bot.ui.settings.SettingsError
 import com.dshm.bot.ui.settings.SettingsHint
 import com.dshm.bot.ui.settings.SettingsInput
@@ -61,13 +66,39 @@ fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
     var showKeyDialog by remember { mutableStateOf(false) }
     var keyDraft by remember { mutableStateOf("") }
 
+    // 对齐 dsh-Go `account_page.dart` 的 AppLifecycleListener：从充值 / 用量 / 浏览器
+    // 返回前台时重读余额与资料，避免显示旧数。
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.noteAppResumed()
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(ui.authorizeUrl) {
         val url = ui.authorizeUrl ?: return@LaunchedEffect
         openUrl(context, url)
         viewModel.consumeAuthorizeUrl()
     }
 
-    SettingsPage(title = stringResource(R.string.settings_account), onBack = onBack) {
+    SettingsPage(
+        title = stringResource(R.string.settings_account),
+        onBack = onBack,
+        actions = {
+            // 对齐 dsh-Go `account_page.dart`：已登录时顶栏右侧给一颗刷新钮，
+            // 重读资料与余额（充值/用量返回后也靠它手动兜底）。
+            if (ui.signedIn) {
+                FloatingIconButton(
+                    icon = R.drawable.ic_lucide_refresh_cw,
+                    contentDescription = stringResource(R.string.action_refresh),
+                    enabled = !ui.refreshing,
+                    onClick = viewModel::refresh,
+                )
+            }
+        },
+    ) {
         item {
             if (ui.signedIn) {
                 SignedInCard(ui = ui, onTopUp = { openUrl(context, ui.topUpUrl) }, onUsage = { openUrl(context, ui.usageUrl) })

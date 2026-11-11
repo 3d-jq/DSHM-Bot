@@ -1,6 +1,8 @@
 package com.dshm.bot.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,9 +13,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -22,6 +26,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,7 +52,6 @@ import com.dshm.bot.data.remote.ScheduleTargetKind
 import com.dshm.bot.data.remote.ScheduleTiming
 import com.dshm.bot.data.remote.ScheduledTask
 import com.dshm.bot.data.remote.scheduleAtIso
-import com.dshm.bot.data.remote.scheduleAtLabel
 import com.dshm.bot.data.remote.scheduleTimingLabel
 import com.dshm.bot.data.remote.validateScheduleTiming
 import com.dshm.bot.domain.model.AvatarGlyph
@@ -221,20 +227,12 @@ private fun TaskRow(
     }
     SettingsRow(
         title = task.title.ifEmpty { stringResource(R.string.schedules_untitled) },
+        // 只留一行时间规则；下次时间 / 提纲 / 群名都进详情，列表行不再被挤换行。
         subtitle = listOfNotNull(
             scheduleTimingLabel(task),
-            task.prompt.takeIf { it.isNotBlank() && it != task.title }
-                ?.replace('\n', ' ')
-                ?.take(48),
             roomName?.let { stringResource(R.string.schedules_in_room, it) },
         ).joinToString(" · "),
-        value = if (task.active) {
-            scheduleAtLabel(task.scheduledAt)?.let { stringResource(R.string.schedules_next, it) }
-                ?: stringResource(R.string.schedules_active)
-        } else {
-            stringResource(R.string.schedules_finished)
-        },
-        valueColor = if (task.active) null else Dshm.colors.textTertiary,
+        singleLineTitle = true,
         leading = {
             TargetAvatar(target, size = Dshm.spacing.lg + Dshm.spacing.sm)
         },
@@ -399,10 +397,9 @@ private fun NewTaskForm(
                     onSelect = { picked -> kind = kinds.indexOf(picked).coerceAtLeast(0) },
                 )
                 when (kind) {
-                    0 -> SettingsInput(
+                    0 -> DateTimePickerField(
                         value = atText,
                         onValueChange = { atText = it },
-                        placeholder = stringResource(R.string.schedules_at_hint),
                     )
 
                     2 -> Row(
@@ -422,10 +419,9 @@ private fun NewTaskForm(
                     }
                 }
                 if (kind == 1 || kind == 2) {
-                    SettingsInput(
+                    TimePickerField(
                         value = timeText,
                         onValueChange = { timeText = it },
-                        placeholder = stringResource(R.string.schedules_time_hint),
                     )
                 }
                 if (kind == 3) {
@@ -469,6 +465,183 @@ private fun NewTaskForm(
                 )
             }
         }
+    }
+}
+
+private val atFormatter: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+/** 只读点选字段：外观和输入框一致，点它弹选择器；不再让用户手打时间。 */
+@Composable
+private fun PickerField(
+    text: String,
+    placeholder: String,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(Dshm.radius.md)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Dshm.spacing.inputHeight)
+            .clip(shape)
+            .background(Dshm.colors.surface)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text.ifBlank { placeholder },
+            style = Dshm.typography.settingsRowTitle,
+            color = if (text.isBlank()) Dshm.colors.textTertiary else Dshm.colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(Dshm.spacing.xs))
+        Icon(
+            painter = painterResource(R.drawable.ic_lucide_clock_3),
+            contentDescription = null,
+            tint = Dshm.colors.textTertiary,
+            modifier = Modifier.size(Dshm.spacing.icon),
+        )
+    }
+}
+
+/** 每天 / 每周的 24 小时时间轮；对齐 dsh-Go `showClockSheet`。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimePickerField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val parts = value.split(":")
+    val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 9
+    val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+
+    PickerField(
+        text = value,
+        placeholder = stringResource(R.string.schedules_time_hint),
+        onClick = { open = true },
+    )
+    if (open) {
+        val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { open = false },
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(R.string.schedules_pick_time),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = { TimePicker(state = state) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onValueChange("%02d:%02d".format(state.hour, state.minute))
+                    open = false
+                }) {
+                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { open = false }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
+    }
+}
+
+/** 「一次」任务：先选日期，再选时间，拼成 `yyyy-MM-dd HH:mm`。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateTimePickerField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    var stage by remember { mutableStateOf(0) }
+    var pickedDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
+
+    PickerField(
+        text = value,
+        placeholder = stringResource(R.string.schedules_at_hint),
+        onClick = { stage = 1 },
+    )
+    if (stage == 1) {
+        val zone = java.time.ZoneId.systemDefault()
+        val parsed = runCatching { java.time.LocalDateTime.parse(value, atFormatter) }.getOrNull()
+            ?: java.time.LocalDateTime.now().plusHours(1)
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = parsed.atZone(zone).toInstant().toEpochMilli(),
+        )
+        AlertDialog(
+            onDismissRequest = { stage = 0 },
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(R.string.schedules_pick_date),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = { DatePicker(state = state) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickedDate = state.selectedDateMillis?.let {
+                        java.time.Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
+                    }
+                    stage = 2
+                }) {
+                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { stage = 0 }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
+    }
+    if (stage == 2) {
+        val parsed = runCatching { java.time.LocalDateTime.parse(value, atFormatter) }.getOrNull()
+        val state = rememberTimePickerState(
+            initialHour = parsed?.hour ?: 9,
+            initialMinute = parsed?.minute ?: 0,
+            is24Hour = true,
+        )
+        AlertDialog(
+            onDismissRequest = { stage = 0 },
+            containerColor = Dshm.colors.surface,
+            title = {
+                Text(
+                    text = stringResource(R.string.schedules_pick_time),
+                    style = Dshm.typography.sheetTitle,
+                    color = Dshm.colors.textPrimary,
+                )
+            },
+            text = { TimePicker(state = state) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val date = pickedDate ?: java.time.LocalDate.now()
+                    onValueChange(date.atTime(state.hour, state.minute).format(atFormatter))
+                    pickedDate = null
+                    stage = 0
+                }) {
+                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    pickedDate = null
+                    stage = 0
+                }) {
+                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                }
+            },
+        )
     }
 }
 

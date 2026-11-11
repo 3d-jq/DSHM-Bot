@@ -1044,6 +1044,15 @@ internal fun JSONObject.anyOrNull(key: String): Any? {
 
 internal fun JSONObject.numberOrNull(key: String): Double? = (anyOrNull(key) as? Number)?.toDouble()
 
+/**
+ * 文本字段。
+ *
+ * `org.json` 的 `optString` 对 JSON `null` 会返回字符串 `"null"`（`String.valueOf(JSONObject.NULL)`），
+ * 记忆这类接口里 `topic` / `by` / `error` 大量是 null，直接用 `optString` 就会在界面上写满 "null"。
+ */
+internal fun JSONObject.textOrNull(key: String): String? =
+    (anyOrNull(key) as? String)?.takeIf { it.isNotEmpty() }
+
 internal fun JSONArray.toStringList(): List<String> = buildList {
     for (i in 0 until length()) {
         when (val value = opt(i)) {

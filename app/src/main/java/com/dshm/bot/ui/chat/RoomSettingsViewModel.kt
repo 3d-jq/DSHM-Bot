@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.textOrNull
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,7 @@ class RoomSettingsViewModel(
     private val _ui = MutableStateFlow(RoomSettingsUi(loading = client != null))
     val ui: StateFlow<RoomSettingsUi> = _ui.asStateFlow()
     private var statusJob: Job? = null
+    private var memoryJob: Job? = null
 
     init {
         if (client == null) {
@@ -172,11 +174,11 @@ class RoomSettingsViewModel(
                     add(
                         BotMemoryEntry(
                             scope = item.optString("scope", "group"),
-                            topic = item.optString("topic").takeIf { it.isNotEmpty() },
+                            topic = item.textOrNull("topic"),
                             text = text,
-                            added = item.optString("added").takeIf { it.isNotEmpty() },
-                            by = item.optString("by").takeIf { it.isNotEmpty() },
-                            source = item.optString("source").takeIf { it.isNotEmpty() },
+                            added = item.textOrNull("added"),
+                            by = item.textOrNull("by"),
+                            source = item.textOrNull("source"),
                         ),
                     )
                 }
@@ -190,10 +192,42 @@ class RoomSettingsViewModel(
                 memory = memory,
                 memorySizes = sizes,
                 memorySummary = view.optJSONObject("summary")?.optString("text")?.takeIf { text -> text.isNotEmpty() },
+                memorySummaryAt = view.optJSONObject("summary")?.optLong("at", 0L)?.takeIf { at -> at > 0L },
+                memorySummaryError = view.textOrNull("error"),
+                memoryLimit = view.optJSONObject("limits")?.optInt("main", 0)?.takeIf { limit -> limit > 0 },
                 memorySummarizing = view.optBoolean("summarizing", false),
                 memoryFresh = view.optBoolean("fresh", true),
             )
         }
+    }
+
+    /**
+     * 打开记忆面板时拉一次并让 DSH 写摘要；`summarizing` 期间照 DS Bot 每 1.5s 轮询，
+     * 最多 90 次兜底（面板关掉后不会一直打接口）。
+     */
+    fun refreshMemory(regenerate: Boolean = false) {
+        val connection = client ?: return
+        memoryJob?.cancel()
+        memoryJob = viewModelScope.launch {
+            repeat(90) { attempt ->
+                val body = JSONObject().put("roomId", roomId)
+                if (attempt == 0) {
+                    if (regenerate) body.put("regenerate", true) else body.put("summarize", true)
+                } else {
+                    body.put("summarize", true)
+                }
+                val view = runCatching { connection.bot("memory-view", body) }.getOrNull()
+                    ?: return@launch
+                applyMemoryView(view)
+                if (!view.optBoolean("summarizing", false)) return@launch
+                delay(1_500)
+            }
+        }
+    }
+
+    fun stopMemoryPolling() {
+        memoryJob?.cancel()
+        memoryJob = null
     }
 
     private suspend fun loadUsage(connection: DshRemoteApi) {
@@ -309,6 +343,25 @@ class RoomSettingsViewModel(
                 loadMemory(connection)
                 onDone(null)
             }.onFailure { failure -> onDone(failure.message ?: "删除群记忆失败") }
+        }
+    }
+
+    /** 对着群记忆说话 / 直接更新（`memory-ask {roomId, text}`）。 */
+    fun memoryAsk(text: String, onReply: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) {
+            onReply(null)
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot("memory-ask", JSONObject().put("roomId", roomId).put("text", trimmed))
+            }.onSuccess { view ->
+                applyMemoryView(view)
+                onReply(view.optString("reply").takeIf { it.isNotEmpty() })
+                if (view.optBoolean("summarizing", false)) refreshMemory(false)
+            }.onFailure { failure -> onReply(failure.message ?: "群记忆更新失败") }
         }
     }
 

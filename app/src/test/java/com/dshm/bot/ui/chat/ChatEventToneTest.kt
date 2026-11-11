@@ -25,11 +25,20 @@ class ChatEventToneTest {
 
     @Test
     fun failureCodesReadInChinese() {
-        assertEquals("API 密钥无效", failureLabel("AUTH", "ignored"))
-        assertEquals("账户额度已用尽", failureLabel("QUOTA", ""))
-        assertEquals("账户额度已用尽", failureLabel("ACCOUNT_QUOTA", ""))
-        assertEquals("连不上模型服务", failureLabel("TRANSPORT", ""))
+        // 对齐 dsh-Go `turn_failure_text.dart` 的错误码映射。
+        assertEquals("API Key 无效或已过期", failureLabel("AUTH", "ignored"))
+        assertEquals("API Key 无效或已过期", failureLabel("INVALID_CREDENTIAL", ""))
+        assertEquals("缺少 API Key", failureLabel("MISSING_CREDENTIAL", ""))
+        assertEquals("余额不足", failureLabel("QUOTA", ""))
+        assertEquals("账号额度已用完", failureLabel("ACCOUNT_QUOTA", ""))
+        assertEquals("模型请求太频繁", failureLabel("RATE_LIMIT", ""))
+        assertEquals("没能连上模型服务", failureLabel("TRANSPORT", ""))
         assertEquals("模型响应超时", failureLabel("TIMEOUT", ""))
+        assertEquals("模型服务暂时不可用", failureLabel("SERVER", ""))
+        assertEquals("模型服务暂时不可用", failureLabel("HTTP_503", ""))
+        assertEquals("模型没有返回内容", failureLabel("EMPTY_RESPONSE", ""))
+        assertEquals("这个模型需要新版引擎", failureLabel("CLIENT_UPGRADE_REQUIRED", ""))
+        assertEquals("当前模型不可用", failureLabel("MODEL_UNSUPPORTED", ""))
         assertEquals("它的群聊会话打不开，下次会换一个新的", failureLabel("SESSION_RESET", ""))
     }
 

@@ -662,3 +662,37 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   中转类事件行文案核对（群聊工具从结果解析群名，与网页版同一正则；`ToolEventLineTest` 覆盖）。
   清单已收口：群聊时间/耗时、BTW 旁白卡、reactions 三条按 2026-11-09 决定**有意不做**
   （理由见清单末尾），余下全部对齐 → **网页版入口可以去掉了**。
+
+### 名字胶囊面板与二级弹层统一（2026-11-11，第二十二轮）
+
+- ☑️ Bot 名字胶囊面板去掉「复制整段对话」（`chat_copy_transcript`），只保留「设置详情」入口；
+  群面板同步去掉，`onCopyTranscript` 参数与 `copyTranscript()` 一起清除。
+- ☑️ 面板里的权限选择改成**设置页同一套**：文案优先 `SettingsCopy.permissionLabel/Hint`（服务端英文名只作兜底），
+  选中控件换成 `RadioButton`，危险档用 `warning` 副标题色。
+- ☑️ 二级弹层全部改底部面板（`SettingsSheet`）：`TextEditDialog`（Bot 做什么 / 名称 / 角色等）、
+  `MemoryPanelDialog`（含改一条 `MemoryEditSheet`）、`FolderPickerDialog`（文件/工作目录）、
+  `SchedulesSheet` + `NewScheduleSheet`（定时任务）、群设置页的 `ListPickDialog`。
+- ☑️ 群名字胶囊面板的「记忆」直接打开记忆面板（不再跳完整设置页）。
+- ☑️ 「这个 Bot 做什么」有内容时只显示一次（标题单行省略），空的时候才显示提示，
+  修掉标题与副标题各重复一遍内容的问题。
+- ☑️ **记忆面板按 DS Bot 重做**（2026-11-11，第二十三轮）：
+  - 两个页面：默认「记忆摘要」（`#` 标题 / 段落渲染、生成中骨架、过期淡到 55%、失败可重试），
+    `···` 菜单进「全部条目」+「重新生成摘要」；条目页左上角返回。
+  - 全部条目不分 chip，改成 `own` / `team`（群 → `group`）两段堆叠，标题右侧显示
+    `已用 N / 上限字符`（新解析 `memory-view.limits.main`）；条目按 `scope:topic` 分组，
+    右侧只有垃圾桶，点一下变「移除」再点才真删。
+  - 空态改成居中圆底记忆图标 + 标题 + 说明。
+  - **两种打开方式**：名字胶囊 → 底部面板（固定高度、只预览 + 能删，没有输入框）；
+    Bot 设置 → 整屏（`Dialog`，多一个 `memory-ask` 的「问我或直接更新」胶囊输入）。
+  - 打开面板发 `memory-view {summarize:true}`，`summarizing` 期间每 1.5s 轮询一次。
+  - 直填新增/编辑（`memory-add` / `memory-edit`）在面板里去掉了，之后在 Bot 设置里单独做。
+- ☑️ **修 `null`**：`org.json` 的 `optString` 对 JSON `null` 会返回字符串 `"null"`
+  （`String.valueOf(JSONObject.NULL)`），记忆条目里的 `topic` / `by` / `added` / `source`
+  和 `memory-view.error` 因此在界面上写满 "null"，删记忆时还会把 `"null"` 当 topic 发上去。
+  新增 `JSONObject.textOrNull()`（`data/remote/EngineSettingsModels.kt`）并按它解析。
+- ☑️ **设置页二级页改成整屏**（2026-11-11，第二十四轮）：新增 `ui/chat/BotSettingsPages.kt`
+  （`BotMemoryPage` / `BotSchedulesPage` / `BotFolderPage` / `BotNoticePage`），
+  一律走我们的 `SettingsPage` 顶栏 + 导航里现成的 iOS push/pop 动效
+  （`DshmBotApp.kt` 新增 `bot-page:<id>:<page>` 这一层）。设置页里点「记忆 / 定时任务 /
+  工作文件夹」和群公告都推整屏页，不再弹底部面板；**名称 / 角色仍然是底部面板**
+  （单行输入不值得做成整页）。名字胶囊弹出的面板维持底部面板不变。

@@ -61,6 +61,12 @@ data class RoomSettingsUi(
     val memoryEnabled: Boolean = true,
     val memorySizes: Map<String, String> = emptyMap(),
     val memorySummary: String? = null,
+    /** `memory-view.summary.at`：摘要生成时间（epoch ms）。 */
+    val memorySummaryAt: Long? = null,
+    /** `memory-view.error`：摘要写失败时的原因。 */
+    val memorySummaryError: String? = null,
+    /** `memory-view.limits.main`：MEMORY.md 的字符上限。 */
+    val memoryLimit: Int? = null,
     val memorySummarizing: Boolean = false,
     val memoryFresh: Boolean = true,
     val usageTokens: Long = 0L,

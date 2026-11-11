@@ -9,10 +9,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -57,6 +58,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import com.dshm.bot.core.design.Dshm
@@ -499,9 +501,8 @@ private fun CodeBlockView(
 /**
  * 表格：带边框、**横向可滚动**。
  *
- * 规格照 DeepSearch 的 `MarkdownText.kt` 的 `TableView`：
- * 整块表格外面 0.5dp 边框 + 4dp 圆角，表头有底色、每行一条分隔线，
- * 列固定 120dp（内容长短不影响列宽，表格因此不会因某格太长而歪掉）。
+ * 外层 `horizontalScroll`：内容放不下时按固定列宽横向拖；放得下时列等分气泡宽度。
+ * 画完整网格（外框 + 横向分隔线 + 列间竖线），列宽固定才能保证竖线不被打乱。
  */
 @Composable
 private fun MarkdownTable(
@@ -513,74 +514,89 @@ private fun MarkdownTable(
     shardBase: String = "table",
 ) {
     if (header.isEmpty()) return
-    // 照 DeepSearch `TableView`：只画外框 + 每行横线，**不画竖线**（竖线会把
-    // 宽度不同的单元格切得参差），4dp 圆角、0.5dp 边框。
+    // 4dp 圆角、0.5dp 细线。先算固定列宽下的总宽，由 [BoxWithConstraints] 决定是
+    // 「铺满气泡、列等分」还是「保持固定列宽、外层横向滚动」。
     val borderColor = colors.textPrimary.copy(alpha = 0.2f)
     val headerFill = colors.surfaceMuted
     val shape = RoundedCornerShape(4.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(0.5.dp, borderColor, shape)
-            .clip(shape),
-    ) {
-        Column {
-            // 表头行
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(headerFill)
-                    .height(IntrinsicSize.Min),
-            ) {
-                header.forEachIndexed { column, cell ->
-                    TableCell(
-                        text = cell,
-                        alignment = alignments.getOrElse(column) { MarkdownTables.Alignment.LEFT },
-                        colors = colors,
-                        base = base,
-                        bold = true,
-                        modifier = Modifier.weight(1f),
-                        shardId = "$shardBase:h$column",
-                    )
-                    if (column < header.lastIndex) {
-                        VerticalDivider(
-                            thickness = 0.5.dp,
-                            color = borderColor,
-                            modifier = Modifier.fillMaxHeight(),
-                        )
-                    }
-                }
-            }
-            HorizontalDivider(thickness = 0.5.dp, color = borderColor)
-            // 数据行
-            rows.forEachIndexed { rowIndex, row ->
-                Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                    header.indices.forEach { column ->
+    val stroke = 0.5.dp
+    val columns = header.size
+    val dividerCount = (columns - 1).coerceAtLeast(0)
+    val fixedWidth = Dshm.spacing.tableCellWidth * columns.toFloat() +
+        stroke * dividerCount.toFloat()
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val available = if (maxWidth == Dp.Infinity) fixedWidth else maxWidth
+        val fits = fixedWidth <= available
+        val tableWidth = if (fits) available else fixedWidth
+        val cellWidth = if (fits) {
+            (available - stroke * dividerCount.toFloat()) / columns.toFloat()
+        } else {
+            Dshm.spacing.tableCellWidth
+        }
+        Box(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .border(stroke, borderColor, shape)
+                .clip(shape),
+        ) {
+            Column(Modifier.width(tableWidth)) {
+                // 表头行
+                Row(
+                    modifier = Modifier
+                        .background(headerFill)
+                        .height(IntrinsicSize.Min),
+                ) {
+                    header.forEachIndexed { column, cell ->
                         TableCell(
-                            text = row.getOrNull(column).orEmpty(),
+                            text = cell,
                             alignment = alignments.getOrElse(column) { MarkdownTables.Alignment.LEFT },
                             colors = colors,
                             base = base,
-                            bold = false,
-                            modifier = Modifier.weight(1f),
-                            shardId = "$shardBase:r$rowIndex$column",
+                            bold = true,
+                            modifier = Modifier.width(cellWidth),
+                            shardId = "$shardBase:h$column",
                         )
                         if (column < header.lastIndex) {
                             VerticalDivider(
-                                thickness = 0.5.dp,
+                                thickness = stroke,
                                 color = borderColor,
                                 modifier = Modifier.fillMaxHeight(),
                             )
                         }
                     }
                 }
-                HorizontalDivider(thickness = 0.5.dp, color = borderColor)
+                HorizontalDivider(thickness = stroke, color = borderColor)
+                // 数据行
+                rows.forEachIndexed { rowIndex, row ->
+                    Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                        header.indices.forEach { column ->
+                            TableCell(
+                                text = row.getOrNull(column).orEmpty(),
+                                alignment = alignments.getOrElse(column) { MarkdownTables.Alignment.LEFT },
+                                colors = colors,
+                                base = base,
+                                bold = false,
+                                modifier = Modifier.width(cellWidth),
+                                shardId = "$shardBase:r$rowIndex$column",
+                            )
+                            if (column < header.lastIndex) {
+                                VerticalDivider(
+                                    thickness = stroke,
+                                    color = borderColor,
+                                    modifier = Modifier.fillMaxHeight(),
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(thickness = stroke, color = borderColor)
+                }
             }
         }
     }
 }
 
-/** 表格的一格：固定 120dp 宽，按对齐方式排内容。 */
+/** 表格的一格：固定列宽，按对齐方式排内容。 */
 @Composable
 private fun TableCell(
     text: String,
@@ -592,7 +608,7 @@ private fun TableCell(
     shardId: String = "",
 ) {
     Box(
-        // 列宽均分气泡宽度：手机上不会出现「第三列被切掉、要横向拖」的情况。
+        // 固定列宽：整体交给外层横向滚动，格子本身不再换行挤窄。
         modifier = modifier.padding(horizontal = Dshm.spacing.sm, vertical = 6.dp),
         contentAlignment = when (alignment) {
             MarkdownTables.Alignment.CENTER -> Alignment.Center

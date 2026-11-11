@@ -60,6 +60,7 @@ import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
 import com.dshm.bot.ui.settings.SettingsSegmentedPill
+import com.dshm.bot.ui.settings.SettingsTextSheet
 import com.dshm.bot.ui.settings.settingsLanguage
 import org.json.JSONObject
 
@@ -70,6 +71,8 @@ fun BotDetailsScreen(
     endpoint: RuntimeEndpoint?,
     onBack: () -> Unit,
     onDeleted: () -> Unit,
+    /** 设置页里的二级整屏页（记忆 / 定时任务 / 工作文件夹），由外层导航 push。 */
+    onOpenPage: (String) -> Unit = {},
     viewModel: BotDetailsViewModel = viewModel(
         key = "bot-details:${bot.id}:${endpoint?.baseUrl.orEmpty()}:${endpoint?.token.orEmpty()}",
         factory = BotDetailsViewModel.factory(bot.id, endpoint),
@@ -81,9 +84,6 @@ fun BotDetailsScreen(
     var editRole by rememberSaveable { mutableStateOf(false) }
     var pickShape by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
-    var editWorkdir by rememberSaveable { mutableStateOf(false) }
-    var memoryOpen by rememberSaveable { mutableStateOf(false) }
-    var newSchedule by rememberSaveable { mutableStateOf(false) }
     var instructions by remember(info?.instructions) { mutableStateOf(info?.instructions.orEmpty()) }
     // 这一行要在 LazyColumn 的 item 里用，所以在可组合上下文里先算好。
     val runStatsLine = runStatsLabel(state.runStats)
@@ -198,7 +198,7 @@ fun BotDetailsScreen(
                 SettingsRow(
                     title = stringResource(R.string.bot_settings_workdir),
                     subtitle = info?.workDir ?: stringResource(R.string.bot_settings_workdir_default),
-                    onClick = { editWorkdir = true },
+                    onClick = { onOpenPage(BOT_PAGE_FOLDER) },
                 )
             }
         }
@@ -277,27 +277,21 @@ fun BotDetailsScreen(
                         stringResource(R.string.bot_settings_memory_count, state.memory.size)
                     },
                     value = stringResource(R.string.bot_settings_manage),
-                    onClick = { memoryOpen = true },
+                    onClick = { onOpenPage(BOT_PAGE_MEMORY) },
                 )
             }
         }
 
         item {
             SettingsSection(title = stringResource(R.string.bot_settings_schedules)) {
-                state.schedules.forEachIndexed { index, task ->
-                    if (index > 0) SettingsRowDivider()
-                    SettingsRow(
-                        title = task.title,
-                        subtitle = task.prompt,
-                        value = stringResource(R.string.bot_settings_schedule_delete),
-                        valueColor = Dshm.colors.danger,
-                        onClick = { viewModel.deleteSchedule(task) },
-                    )
-                }
-                if (state.schedules.isNotEmpty()) SettingsRowDivider()
                 SettingsRow(
-                    title = stringResource(R.string.bot_settings_schedule_new),
-                    onClick = { newSchedule = true },
+                    title = if (state.schedules.isEmpty()) {
+                        stringResource(R.string.bot_settings_schedule_none)
+                    } else {
+                        stringResource(R.string.bot_settings_memory_count, state.schedules.size)
+                    },
+                    value = stringResource(R.string.bot_settings_manage),
+                    onClick = { onOpenPage(BOT_PAGE_SCHEDULES) },
                 )
             }
         }
@@ -443,104 +437,6 @@ fun BotDetailsScreen(
             },
         )
     }
-    if (editWorkdir && info != null) {
-        FolderPickerDialog(
-            value = info.workDir,
-            fallback = stringResource(R.string.bot_settings_workdir_default),
-            folders = state.folders,
-            picker = state.folderPicker,
-            onList = { path, then -> viewModel.listFolders(path, then) },
-            onPickNative = { then -> viewModel.pickFolder(then) },
-            onChoose = { path ->
-                editWorkdir = false
-                viewModel.update(
-                    patch = JSONObject().put("workDir", path.orEmpty()),
-                    optimistic = { it.copy(workDir = path) },
-                )
-            },
-            onDismiss = { editWorkdir = false },
-            onLoad = { viewModel.loadFolders() },
-        )
-    }
-    if (memoryOpen) {
-        MemoryPanelDialog(
-            ownerName = info?.name ?: bot.name,
-            group = false,
-            entries = state.memory,
-            sizes = state.memorySizes,
-            summary = state.memorySummary,
-            summarizing = state.memorySummarizing,
-            fresh = state.memoryFresh,
-            onAdd = { scope, topic, text -> viewModel.addMemory(scope, topic, text) },
-            onEdit = { entry, next, topic -> viewModel.editMemory(entry, next, topic) },
-            onForget = { entry -> viewModel.forgetMemory(entry) },
-            onDismiss = { memoryOpen = false },
-        )
-    }
-    if (newSchedule) {
-        NewScheduleDialog(
-            onDismiss = { newSchedule = false },
-            onSave = { title, prompt, time ->
-                newSchedule = false
-                viewModel.createDailySchedule(title, prompt, time)
-            },
-        )
-    }
-}
-
-@Composable
-private fun NewScheduleDialog(
-    onDismiss: () -> Unit,
-    onSave: (String, String, String) -> Unit,
-) {
-    var title by remember { mutableStateOf("") }
-    var prompt by remember { mutableStateOf("") }
-    var time by remember { mutableStateOf("09:00") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Dshm.colors.surface,
-        title = { Text(stringResource(R.string.bot_settings_schedule_new)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.bot_settings_schedule_title)) },
-                )
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    minLines = 2,
-                    maxLines = 4,
-                    label = { Text(stringResource(R.string.bot_settings_schedule_prompt)) },
-                )
-                OutlinedTextField(
-                    value = time,
-                    onValueChange = { time = it },
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.bot_settings_schedule_time)) },
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (title.isNotBlank() && prompt.isNotBlank()) {
-                        onSave(title.trim(), prompt.trim(), time.trim())
-                    }
-                },
-                enabled = title.isNotBlank() && prompt.isNotBlank(),
-            ) {
-                Text(stringResource(android.R.string.ok))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.cancel))
-            }
-        },
-    )
 }
 
 @Composable
@@ -552,31 +448,16 @@ internal fun TextEditDialog(
     multiline: Boolean = false,
     placeholder: String? = null,
 ) {
-    var text by remember(initial) { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Dshm.colors.surface,
-        title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = !multiline,
-                minLines = if (multiline) 4 else 1,
-                maxLines = if (multiline) 10 else 1,
-                placeholder = placeholder?.let { { Text(it) } },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(text.trim()) }) {
-                Text(stringResource(android.R.string.ok))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.cancel))
-            }
+    // 统一的底部面板输入（设置页同款）；面板里的输入框都用同一套样式。
+    SettingsTextSheet(
+        title = title,
+        initial = initial,
+        placeholder = placeholder,
+        multiline = multiline,
+        onDismiss = onDismiss,
+        onSave = { value ->
+            onSave(value.trim())
+            null
         },
     )
 }
@@ -629,23 +510,19 @@ private fun PermissionRows(
     permissions.forEachIndexed { index, preset ->
         if (index > 0) SettingsRowDivider()
         val selected = preset == current
+        // 和设置页 PermissionScreen 同一套：本地化文案优先，接口原文只作兜底；
+        // 选中控件也用同一个 RadioButton，不再是自绘圆点。
+        val label = SettingsCopy.permissionLabel(preset, language).takeIf { it.isNotBlank() }
+            ?: labels[preset]
+            ?: preset
+        val hint = SettingsCopy.permissionHint(preset, language) ?: hints[preset]
+        val risky = preset == "danger-full-access" || preset == "auto"
         SettingsRow(
-            title = labels[preset] ?: SettingsCopy.permissionLabel(preset, language),
-            subtitle = hints[preset] ?: SettingsCopy.permissionHint(preset, language),
+            title = label,
+            subtitle = hint,
+            subtitleColor = if (risky) Dshm.colors.warning else null,
             trailing = {
-                Box(
-                    modifier = Modifier
-                        .size(Dshm.spacing.selectionTick)
-                        .clip(CircleShape)
-                        .background(
-                            if (selected) Dshm.colors.accent else androidx.compose.ui.graphics.Color.Transparent,
-                        )
-                        .border(
-                            Dshm.spacing.hairline + Dshm.spacing.xs / 2,
-                            if (selected) Dshm.colors.accent else Dshm.colors.textTertiary,
-                            CircleShape,
-                        ),
-                )
+                RadioButton(selected = selected, onClick = null)
             },
             onClick = { onSelect(preset) },
         )
@@ -661,7 +538,6 @@ fun BotSettingsSheet(
     onDetails: () -> Unit,
     onBrowser: () -> Unit = {},
     /** 复制整段对话（网页版详情抽屉的 Share；内容由对话页按当前条目生成）。 */
-    onCopyTranscript: () -> Unit = {},
     viewModel: BotDetailsViewModel = viewModel(
         key = "bot-sheet:${bot.id}:${endpoint?.baseUrl.orEmpty()}:${endpoint?.token.orEmpty()}",
         factory = BotDetailsViewModel.factory(bot.id, endpoint),
@@ -674,6 +550,7 @@ fun BotSettingsSheet(
     var editInstructions by rememberSaveable { mutableStateOf(false) }
     var showMemory by rememberSaveable { mutableStateOf(false) }
     var showSchedules by rememberSaveable { mutableStateOf(false) }
+    var newSchedule by rememberSaveable { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(DETAILS_TAB) }
     var sheetNotice by rememberSaveable { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -756,11 +633,6 @@ fun BotSettingsSheet(
                         onDismiss()
                         onDetails()
                     },
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.chat_copy_transcript),
-                    onClick = onCopyTranscript,
                 )
             }
 
@@ -874,11 +746,16 @@ fun BotSettingsSheet(
 
             Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_instructions)) {
+                // 有内容时只显示一次（标题单行省略），空的时候给个提示，不再标题/副标题各来一遍。
+                val instructions = info?.instructions?.trim().orEmpty()
                 SettingsRow(
-                    title = (info?.instructions?.trim()?.takeIf { it.isNotEmpty() }
-                        ?: stringResource(R.string.bot_settings_note_add)),
-                    subtitle = info?.instructions?.trim().orEmpty()
-                        .ifBlank { stringResource(R.string.bot_settings_instructions) },
+                    title = instructions.ifEmpty { stringResource(R.string.bot_settings_note_add) },
+                    subtitle = if (instructions.isEmpty()) {
+                        stringResource(R.string.bot_settings_note_hint)
+                    } else {
+                        null
+                    },
+                    singleLineTitle = true,
                     onClick = { editInstructions = true },
                 )
             }
@@ -929,58 +806,35 @@ fun BotSettingsSheet(
             entries = state.memory,
             sizes = state.memorySizes,
             summary = state.memorySummary,
+            summaryAt = state.memorySummaryAt,
+            summaryError = state.memorySummaryError,
+            memoryLimit = state.memoryLimit,
             summarizing = state.memorySummarizing,
             fresh = state.memoryFresh,
-            onAdd = { scope, topic, text -> viewModel.addMemory(scope, topic, text) },
-            onEdit = { entry, next, topic -> viewModel.editMemory(entry, next, topic) },
+            onRefresh = { regenerate -> viewModel.refreshMemory(regenerate) },
+            onStopPolling = { viewModel.stopMemoryPolling() },
+            onAsk = { text, onReply -> viewModel.memoryAsk(text, onReply) },
             onForget = { entry -> viewModel.forgetMemory(entry) },
             onDismiss = { showMemory = false },
         )
     }
     if (showSchedules) {
-        AlertDialog(
-            onDismissRequest = { showSchedules = false },
-            containerColor = Dshm.colors.surface,
-            title = { Text(stringResource(R.string.bot_settings_schedules)) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (state.schedules.isEmpty()) {
-                        Text(stringResource(R.string.bot_settings_schedule_none))
-                    } else {
-                        state.schedules.forEach { task ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = Dshm.spacing.xs),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        text = task.title,
-                                        style = Dshm.typography.rowTitle,
-                                        color = Dshm.colors.textPrimary,
-                                    )
-                                    Text(
-                                        text = task.prompt,
-                                        style = Dshm.typography.rowPreview,
-                                        color = Dshm.colors.textSecondary,
-                                    )
-                                }
-                                TextButton(onClick = { viewModel.deleteSchedule(task) }) {
-                                    Text(
-                                        text = stringResource(R.string.bot_settings_schedule_delete),
-                                        color = Dshm.colors.danger,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+        SchedulesSheet(
+            tasks = state.schedules,
+            onDelete = { viewModel.deleteSchedule(it) },
+            onDismiss = { showSchedules = false },
+            onNew = {
+                showSchedules = false
+                newSchedule = true
             },
-            confirmButton = {
-                TextButton(onClick = { showSchedules = false }) {
-                    Text(stringResource(android.R.string.ok))
-                }
+        )
+    }
+    if (newSchedule) {
+        NewScheduleSheet(
+            onDismiss = { newSchedule = false },
+            onSave = { title, prompt, time ->
+                newSchedule = false
+                viewModel.createDailySchedule(title, prompt, time)
             },
         )
     }

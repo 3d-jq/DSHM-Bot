@@ -8,11 +8,14 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.textOrNull
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -93,6 +96,12 @@ data class BotDetailsUiState(
     /** 记忆正文按 scope 的字符数（`memory-view.sizes`）。 */
     val memorySizes: Map<String, String> = emptyMap(),
     val memorySummary: String? = null,
+    /** `memory-view.summary.at`：摘要生成时间（epoch ms）。 */
+    val memorySummaryAt: Long? = null,
+    /** `memory-view.error`：摘要写失败时的原因（对齐 DS Bot 的「摘要读不出来了」）。 */
+    val memorySummaryError: String? = null,
+    /** `memory-view.limits.main`：MEMORY.md 的字符上限。 */
+    val memoryLimit: Int? = null,
     val memorySummarizing: Boolean = false,
     /** 摘要是否跟当前条目对得上；false 时是旧摘要。 */
     val memoryFresh: Boolean = true,
@@ -119,6 +128,7 @@ class BotDetailsViewModel(
     private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
     private val _ui = MutableStateFlow(BotDetailsUiState(loading = client != null))
     val ui: StateFlow<BotDetailsUiState> = _ui.asStateFlow()
+    private var memoryJob: Job? = null
 
     init {
         if (client == null) {
@@ -335,11 +345,11 @@ class BotDetailsViewModel(
                         add(
                             BotMemoryEntry(
                                 scope = item.optString("scope", "own"),
-                                topic = item.optString("topic").takeIf { it.isNotEmpty() },
+                                topic = item.textOrNull("topic"),
                                 text = text,
-                                added = item.optString("added").takeIf { it.isNotEmpty() },
-                                by = item.optString("by").takeIf { it.isNotEmpty() },
-                                source = item.optString("source").takeIf { it.isNotEmpty() },
+                                added = item.textOrNull("added"),
+                                by = item.textOrNull("by"),
+                                source = item.textOrNull("source"),
                             ),
                         )
                     }
@@ -352,15 +362,51 @@ class BotDetailsViewModel(
             }
         }.orEmpty()
         val summary = view.optJSONObject("summary")?.optString("text")?.takeIf { it.isNotEmpty() }
+        val summaryAt = view.optJSONObject("summary")?.optLong("at", 0L)?.takeIf { it > 0L }
+        val limit = view.optJSONObject("limits")?.optInt("main", 0)?.takeIf { it > 0 }
         _ui.update {
             it.copy(
                 memory = memory,
                 memorySizes = sizes,
                 memorySummary = summary,
+                memorySummaryAt = summaryAt,
+                memorySummaryError = view.textOrNull("error"),
+                memoryLimit = limit,
                 memorySummarizing = view.optBoolean("summarizing", false),
                 memoryFresh = view.optBoolean("fresh", true),
             )
         }
+    }
+
+    /**
+     * 打开记忆面板时拉一次，并让 DSH 去写摘要（`memory-view {summarize:true}`）。
+     *
+     * DS Bot 在 `summarizing` 期间每 1.5s 轮询一次，摘要落地就停；这里照做，
+     * 最多轮询 90 次（约两分半）兜底，避免面板关掉以后一直在打接口。
+     */
+    fun refreshMemory(regenerate: Boolean = false) {
+        val connection = client ?: return
+        memoryJob?.cancel()
+        memoryJob = viewModelScope.launch {
+            repeat(90) { attempt ->
+                val body = JSONObject().put("botId", botId)
+                if (attempt == 0) {
+                    if (regenerate) body.put("regenerate", true) else body.put("summarize", true)
+                } else {
+                    body.put("summarize", true)
+                }
+                val view = runCatching { connection.bot("memory-view", body) }.getOrNull()
+                    ?: return@launch
+                applyMemoryView(view)
+                if (!view.optBoolean("summarizing", false)) return@launch
+                delay(1_500)
+            }
+        }
+    }
+
+    fun stopMemoryPolling() {
+        memoryJob?.cancel()
+        memoryJob = null
     }
 
     private fun parseRunStats(values: JSONObject?): BotRunStats {
@@ -555,6 +601,31 @@ class BotDetailsViewModel(
                 onDone(null)
             }.onFailure {
                 onDone(it.message ?: "删除记忆失败")
+            }
+        }
+    }
+
+    /**
+     * 对着记忆说话 / 直接更新（`memory-ask`，DS Bot 面板底部那个胶囊输入）。
+     * `result.reply` 给界面显示，`result.view` 直接回填整张面板。
+     */
+    fun memoryAsk(text: String, onReply: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) {
+            onReply(null)
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot("memory-ask", JSONObject().put("botId", botId).put("text", trimmed))
+            }.onSuccess { view ->
+                applyMemoryView(view)
+                val reply = view.optString("reply").takeIf { it.isNotEmpty() }
+                onReply(reply)
+                if (view.optBoolean("summarizing", false)) refreshMemory(false)
+            }.onFailure { failure ->
+                onReply(failure.message ?: "记忆更新失败")
             }
         }
     }

@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">DSHM Bot</string>
 
+    <string name="action_choose">选择</string>
+    <string name="settings_value_current">当前</string>
     <string name="action_back">返回</string>
 
     <string name="home_profile">个人资料与设置</string>
@@ -100,6 +102,37 @@
     <string name="bot_details_memory_scope_team">团队记忆</string>
     <string name="bot_details_memory_scope_group">群记忆</string>
     <string name="bot_details_memory_chars">%1$d 字</string>
+    <string name="memory_title_summary">记忆摘要</string>
+    <string name="memory_title_entries">全部条目</string>
+    <string name="memory_menu">记忆选项</string>
+    <string name="memory_regenerate">重新生成摘要</string>
+    <string name="memory_back">返回摘要</string>
+    <string name="memory_close">关闭</string>
+    <string name="memory_writing">正在写摘要…</string>
+    <string name="memory_updating">更新中…</string>
+    <string name="memory_updated_ago">更新于 %1$s</string>
+    <string name="memory_updated_now">刚刚更新</string>
+    <string name="memory_stale_reason">摘要过期了：%1$s</string>
+    <string name="memory_failed_reason">摘要写不出来：%1$s</string>
+    <string name="memory_retry">重试</string>
+    <string name="memory_empty_group_title">这个群还没有保存任何内容</string>
+    <string name="memory_empty_bot_title">%1$s 还没保存任何内容</string>
+    <string name="memory_empty_group_text">群记忆存的是它干活需要的决定、规则和事实，只有成员能在这里读到。可以直接在群里告诉它。</string>
+    <string name="memory_empty_bot_text">Bot 会记住长期的偏好、决定，以及你让它记的东西。可以在对话里告诉 %1$s，之后也能在 Bot 设置里加。</string>
+    <string name="memory_section_own">%1$s 的记忆</string>
+    <string name="memory_section_team">团队记忆</string>
+    <string name="memory_section_team_hint">每个 Bot 都读</string>
+    <string name="memory_section_group">群记忆</string>
+    <string name="memory_section_group_hint">只有成员能读</string>
+    <string name="memory_size">已用 %1$s / %2$s 字符</string>
+    <string name="memory_remove">从记忆中移除</string>
+    <string name="memory_remove_again">再点一次移除</string>
+    <string name="memory_remove_confirm">移除</string>
+    <string name="memory_ago_minutes">%1$d 分钟前</string>
+    <string name="memory_ago_hours">%1$d 小时前</string>
+    <string name="memory_ago_days">%1$d 天前</string>
+    <string name="memory_one_entry">1 条</string>
+    <string name="memory_ask_placeholder">问我或直接更新</string>
     <string name="bot_details_folder_choose">选择文件夹…</string>
     <string name="bot_details_folder_browse">浏览文件夹…</string>
     <string name="bot_details_folder_type">手动输入路径…</string>
@@ -686,6 +719,8 @@
     <string name="schedules_room_suffix">群聊</string>
     <string name="schedules_weekdays">周几</string>
     <string name="schedules_need_fields">名字和内容都要填</string>
+    <string name="schedules_pick_time">选择时间</string>
+    <string name="schedules_pick_date">选择日期</string>
 
     <string name="settings_search_title">搜索设置</string>
     <string name="settings_search_hint">搜索设置项</string>

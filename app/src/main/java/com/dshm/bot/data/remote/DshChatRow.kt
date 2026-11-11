@@ -39,7 +39,7 @@ sealed interface DshChatRow {
             "turn/start", "turn/end", "step/start", "step/end",
             "session/title", "model/selection", "assistant/attempt",
             "approval/decided", "approval/policy", "permission/preset", "sandbox/mode",
-            "agent/inbox/spliced", "llm/retry", "todo/write", "goal/change",
+            "agent/inbox/spliced", "todo/write", "goal/change",
         )
 
         fun fromEvent(event: DshLogEvent): List<DshChatRow> {

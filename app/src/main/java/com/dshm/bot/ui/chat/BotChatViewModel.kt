@@ -589,6 +589,32 @@ class BotChatViewModel(
                     artifactCalls.values.removeAll { it.turn == turn }
                 }
             }
+
+            // dsh-Go 把 `llm/retry` 渲染成一条 `kind: 'retry'` 的普通事件行：
+            // 「模型请求失败，正在重试 (n/max)：原因」。这里对齐成同一行。
+            "llm/retry" -> {
+                val retry = data.optInt("retry", 0).coerceAtLeast(1)
+                val max = data.optInt("maxRetries", 0).takeIf { it > 0 }
+                val failure = data.optJSONObject("failure")
+                val reason = failure?.optString("message")?.takeIf { it.isNotBlank() }
+                    ?: failure?.optString("code")?.takeIf { it.isNotBlank() }
+                val retrySuffix = max?.let { "（$retry/$it）" } ?: "（$retry）"
+                val reasonSuffix = reason?.let { "：$it" } ?: ""
+                val id = "retry:$seq"
+                if (seen.add(id)) {
+                    toolEvents[seq] = ChatEntry(
+                        id = id,
+                        kind = ChatEntryKind.EVENT,
+                        text = "模型请求失败，正在重试$retrySuffix$reasonSuffix",
+                        author = botName,
+                        botId = botId,
+                        eventKind = "retry",
+                        eventCode = failure?.optString("code")?.takeIf { it.isNotBlank() },
+                        seq = seq,
+                        timeMs = time,
+                    )
+                }
+            }
         }
     }
 
@@ -1679,41 +1705,32 @@ class BotChatViewModel(
             if (isGroup) {
                 refreshGroupArtifacts(connection, groupRoundStartedAt.takeIf { it > 0 } ?: watchStartedAt)
             }
-            // 一轮结束却一个字都没产出：多半是模型调用失败（DS Bot 只写诊断不写 chat），
-            // 查一次诊断，找到就把失败贴成一行，别让「失败」和「正常做完」长得一样。
+            // 这一轮有没有产出都要判失败：DS Bot 的模型调用失败只写诊断不写 chat，
+            // 若只在「零产出」时查，模型吐了半段再失败就会静默，和「正常做完」长得一样。
             val produced = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT } > botEntriesAtStart
             val context = notifyContext
             val last = _uiState.value.entries.lastOrNull { it.kind == ChatEntryKind.BOT }?.text.orEmpty()
             val showPhoneResult = phoneTaskDone && context != null &&
                 DshmAccessibilityService.current != null
             Log.i("PhoneResult", "watch end: done=$phoneTaskDone show=$showPhoneResult produced=$produced")
+            // 对齐 dsh-Go：无论这一轮有没有产出都查一次失败诊断（模型中途失败也
+            // 不算「正常做完」，必须补一条错误行，不让失败静默）。已按 time 去重。
             var turnFailure: String? = null
-            if (produced) {
-                if (context != null && !showPhoneResult) {
-                    pushNotification(
-                        if (userStoppedRun) ChatNotifier.Kind.ERROR else ChatNotifier.Kind.DONE,
-                        context.getString(
-                            if (userStoppedRun) R.string.notify_error_title else R.string.notify_done_title,
-                            botName,
-                        ),
-                        if (userStoppedRun) {
-                            context.getString(R.string.notify_stopped_body)
-                        } else {
-                            notificationPreview(last.ifBlank { context.getString(R.string.notify_done_body) })
-                        },
-                    )
-                }
-            } else {
+            if (!userStoppedRun) {
                 turnFailure = reportTurnFailure(connection, watchStartedAt)
-                if (turnFailure != null && context != null) {
-                    if (!showPhoneResult) {
-                        pushNotification(
-                            ChatNotifier.Kind.ERROR,
-                            context.getString(R.string.notify_error_title, botName),
-                            notificationPreview(turnFailure.orEmpty()),
-                        )
-                    }
-                }
+            }
+            if (context != null && !showPhoneResult && turnFailure != null) {
+                pushNotification(
+                    ChatNotifier.Kind.ERROR,
+                    context.getString(R.string.notify_error_title, botName),
+                    notificationPreview(turnFailure),
+                )
+            } else if (context != null && !showPhoneResult && produced && turnFailure == null) {
+                pushNotification(
+                    ChatNotifier.Kind.DONE,
+                    context.getString(R.string.notify_done_title, botName),
+                    notificationPreview(last.ifBlank { context.getString(R.string.notify_done_body) }),
+                )
             }
             if (phoneTaskDone) {
                 if (showPhoneResult) {

@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">DSHM Bot</string>
 
+    <string name="action_choose">Choose</string>
+    <string name="settings_value_current">Current</string>
     <string name="action_back">Back</string>
 
     <string name="home_profile">Profile and settings</string>
@@ -100,6 +102,37 @@
     <string name="bot_details_memory_scope_team">Team memory</string>
     <string name="bot_details_memory_scope_group">Group memory</string>
     <string name="bot_details_memory_chars">%1$d chars</string>
+    <string name="memory_title_summary">Memory summary</string>
+    <string name="memory_title_entries">All entries</string>
+    <string name="memory_menu">Memory options</string>
+    <string name="memory_regenerate">Regenerate summary</string>
+    <string name="memory_back">Back to the summary</string>
+    <string name="memory_close">Close memory</string>
+    <string name="memory_writing">Writing the summary…</string>
+    <string name="memory_updating">Updating…</string>
+    <string name="memory_updated_ago">Updated %1$s</string>
+    <string name="memory_updated_now">Updated just now</string>
+    <string name="memory_stale_reason">The summary is out of date: %1$s</string>
+    <string name="memory_failed_reason">The summary could not be written: %1$s</string>
+    <string name="memory_retry">Try again</string>
+    <string name="memory_empty_group_title">Nothing is saved for this group yet</string>
+    <string name="memory_empty_bot_title">%1$s has not saved anything yet</string>
+    <string name="memory_empty_group_text">A group keeps the decisions, rules and facts its work needs, for its members to read here. Tell it in the group chat.</string>
+    <string name="memory_empty_bot_text">Bots keep lasting preferences, decisions and what you ask them to remember. Tell %1$s in its chat, or add it in Bot settings.</string>
+    <string name="memory_section_own">Memory of %1$s</string>
+    <string name="memory_section_team">Team memory</string>
+    <string name="memory_section_team_hint">Every Bot reads it</string>
+    <string name="memory_section_group">Group memory</string>
+    <string name="memory_section_group_hint">Only its members read it</string>
+    <string name="memory_size">%1$s of %2$s characters</string>
+    <string name="memory_remove">Remove from memory</string>
+    <string name="memory_remove_again">Click again to remove</string>
+    <string name="memory_remove_confirm">Remove</string>
+    <string name="memory_ago_minutes">%1$d min ago</string>
+    <string name="memory_ago_hours">%1$d h ago</string>
+    <string name="memory_ago_days">%1$d d ago</string>
+    <string name="memory_one_entry">1 entry</string>
+    <string name="memory_ask_placeholder">Ask or update</string>
     <string name="bot_details_folder_choose">Choose a folder…</string>
     <string name="bot_details_folder_browse">Browse folders…</string>
     <string name="bot_details_folder_type">Enter a path…</string>
@@ -1128,6 +1161,8 @@
     <string name="schedules_room_suffix">Group chat</string>
     <string name="schedules_weekdays">Days</string>
     <string name="schedules_need_fields">Fill in the name and what to do</string>
+    <string name="schedules_pick_time">Pick a time</string>
+    <string name="schedules_pick_date">Pick a date</string>
 </resources>
 
 

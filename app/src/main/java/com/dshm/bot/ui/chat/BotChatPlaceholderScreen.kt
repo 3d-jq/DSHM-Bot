@@ -296,18 +296,6 @@ fun BotChatScreen(
     /** 正在提交上方的模型选择：chip 禁用，避免重复点。 */
     var pickingModel by remember { mutableStateOf(false) }
 
-    // 「复制整段对话」：按当前界面上的条目生成 Markdown（网页版详情抽屉的 Share）。
-    fun copyTranscript() {
-        copyMessage(
-            attachContext,
-            conversationMarkdown(
-                title = bot.name,
-                botName = bot.name,
-                entries = state.entries,
-            ),
-        )
-    }
-
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Dshm.colors.background,
@@ -614,7 +602,6 @@ fun BotChatScreen(
                     onDetails()
                 },
                 onOpenMember = onOpenMember,
-                onCopyTranscript = { copyTranscript() },
             )
         } else {
             BotSettingsSheet(
@@ -626,7 +613,6 @@ fun BotChatScreen(
                     onDetails()
                 },
                 onBrowser = { onOpenBrowser(null) },
-                onCopyTranscript = { copyTranscript() },
             )
         }
     }

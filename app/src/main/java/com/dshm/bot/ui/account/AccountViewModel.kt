@@ -48,6 +48,8 @@ class AccountViewModel(
         val hasApiKey: Boolean = false,
         val maskedApiKey: String = "",
         val busy: Boolean = false,
+        /** 顶栏刷新按钮：正在重读资料与余额。 */
+        val refreshing: Boolean = false,
         val stage: AccountStage? = null,
         val attemptId: String? = null,
         val pendingSignOut: Boolean = false,
@@ -99,6 +101,7 @@ class AccountViewModel(
 
     fun refresh() {
         val repo = repository ?: return
+        _ui.value = _ui.value.copy(refreshing = true)
         viewModelScope.launch {
             runCatching {
                 val state = repo.state()
@@ -106,6 +109,7 @@ class AccountViewModel(
                 val balances = if (state.signedIn) repo.balances() else null
                 _ui.value = UiState(
                     ready = true,
+                    refreshing = false,
                     signedIn = state.signedIn,
                     name = profile?.name,
                     avatarUrl = profile?.avatarUrl,
@@ -116,7 +120,7 @@ class AccountViewModel(
                     hasApiKey = apiKeyStore.key() != null,
                     maskedApiKey = apiKeyStore.masked(),
                 )
-            }.onFailure { _ui.value = _ui.value.copy(ready = true, error = it.message) }
+            }.onFailure { _ui.value = _ui.value.copy(ready = true, refreshing = false, error = it.message) }
         }
     }
 

@@ -17,6 +17,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -44,7 +47,6 @@ fun RoomSettingsSheet(
     onDetails: () -> Unit,
     onOpenMember: (String) -> Unit,
     /** 复制整段对话（网页版详情抽屉的 Share）。 */
-    onCopyTranscript: () -> Unit = {},
     viewModel: RoomSettingsViewModel = viewModel(
         key = "room-sheet:${row.id}:${endpoint?.baseUrl.orEmpty()}",
         factory = RoomSettingsViewModel.factory(row.id, endpoint),
@@ -52,6 +54,7 @@ fun RoomSettingsSheet(
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val info = state.info
+    var showMemory by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.86f
 
@@ -165,10 +168,7 @@ fun RoomSettingsSheet(
                             stringResource(R.string.bot_settings_memory_count, state.memory.size)
                         },
                         value = stringResource(R.string.bot_settings_manage),
-                        onClick = {
-                            onDismiss()
-                            onDetails()
-                        },
+                        onClick = { showMemory = true },
                     )
                 }
             }
@@ -188,12 +188,27 @@ fun RoomSettingsSheet(
                         onDetails()
                     },
                 )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.chat_copy_transcript),
-                    onClick = onCopyTranscript,
-                )
             }
         }
+    }
+
+    if (showMemory) {
+        MemoryPanelDialog(
+            ownerName = info?.name ?: row.name,
+            group = true,
+            entries = state.memory,
+            sizes = state.memorySizes,
+            summary = state.memorySummary,
+            summaryAt = state.memorySummaryAt,
+            summaryError = state.memorySummaryError,
+            memoryLimit = state.memoryLimit,
+            summarizing = state.memorySummarizing,
+            fresh = state.memoryFresh,
+            onRefresh = { regenerate -> viewModel.refreshMemory(regenerate) },
+            onStopPolling = { viewModel.stopMemoryPolling() },
+            onAsk = { text, onReply -> viewModel.memoryAsk(text, onReply) },
+            onForget = { entry -> viewModel.forgetMemory(entry) },
+            onDismiss = { showMemory = false },
+        )
     }
 }

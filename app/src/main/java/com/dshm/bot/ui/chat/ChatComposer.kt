@@ -24,6 +24,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -369,21 +370,7 @@ fun ChatComposer(
         }
         // 输入框本体：附件缩略图也在这块白卡**里面**（照 DeepSearch：缩略图行在
         // 输入框的圆角容器内、文字行上方），不是浮在输入框外面的另一条。
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(COMPOSER_TEST_TAG)
-                .shadow(
-                    elevation = spacing.composerElevation,
-                    shape = shape,
-                    ambientColor = colors.shadowSoft,
-                    spotColor = colors.shadowSoft,
-                )
-                .clip(shape)
-                .background(colors.surface)
-                .border(spacing.hairline, colors.divider, shape)
-                .padding(spacing.composerKeyGap),
-        ) {
+        ComposerFieldSurface(modifier = Modifier.testTag(COMPOSER_TEST_TAG)) {
         if (attachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -598,9 +585,37 @@ private fun AttachMenuKey(
     }
 }
 
+/**
+ * 输入卡外壳：对话输入框那一套（28dp 圆角 + 白底 + 细描边 + 投影）。
+ *
+ * 记忆面板底部的输入框也用它，保证和对话输入框是同款。
+ */
+@Composable
+internal fun ComposerFieldSurface(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(Dshm.radius.composer)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = Dshm.spacing.composerElevation,
+                shape = shape,
+                ambientColor = Dshm.colors.shadowSoft,
+                spotColor = Dshm.colors.shadowSoft,
+            )
+            .clip(shape)
+            .background(Dshm.colors.surface)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
+            .padding(Dshm.spacing.composerKeyGap),
+        content = content,
+    )
+}
+
 /** 发送键：有内容主色实心 + ↑；无内容淡底灰箭头（禁用）。 */
 @Composable
-private fun SendKey(enabled: Boolean, onSend: () -> Unit) {
+internal fun SendKey(enabled: Boolean, onSend: () -> Unit) {
     Box(
         modifier = Modifier
             .size(Dshm.spacing.composerKey)

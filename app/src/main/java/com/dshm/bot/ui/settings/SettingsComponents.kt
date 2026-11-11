@@ -386,7 +386,9 @@ fun SettingsInput(
         decorationBox = { inner ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                // 多行输入（例如定时任务的「让他做什么」）要从左上角开始，
+                // 不能垂直居中；单行输入仍居中。
+                verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
             ) {
                 Box(Modifier.weight(1f)) {
                     if (value.isEmpty() && placeholder != null) {
