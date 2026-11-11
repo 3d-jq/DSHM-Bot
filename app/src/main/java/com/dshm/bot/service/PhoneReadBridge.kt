@@ -1,6 +1,7 @@
 package com.dshm.bot.service
 
 import android.content.Context
+import com.dshm.bot.data.remote.BotCache
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -35,9 +36,24 @@ object PhoneReadBridge {
             }
             for (index in 0 until items.length()) {
                 val item = items.optJSONObject(index) ?: continue
+                refreshBotCache(api, context, item.optString("botId"))
                 answer(api, context, item)
             }
         }
+    }
+
+    private var cachedBotId: String? = null
+    private var cachedAt = 0L
+
+    /** 悬浮条要画对应 Bot 的头像；新 Bot/一分钟过期时补一次 state，不能拖慢每个动作。 */
+    private suspend fun refreshBotCache(api: RemoteDshApi, context: Context, botId: String) {
+        if (botId.isBlank()) return
+        val now = System.currentTimeMillis()
+        if (botId == cachedBotId && now - cachedAt < 60_000L) return
+        cachedBotId = botId
+        cachedAt = now
+        val state = runCatching { api.botValue("state") }.getOrNull()
+        if (state is JSONObject) runCatching { BotCache(context).save(state) }
     }
 
     private suspend fun answer(api: RemoteDshApi, context: Context, item: JSONObject) {

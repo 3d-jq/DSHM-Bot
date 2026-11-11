@@ -27,6 +27,7 @@ class DshmAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         PhoneOverlay.hideNow()
+        PhoneResultOverlay.hide()
         gestureThread?.quitSafely()
         gestureThread = null
         gestureHandler = null

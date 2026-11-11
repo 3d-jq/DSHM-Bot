@@ -1,38 +1,30 @@
 package com.dshm.bot.service
 
-import android.animation.ValueAnimator
 import android.content.Context
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.graphics.RectF
-import android.graphics.SweepGradient
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import kotlin.math.cos
 import kotlin.math.min
 
 /**
  * 手机操控 Bot 工作时浮在别的 App 上面的控制胶囊（移植 DeepSearch `HandsCapsule`）：
  *
  * - 深色墨底 + 发丝描边，顶部居中、避开状态栏；
- * - 左侧三色渐变呼吸环（SweepGradient）+ 四根活动条；
- * - 中间「第 N 步」+ 当前动作；
+ * - 左侧是当前 Bot 的头像；
+ * - 中间只显示当前动作，不再显示步数；
  * - 右侧 停止；等用户接管时多一颗「继续」；等批准时多「打开」。
  *
- * 舞台（边缘跑马灯 / 瞄准环 / 涟漪）在 [PhoneStage]。
+ * 舞台（边缘跑马灯 / 鼠标指针）在 [PhoneStage]。
  */
 object PhoneOverlay {
     private val main = Handler(Looper.getMainLooper())
@@ -41,8 +33,8 @@ object PhoneOverlay {
     private var params: WindowManager.LayoutParams? = null
     private var title: TextView? = null
     private var detail: TextView? = null
-    private var ring: RingView? = null
-    private var bars: BarsView? = null
+    private var face: PhoneBotFace? = null
+    private var faceBotId: String? = null
     private var continueBtn: TextView? = null
     private var openBtn: TextView? = null
     private var allowBtn: TextView? = null
@@ -52,21 +44,21 @@ object PhoneOverlay {
 
     /** 兼容旧调用：显式文案的工作态。 */
     fun show(service: DshmAccessibilityService, text: String) {
-        working(service, 0, text)
+        working(service, text)
     }
 
-    fun working(service: DshmAccessibilityService, step: Int, text: String) = onMain {
+    fun working(service: DshmAccessibilityService, text: String) = onMain {
         if (PhoneControlSession.stopped) return@onMain
+        PhoneResultOverlay.hide()
         ensure(service)
-        title?.text = if (step > 0) "第 $step 步" else "DSH 正在操作手机"
+        refreshFace(service)
+        title?.text = "DSH 正在操作手机"
         detail?.text = text
         continueBtn?.visibility = View.GONE
         openBtn?.visibility = View.GONE
         allowBtn?.visibility = View.GONE
         denyBtn?.visibility = View.GONE
         stopBtn?.visibility = View.VISIBLE
-        ring?.turning(true)
-        bars?.start()
         PhoneStage.mood(PhoneStage.Mood.WORKING)
         main.removeCallbacks(hide)
         main.postDelayed(hide, 15_000)
@@ -75,6 +67,7 @@ object PhoneOverlay {
     /** 轮到你：登录、验证码等在 operated App 里完成，胶囊给「继续」。 */
     fun takeOver(service: DshmAccessibilityService, reason: String) = onMain {
         if (PhoneControlSession.stopped) return@onMain
+        PhoneResultOverlay.hide()
         ensure(service)
         title?.text = "轮到你"
         detail?.text = reason.ifBlank { "请在手机上完成这一步，然后点继续" }
@@ -83,8 +76,6 @@ object PhoneOverlay {
         allowBtn?.visibility = View.GONE
         denyBtn?.visibility = View.GONE
         stopBtn?.visibility = View.VISIBLE
-        ring?.turning(false)
-        bars?.stop()
         PhoneStage.mood(PhoneStage.Mood.WAITING)
         main.removeCallbacks(hide)
     }
@@ -92,6 +83,7 @@ object PhoneOverlay {
     /** 等你批准：这一步要用户点一下允许。 */
     fun approval(service: DshmAccessibilityService, what: String, decidable: Boolean = true) = onMain {
         if (PhoneControlSession.stopped) return@onMain
+        PhoneResultOverlay.hide()
         ensure(service)
         title?.text = "等你批准"
         detail?.text = what
@@ -100,8 +92,6 @@ object PhoneOverlay {
         allowBtn?.visibility = if (decidable) View.VISIBLE else View.GONE
         denyBtn?.visibility = if (decidable) View.VISIBLE else View.GONE
         stopBtn?.visibility = View.VISIBLE
-        ring?.turning(false)
-        bars?.stop()
         PhoneStage.mood(PhoneStage.Mood.WAITING)
         main.removeCallbacks(hide)
     }
@@ -150,23 +140,10 @@ object PhoneOverlay {
         PhoneStage.setVisible(true)
     }
 
-    /**
-     * 这一轮手机任务结束：收起浮层并回到 DSHM Bot。
-     * 这是 DeepSearch `HandsOperator.finally` 里 `bringAppToFront` 的同款闭环。
-     */
-    fun finishAndReturn(context: Context? = null) = onMain {
-        val target = DshmAccessibilityService.current ?: context
+    /** 这一轮手机任务结束：收起操作胶囊，显示 eta 同款「结果卡 + 回到界面」。 */
+    fun finishWithResult(context: Context?, text: String) = onMain {
         hideNow()
-        val ctx = target ?: return@onMain
-        main.postDelayed({
-            val intent = android.content.Intent(ctx, com.dshm.bot.MainActivity::class.java)
-                .addFlags(
-                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
-                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                        android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP,
-                )
-            runCatching { ctx.startActivity(intent) }
-        }, 180L)
+        PhoneResultOverlay.show(context, text)
     }
 
     fun hideNow(): Unit = onMain {
@@ -178,8 +155,8 @@ object PhoneOverlay {
         params = null
         title = null
         detail = null
-        ring = null
-        bars = null
+        face = null
+        faceBotId = null
         continueBtn = null
         openBtn = null
         allowBtn = null
@@ -219,6 +196,13 @@ object PhoneOverlay {
         capsule.animate().alpha(1f).translationY(0f).setDuration(220L).start()
     }
 
+    private fun refreshFace(service: DshmAccessibilityService) {
+        val botId = PhoneControlSession.activeBotId
+        if (botId == faceBotId) return
+        faceBotId = botId
+        face?.setLook(PhoneBotLooks.load(service))
+    }
+
     private fun build(service: DshmAccessibilityService): LinearLayout {
         val capsule = LinearLayout(service).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -236,26 +220,13 @@ object PhoneOverlay {
         val faceBox = FrameLayout(service).apply {
             layoutParams = LinearLayout.LayoutParams(faceSize, faceSize).apply { rightMargin = dp(service, 8) }
         }
-        val logo = ImageView(service).apply {
-            layoutParams = FrameLayout.LayoutParams(faceSize - dp(service, 8), faceSize - dp(service, 8))
-                .apply { gravity = Gravity.CENTER }
-            setImageResource(com.dshm.bot.R.mipmap.ic_launcher_foreground)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-        }
-        faceBox.addView(logo)
-        ring = RingView(service).apply {
+        val look = PhoneBotLooks.load(service)
+        face = PhoneBotFace(service, faceSize, look).apply {
             layoutParams = FrameLayout.LayoutParams(faceSize, faceSize).apply { gravity = Gravity.CENTER }
         }
-        faceBox.addView(ring)
+        faceBotId = PhoneControlSession.activeBotId
+        faceBox.addView(face)
         capsule.addView(faceBox)
-
-        bars = BarsView(service).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(service, 18), dp(service, 20)).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                rightMargin = dp(service, 6)
-            }
-        }
-        capsule.addView(bars)
 
         val texts = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
@@ -281,7 +252,7 @@ object PhoneOverlay {
         continueBtn = button(service, "继续", ACCENT) {
             PhoneControlSession.paused = false
             PhoneApprovalGate.allowLatest()
-            DshmAccessibilityService.current?.let { working(it, 0, "继续操作手机") }
+            DshmAccessibilityService.current?.let { working(it, "继续操作手机") }
         }.apply { visibility = View.GONE }
         openBtn = button(service, "打开", ACCENT) {
             val intent = android.content.Intent(service, com.dshm.bot.MainActivity::class.java)
@@ -290,11 +261,11 @@ object PhoneOverlay {
         }.apply { visibility = View.GONE }
         allowBtn = button(service, "允许", ACCENT) {
             PhoneApprovalGate.allowLatest()
-            DshmAccessibilityService.current?.let { working(it, 0, "继续操作手机") }
+            DshmAccessibilityService.current?.let { working(it, "继续操作手机") }
         }.apply { visibility = View.GONE }
         denyBtn = button(service, "拒绝", STOP_RED) {
             PhoneApprovalGate.denyLatest()
-            DshmAccessibilityService.current?.let { working(it, 0, "已拒绝这一步") }
+            DshmAccessibilityService.current?.let { working(it, "已拒绝这一步") }
         }.apply { visibility = View.GONE }
         stopBtn = button(service, "停止", STOP_RED) {
             PhoneControlSession.stopped = true
@@ -327,120 +298,6 @@ object PhoneOverlay {
             setOnClickListener { onClick() }
         }
 
-    /** 三色渐变呼吸环（移植 DeepSearch `HandsCapsule.RingView`）。 */
-    private class RingView(context: Context) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-        private val rect = RectF()
-        private var shader: SweepGradient? = null
-        private var breath = 0.5f
-        private var working = false
-        private var animator: ValueAnimator? = null
-
-        fun turning(on: Boolean) {
-            working = on
-            animator?.cancel()
-            animator = null
-            breath = if (stillMotion(context)) 0.5f else 0f
-            if (on && !stillMotion(context)) {
-                animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                    duration = BREATH_MS
-                    repeatCount = ValueAnimator.INFINITE
-                    interpolator = null
-                    addUpdateListener {
-                        breath = 0.5f - 0.5f * cos((it.animatedValue as Float) * 2f * Math.PI.toFloat())
-                        invalidate()
-                    }
-                    start()
-                }
-            }
-            invalidate()
-        }
-
-        override fun onDetachedFromWindow() {
-            animator?.cancel()
-            super.onDetachedFromWindow()
-        }
-
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            val stroke = resources.displayMetrics.density * 1.5f
-            paint.strokeWidth = stroke
-            rect.set(stroke, stroke, w - stroke, h - stroke)
-            shader = SweepGradient(
-                w / 2f,
-                h / 2f,
-                intArrayOf(ACCENT, VIOLET, CYAN, ACCENT),
-                floatArrayOf(0f, 0.38f, 0.72f, 1f),
-            )
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            if (working) {
-                paint.shader = shader
-                paint.alpha = (255 * (0.86f + 0.14f * breath)).toInt()
-                val scale = 1f + 0.06f * breath
-                canvas.save()
-                canvas.scale(scale, scale, width / 2f, height / 2f)
-                canvas.drawOval(rect, paint)
-                canvas.restore()
-            } else {
-                paint.shader = null
-                paint.color = 0x59FFFFFF
-                canvas.drawOval(rect, paint)
-            }
-        }
-    }
-
-    /** 四根依次起伏的活动条（移植 DeepSearch `HandsCapsule.BarsView`）。 */
-    private class BarsView(context: Context) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var t = 0f
-        private var animator: ValueAnimator? = null
-
-        fun start() {
-            if (animator != null || stillMotion(context)) {
-                invalidate()
-                return
-            }
-            animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = BREATH_MS
-                repeatCount = ValueAnimator.INFINITE
-                interpolator = null
-                addUpdateListener {
-                    t = it.animatedValue as Float
-                    invalidate()
-                }
-                start()
-            }
-        }
-
-        fun stop() {
-            animator?.cancel()
-            animator = null
-        }
-
-        override fun onDetachedFromWindow() {
-            stop()
-            super.onDetachedFromWindow()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            val d = resources.displayMetrics.density
-            val barW = 3f * d
-            val gap = 2.5f * d
-            val total = 4 * barW + 3 * gap
-            var x = (width - total) / 2f
-            for (i in 0 until 4) {
-                val phase = ((t - i * BAR_LAG) % 1f + 1f) % 1f
-                val eased = if (stillMotion(context)) 1f else 0.5f - 0.5f * cos(phase * 2f * Math.PI.toFloat())
-                val h = height * (0.35f + 0.65f * eased)
-                paint.color = if (i % 2 == 0) CYAN else ACCENT
-                paint.alpha = (255 * (0.6f + 0.4f * eased)).toInt()
-                canvas.drawRoundRect(x, height - h, x + barW, height.toFloat(), barW / 2f, barW / 2f, paint)
-                x += barW + gap
-            }
-        }
-    }
-
     private fun statusBarHeight(service: DshmAccessibilityService): Int {
         val id = service.resources.getIdentifier("status_bar_height", "dimen", "android")
         return if (id > 0) service.resources.getDimensionPixelSize(id) else dp(service, 24)
@@ -459,20 +316,9 @@ object PhoneOverlay {
         ).toInt()
 
     private const val ACCENT = 0xFF0A66E4.toInt()
-    private const val VIOLET = 0xFF7C5CFF.toInt()
-    private const val CYAN = 0xFF06B6D4.toInt()
     private const val INK = 0xD1111218.toInt()
     private const val EDGE = 0x1AFFFFFF
     private const val STOP_RED = 0xFF9B3B3B.toInt()
-    private const val BREATH_MS = 4800L
-    private const val BAR_LAG = 600f / BREATH_MS
-
-    private fun stillMotion(context: Context): Boolean =
-        Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f,
-        ) == 0f
 }
 
 object PhoneControlSession {
@@ -483,24 +329,41 @@ object PhoneControlSession {
 
     @Volatile
     private var engagedBot: String? = null
+    @Volatile
+    private var engaged = false
+    @Volatile
+    var activeBotId: String? = null
+        private set
 
     /** 这一轮里第一次真正调用了手机工具。 */
     fun engage(botId: String?) {
         engagedBot = botId
+        engaged = true
+        if (!botId.isNullOrBlank()) activeBotId = botId
     }
 
     /** 只让发起手机操作的那个 Bot 的回合结束触发“回到 App”。 */
-    fun consumeFor(botId: String): Boolean {
-        val owner = engagedBot ?: return false
-        if (owner.isNotEmpty() && owner != botId) return false
+    fun consumeFor(@Suppress("UNUSED_PARAMETER") botId: String): Boolean {
+        if (!engaged) return false
+        engaged = false
         engagedBot = null
         return true
+    }
+
+    /** 用户发出一条新消息：清掉上一轮停止/暂停和“已参与”标记。 */
+    fun beginTurn() {
+        paused = false
+        stopped = false
+        engaged = false
+        engagedBot = null
     }
 
     fun reset() {
         paused = false
         stopped = false
+        engaged = false
         engagedBot = null
+        activeBotId = null
     }
 
     fun blockedReason(): String? = when {

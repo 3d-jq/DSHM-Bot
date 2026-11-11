@@ -1,6 +1,7 @@
 package com.dshm.bot.ui.chat
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -37,6 +38,7 @@ import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
 import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.service.PhoneControlSession
 import com.dshm.bot.service.PhoneOverlay
+import com.dshm.bot.service.DshmAccessibilityService
 import com.dshm.bot.ui.home.RoomMemberUi
 import com.dshm.bot.ui.home.TeamRoomUi
 import kotlinx.coroutines.Job
@@ -912,6 +914,10 @@ class BotChatViewModel(
         val connection = client ?: return
         val text = raw.trim()
         if ((text.isEmpty() && attachments.isEmpty()) || _uiState.value.sending) return
+        // 新一轮指令：清掉上一轮手机操控留下的“停止/暂停”状态和回合标记。
+        val phoneOwner = notifyContext?.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
+            ?.getString("phone_control_bot_id", null)
+        if (phoneOwner == null || phoneOwner == botId) PhoneControlSession.beginTurn()
         val requestId = UUID.randomUUID().toString()
         optimisticRun = true
         userStoppedRun = false
@@ -1667,11 +1673,7 @@ class BotChatViewModel(
             }
             optimisticRun = false
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
-            // 手机操控这一轮真正结束：照 DeepSearch 的 finally 闭环，
-            // 收起浮层并把 DSHM Bot 拉回前台。只由调用手机工具的 Bot 触发。
-            if (PhoneControlSession.consumeFor(botId)) {
-                PhoneOverlay.finishAndReturn(notifyContext)
-            }
+            val phoneTaskDone = PhoneControlSession.consumeFor(botId)
             // 群成员跑在自己会话里，产物（`present`）也就落在那边：这一轮结束后
             // 去插件收一次，没人 `present` 时就退回「本轮被改动的文件」。
             if (isGroup) {
@@ -1681,9 +1683,13 @@ class BotChatViewModel(
             // 查一次诊断，找到就把失败贴成一行，别让「失败」和「正常做完」长得一样。
             val produced = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT } > botEntriesAtStart
             val context = notifyContext
+            val last = _uiState.value.entries.lastOrNull { it.kind == ChatEntryKind.BOT }?.text.orEmpty()
+            val showPhoneResult = phoneTaskDone && context != null &&
+                DshmAccessibilityService.current != null
+            Log.i("PhoneResult", "watch end: done=$phoneTaskDone show=$showPhoneResult produced=$produced")
+            var turnFailure: String? = null
             if (produced) {
-                if (context != null) {
-                    val last = _uiState.value.entries.lastOrNull { it.kind == ChatEntryKind.BOT }?.text.orEmpty()
+                if (context != null && !showPhoneResult) {
                     pushNotification(
                         if (userStoppedRun) ChatNotifier.Kind.ERROR else ChatNotifier.Kind.DONE,
                         context.getString(
@@ -1698,13 +1704,27 @@ class BotChatViewModel(
                     )
                 }
             } else {
-                val failure = reportTurnFailure(connection, watchStartedAt)
-                if (failure != null && context != null) {
-                    pushNotification(
-                        ChatNotifier.Kind.ERROR,
-                        context.getString(R.string.notify_error_title, botName),
-                        notificationPreview(failure),
-                    )
+                turnFailure = reportTurnFailure(connection, watchStartedAt)
+                if (turnFailure != null && context != null) {
+                    if (!showPhoneResult) {
+                        pushNotification(
+                            ChatNotifier.Kind.ERROR,
+                            context.getString(R.string.notify_error_title, botName),
+                            notificationPreview(turnFailure.orEmpty()),
+                        )
+                    }
+                }
+            }
+            if (phoneTaskDone) {
+                if (showPhoneResult) {
+                    val result = if (produced) {
+                        last.ifBlank { context?.getString(R.string.notify_done_body).orEmpty() }
+                    } else {
+                        turnFailure ?: "任务已经结束。"
+                    }
+                    PhoneOverlay.finishWithResult(context, result)
+                } else {
+                    PhoneOverlay.hideNow()
                 }
             }
             userStoppedRun = false
