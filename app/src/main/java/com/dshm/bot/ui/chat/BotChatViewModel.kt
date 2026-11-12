@@ -324,6 +324,11 @@ class BotChatViewModel(
     val speechRepository: SpeechRepository? = endpoint?.let { RemoteSpeechRepository(DshClients.of(it)) }
     private val historyCache = appContext?.let { ChatHistoryCache(it, botId) }
     private val cachedHistory = historyCache?.load()
+    /** 自己发过的附件（`rpcId → 本地文件`）：历史重载后把缩略图贴回去。 */
+    private val attachmentCache = appContext?.let { ChatAttachmentCache(it, botId) }
+    private val sentAttachments = java.util.concurrent.ConcurrentHashMap<String, List<ChatAttachmentItem>>(
+        attachmentCache?.load().orEmpty(),
+    )
     private val _uiState = MutableStateFlow(
         BotChatUiState(
             // 有磁盘缓存时首屏直接画缓存，不再每次热启动闪骨架。
@@ -979,6 +984,11 @@ class BotChatViewModel(
             },
         )
         localUserEntries[requestId] = bubble
+        // 记下来：历史重载后引擎只给「N 张图片」，靠这张表才能把缩略图贴回去。
+        if (bubble.attachmentItems.isNotEmpty()) {
+            sentAttachments[requestId] = bubble.attachmentItems
+            attachmentCache?.save(sentAttachments)
+        }
         seen.add(bubble.id)
         // 点击那一帧就画出来，不等 HTTP / SSE 回显。
         _uiState.update { state ->
@@ -1943,17 +1953,26 @@ class BotChatViewModel(
         val duration = item.optLong("duration", -1L).takeIf { it > 0L }
         val seqValue = item.optLong("seq", -1L).takeIf { it >= 0L }
         return when (item.optString("kind")) {
-            "user" -> text.takeIf { it.isNotBlank() }
-                ?.let {
+            "user" -> {
+                // 引擎历史只给图片数量；自己发过的按 rpcId 把本地附件贴回来。
+                val sent = rpcId?.let { key -> sentAttachments[key] }.orEmpty()
+                val imageCount = item.optInt("images", 0)
+                // 只有图片、没有文字的消息也要画（以前 `text` 为空就被整条丢掉了）。
+                if (text.isBlank() && sent.isEmpty() && imageCount == 0) {
+                    null
+                } else {
                     ChatEntry(
                         id = if (rpcId != null) "user:$rpcId" else id,
                         kind = ChatEntryKind.USER,
-                        text = it,
+                        text = text,
                         timeMs = time,
                         seq = seqValue,
-                        images = item.optInt("images", 0),
+                        images = imageCount,
+                        attachments = sent.map { attachment -> attachment.name },
+                        attachmentItems = sent,
                     )
                 }
+            }
 
             "bot" -> text.takeIf { it.isNotBlank() }
                 ?.let {

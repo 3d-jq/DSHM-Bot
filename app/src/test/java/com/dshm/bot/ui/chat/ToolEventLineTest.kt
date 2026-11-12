@@ -81,6 +81,15 @@ class ToolEventLineTest {
         assertEquals("研究员", created?.target)
     }
 
+    /** 失败行不挂目标：DS Bot 的失败行是纯文本，点了不该弹出对方的面板。 */
+    @Test
+    fun `failed relay lines carry no target so they are not clickable`() {
+        assertEquals("没能叫停 小助手", line("stop_bot", JSONObject().put("bot", "小助手"), isError = true)?.label)
+        assertEquals(null, line("stop_bot", JSONObject().put("bot", "小助手"), isError = true)?.target)
+        assertEquals("没能给 小助手 发消息", line("message_bot", JSONObject().put("to", "小助手"), isError = true)?.label)
+        assertEquals(null, line("message_bot", JSONObject().put("to", "小助手"), isError = true)?.target)
+    }
+
     @Test
     fun `update_bot without a bot argument updates itself`() {
         val updated = line("update_bot", JSONObject())

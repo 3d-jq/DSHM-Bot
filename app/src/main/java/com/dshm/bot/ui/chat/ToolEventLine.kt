@@ -47,7 +47,8 @@ fun toolEventLine(
         "stop_bot" -> ToolEventLine(
             if (isError) (target?.let { "没能叫停 $it" } ?: "没能叫停其他 Bot")
             else (target?.let { "叫停了 $it" } ?: "叫停了其他 Bot"),
-            target,
+            // 失败行不挂目标：DS Bot 的失败行是纯文本，点了不该弹出对方的面板。
+            target?.takeUnless { isError },
         )
 
         "create_bot" -> ToolEventLine(

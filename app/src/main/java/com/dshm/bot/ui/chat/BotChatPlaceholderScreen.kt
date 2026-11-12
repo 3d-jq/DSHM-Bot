@@ -217,8 +217,9 @@ fun BotChatScreen(
                     val bytes = attachContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     if (bytes == null || bytes.isEmpty()) return@runCatching null
                     val name = displayName(uri)
-                    // 留一份在缓存里：气泡里的缩略图 / 文件卡按路径读，内存里的字节发完就没了。
-                    val dir = File(attachContext.cacheDir, "chat-attachments").apply { mkdirs() }
+                    // 留一份**持久**副本（不是 cacheDir）：气泡里的缩略图 / 文件卡按路径读，
+                    // 缓存目录会被系统清理，历史重载后就只剩「N 张图片」了。
+                    val dir = File(attachContext.filesDir, "chat-attachments").apply { mkdirs() }
                     val cached = File(dir, "${System.currentTimeMillis()}-${name.replace('/', '_')}")
                     cached.outputStream().use { it.write(bytes) }
                     ChatAttachmentDraft(name, bytes, isImage, cached.absolutePath)
@@ -724,6 +725,8 @@ private fun ChatMessages(
     var messageMenu by remember { mutableStateOf<MessageMenuTarget?>(null) }
     /** 「选择文字」面板（两种气泡共用；回复按 markdown 画）。 */
     var selectText by remember { mutableStateOf<MessageMenuTarget?>(null) }
+    /** 正在全屏查看的图片。 */
+    var viewingImage by remember { mutableStateOf<ChatAttachmentItem?>(null) }
     val appContextForMenu = LocalContext.current
     val streamingNow = streaming.isNotEmpty()
     // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
@@ -972,6 +975,7 @@ private fun ChatMessages(
                         items = entry.attachmentItems,
                         images = entry.images,
                         timeMs = null,
+                        onOpenImage = { viewingImage = it },
                         onLongPress = {
                             messageMenu = MessageMenuTarget(
                                 messageId = entry.id,
@@ -1003,7 +1007,16 @@ private fun ChatMessages(
                             ?.let { name -> members.firstOrNull { it.name.equals(name, ignoreCase = true) } }
                         val targetRoom = entry.target
                             ?.let { name -> rooms.firstOrNull { it.name == name } }
-                        val clickId = entry.botId?.takeIf { it != bot.id } ?: targetMember?.id
+                        // 只有「跟别的 Bot / 群聊有往来」的事件行才点得开 —— DS Bot 也只在
+                        // 「发给 X / 你停下了 X / 回复来自 X」这几行挂 `openExchange`。
+                        // 失败和提示类事件（「余额不足」「超时」）不该点出 Bot 间对话面板：
+                        // 它们只是这条对话里的状态播报，点了会弹出一个空壳面板。
+                        val relay = entry.eventKind in RELAY_EVENT_KINDS || entry.tool in RELAY_TOOL_NAMES
+                        val clickId = if (relay) {
+                            entry.botId?.takeIf { it != bot.id } ?: targetMember?.id
+                        } else {
+                            null
+                        }
                         EventLine(
                             text = entry.text,
                             kind = entry.eventKind,
@@ -1094,6 +1107,10 @@ private fun ChatMessages(
                     copyMessage(appContextForMenu, target.text)
                 },
             )
+        }
+        // 点图片缩略图 → 全屏查看器（缩放 / 双击 / 复制 / 分享 / 保存）。
+        viewingImage?.let { image ->
+            FullscreenImageViewer(item = image, onDismiss = { viewingImage = null })
         }
         // 普通高斯模糊 + 渐变遮罩（B 方案）：`Modifier.blur` 底层就是 Android
         // RenderEffect 的高斯模糊，只作用在这层渐变上；不录消息层、不做 DstIn /
@@ -1365,6 +1382,8 @@ private fun UserBubble(
     timeMs: Long? = null,
     /** 长按气泡：弹统一的消息操作面板。 */
     onLongPress: () -> Unit = {},
+    /** 点图片缩略图：打开全屏查看器。 */
+    onOpenImage: (ChatAttachmentItem) -> Unit = {},
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1384,7 +1403,7 @@ private fun UserBubble(
                     .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
             ) {
                 if (items.isNotEmpty()) {
-                    UserAttachmentCards(items)
+                    UserAttachmentCards(items, onOpenImage)
                     if (text.isNotBlank()) Spacer(Modifier.height(Dshm.spacing.xs))
                 }
                 if (text.isNotBlank()) {
@@ -1410,7 +1429,8 @@ private fun UserBubble(
                         modifier = Modifier.padding(top = Dshm.spacing.xxs),
                     )
                 }
-                ImageCountCaption(count = images)
+                // 有本地缩略图时不再写「N 张图片」；只有回读拿不到图才提示数量。
+                if (items.none { it.isImage } && images > 0) ImageCountCaption(count = images)
             }
         }
         timeMs?.let { t ->
@@ -1426,7 +1446,10 @@ private fun UserBubble(
 
 /** 用户气泡里的附件：图片缩略图 + 文件卡（都画在气泡的主色底上）。 */
 @Composable
-private fun UserAttachmentCards(items: List<ChatAttachmentItem>) {
+private fun UserAttachmentCards(
+    items: List<ChatAttachmentItem>,
+    onOpenImage: (ChatAttachmentItem) -> Unit,
+) {
     val images = items.filter { it.isImage }
     val files = items.filterNot { it.isImage }
     Column(horizontalAlignment = Alignment.End) {
@@ -1435,7 +1458,7 @@ private fun UserAttachmentCards(items: List<ChatAttachmentItem>) {
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
             ) {
                 images.take(MAX_USER_THUMBS).forEach { item ->
-                    UserThumb(item, Modifier.size(THUMB_SIZE))
+                    UserThumb(item, Modifier.size(THUMB_SIZE), onClick = { onOpenImage(item) })
                 }
             }
             if (images.size > MAX_USER_THUMBS) {
@@ -1477,7 +1500,11 @@ private fun UserAttachmentCards(items: List<ChatAttachmentItem>) {
 
 /** 气泡里的一张图片缩略图（方形、圆角、按高度裁切）。 */
 @Composable
-private fun UserThumb(item: ChatAttachmentItem, modifier: Modifier = Modifier) {
+private fun UserThumb(
+    item: ChatAttachmentItem,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
+) {
     val bitmap = remember(item.path) {
         runCatching {
             val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
@@ -1487,6 +1514,7 @@ private fun UserThumb(item: ChatAttachmentItem, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(Dshm.spacing.sm))
+            .clickable(onClick = onClick)
             .background(Dshm.colors.onBubbleUser.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center,
     ) {
@@ -1797,6 +1825,13 @@ private fun EventLine(
 
 /** relay 事件的种类：这些行的「谁」是对方 Bot，不是本对话的 Bot。 */
 private val RELAY_EVENT_KINDS = setOf("request", "reply", "report", "stopped")
+
+/**
+ * 这些工具事件行是「跟别的 Bot / 群聊打了交道」，点得开对方对话。
+ *
+ * 其余工具（记忆、浏览器、看自己的对话、团队清单）只是状态播报，点不开任何面板。
+ */
+private val RELAY_TOOL_NAMES = setOf("message_bot", "stop_bot", "post_to_group", "group_relay")
 
 /** relay 事件里的名字：DS Bot 认不出对方时写的是 `You`，不能当名字用。 */
 private fun relaySenderName(name: String?): String? =
