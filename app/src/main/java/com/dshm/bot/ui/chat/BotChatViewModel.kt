@@ -1184,6 +1184,13 @@ class BotChatViewModel(
                 val item = data.optJSONObject("item") ?: return
                 val scope = data.optString("sessionId").ifEmpty { sessionId ?: botId }
                 val entry = parseItem(item, scope, "feed:${System.nanoTime()}") ?: return
+                // 快照跟上：新消息落地就写进磁盘缓存。以前只在完整重拉时写，
+                // 导致「回复完就退 App、冷启动」读到的还是旧快照，要再进一次才变新。
+                //
+                // ⚠️ 必须放在 `seen` 去重**之前**：自己刚发的那条在 `send()` 时就已经
+                // 记进 `seen` 了，去重会把它挡掉 —— 表现是「助手消息冷启动能立刻看到、
+                // 自己发的却要等一会儿」。`appendItem` 自带 id/seq 去重，不会写重。
+                historyCache?.appendItem(item)
                 if (!seen.add(entry.id)) return
                 // 最终消息已经进列表，立即撤掉流式临时气泡，避免同一段回复出现两遍。
                 // 但一条 bot 文字 / 一个 stream 段不等于整回合结束：DS Bot 还能继续
