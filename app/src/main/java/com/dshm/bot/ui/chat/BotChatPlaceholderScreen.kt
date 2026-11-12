@@ -155,6 +155,8 @@ fun BotChatScreen(
     ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // 高频流式文本只在这层读，不经过整个对话页的 state（DeepSearch 侧通道同款）。
+    val streaming by viewModel.streamingText.collectAsStateWithLifecycle()
     var draft by rememberSaveable(bot.id) { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf<List<ChatAttachmentDraft>>(emptyList()) }
     val attachContext = LocalContext.current
@@ -270,7 +272,7 @@ fun BotChatScreen(
     var quickSettings by remember { mutableStateOf(false) }
     var exchangeWith by remember(bot.id) { mutableStateOf<String?>(null) }
     val quickSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val working = state.sending || state.waitingForReply || state.streaming.isNotEmpty()
+    val working = state.sending || state.waitingForReply || streaming.isNotEmpty()
     // 审批应答中（按钮禁用，避免重复点）。
     var answeringApproval by remember { mutableStateOf(false) }
     // 发送了几次 —— 每发一次就重新钉到底（照 DeepSearch 的 SEND-PATH）。
@@ -408,14 +410,14 @@ fun BotChatScreen(
                         onRetry = viewModel::retry,
                     )
 
-                    state.entries.isEmpty() && state.streaming.isEmpty() -> CenteredHint(
+                    state.entries.isEmpty() && streaming.isEmpty() -> CenteredHint(
                         title = stringResource(R.string.chat_placeholder_title, bot.name),
                         hint = stringResource(R.string.chat_placeholder_hint),
                     )
 
                     else -> ChatMessages(
                         entries = state.entries,
-                        streaming = state.streaming,
+                        streaming = streaming,
                         activity = state.activity,
                         lastSendAt = lastSendAt,
                         bot = bot,

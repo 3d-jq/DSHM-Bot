@@ -33,6 +33,8 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -246,6 +248,17 @@ internal fun ShardText(
     val messageId = LocalMarkdownMessageId.current
     val controller = LocalMinisSelectionController.current
     val allocator = LocalShardSubIndex.current
+    // 聊天列表已经不参与 MinisTextKit 选区：走极简 Text，
+    // 不挂 onTextLayout / onGloballyPositioned / drawBehind / shard 构建。
+    if (controller == null) {
+        Text(
+            text = text,
+            style = style,
+            softWrap = softWrap,
+            modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier).then(modifier),
+        )
+        return
+    }
     // 基础 id 同 `LocalShardId`；remember key 只用 baseId，和 DeepSearch 一致
     // （用具体 shardId 当 key 会在块内容变化时重新分配序号，注册表抖动）。
     val baseId = remember(messageId, shardId) { TextShardId(messageId, shardId) }
@@ -311,14 +324,10 @@ fun MarkdownText(
     messageId: String = "",
     /** false：短消息按内容宽度排版，不把气泡撑满（Bot 气泡用）。 */
     fillWidth: Boolean = true,
-    /**
-     * 流式输出中：行内样式（粗体 / 行内代码 / 链接）先不扫，按纯文本画。
-     * 对齐 dsh-Go `MarkdownBody` 的 `inlinePatterns = [_cursorPattern]`。
-     */
+    /** 流式输出中：按块冻结 + 后台解析，最后一块才是 live tail。 */
     streaming: Boolean = false,
 ) {
     val colors = Dshm.colors
-    val blocks = remember(markdown) { parseMarkdown(markdown) }
     val base = Dshm.typography.composerText.copy(
         fontSize = Dshm.typography.composerText.fontSize * fontScale,
         lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
@@ -326,11 +335,15 @@ fun MarkdownText(
     )
 
     val allocator = remember(messageId) { ShardSubIndexAllocator() }
-    val inline: (String) -> AnnotatedString = if (streaming) {
-        { raw -> AnnotatedString(raw) }
-    } else {
-        { raw -> inlineMarkdown(raw, colors, base, mentionMembers) }
-    }
+    // DeepSearch `MarkdownBlockBody`：冻结块解析一次并进进程级缓存，
+    // live tail 在 Dispatchers.Default 上解析后再回主线程画，
+    // 避免长表格 / 长段落每次 publish 都在主线程重扫。
+    // 按块分片（DeepSearch `splitMarkdownIntoBlockTexts`）：每片是独立
+    // composable、自己 produceState，未变的前缀 Compose 直接 skip，
+    // 只有 live tail 那一小片会随 token 重画。
+    val fragments = splitStreamingFragments(markdown)
+    val liveFade = if (streaming) rememberStreamingFade() else null
+    if (liveFade != null) StreamingFadeDriver(liveFade)
     CompositionLocalProvider(
         LocalMarkdownMessageId provides messageId,
         LocalShardSubIndex provides allocator,
@@ -339,79 +352,18 @@ fun MarkdownText(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
     ) {
-        blocks.forEachIndexed { index, block ->
-            val baseId = "b$index"
-            when (block) {
-                is MarkdownBlock.Paragraph -> ShardText(
-                    text = inline(block.text),
-                    style = base,
-                    shardId = "$baseId:p",
-                    fillWidth = fillWidth,
-                )
-
-                is MarkdownBlock.Heading -> ShardText(
-                    text = inline(block.text),
-                    style = base.copy(
-                        fontSize = base.fontSize * if (block.level <= 2) 1.18f else 1.08f,
-                        lineHeight = base.lineHeight * if (block.level <= 2) 1.18f else 1.08f,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    shardId = "$baseId:h",
-                    fillWidth = fillWidth,
-                )
-
-                is MarkdownBlock.ListItem -> ListLine(
-                    text = block.text,
-                    number = block.number,
-                    checked = block.checked,
+        fragments.forEachIndexed { fragmentIndex, fragment ->
+            val live = streaming && fragmentIndex == fragments.lastIndex
+            key(fragmentIndex) {
+                MarkdownFragment(
+                    raw = fragment,
+                    fragmentIndex = fragmentIndex,
+                    live = live,
                     colors = colors,
                     base = base,
                     mentionMembers = mentionMembers,
-                    shardId = "$baseId:l",
                     fillWidth = fillWidth,
-                    streaming = streaming,
-                )
-
-                is MarkdownBlock.Quote -> ShardText(
-                    text = inline(block.text),
-                    style = base.copy(
-                        color = colors.textSecondary,
-                        fontStyle = FontStyle.Italic,
-                    ),
-                    shardId = "$baseId:q",
-                    fillWidth = fillWidth,
-                    // 左边一条强调色竖线：引用块不靠缩进硬猜，一眼能认出来。
-                    modifier = Modifier
-                        .drawBehind {
-                            drawRect(
-                                color = colors.accent,
-                                topLeft = androidx.compose.ui.geometry.Offset.Zero,
-                                size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height),
-                            )
-                        }
-                        .padding(start = Dshm.spacing.md),
-                )
-
-                is MarkdownBlock.Code -> CodeBlockView(
-                    code = block.text,
-                    language = block.language,
-                    base = base,
-                    colors = colors,
-                    shardId = "$baseId:c",
-                )
-
-                MarkdownBlock.Divider -> HorizontalDivider(
-                    thickness = Dshm.spacing.hairline,
-                    color = colors.divider,
-                )
-
-                is MarkdownBlock.Table -> MarkdownTable(
-                    header = block.header,
-                    alignments = block.alignments,
-                    rows = block.rows,
-                    colors = colors,
-                    base = base,
-                    shardBase = "$baseId:t",
+                    fade = if (live) liveFade else null,
                 )
             }
         }
@@ -425,7 +377,7 @@ fun MarkdownText(
  * 对齐 DeepSearch 的 `CodeBlockView`；高亮用 [highlightCode]（轻量词法着色）。
  */
 @Composable
-private fun CodeBlockView(
+internal fun CodeBlockView(
     code: String,
     language: String,
     base: TextStyle,
@@ -513,7 +465,7 @@ private fun CodeBlockView(
  * 画完整网格（外框 + 横向分隔线 + 列间竖线），列宽固定才能保证竖线不被打乱。
  */
 @Composable
-private fun MarkdownTable(
+internal fun MarkdownTable(
     header: List<String>,
     alignments: List<MarkdownTables.Alignment>,
     rows: List<List<String>>,
@@ -542,9 +494,10 @@ private fun MarkdownTable(
         } else {
             Dshm.spacing.tableCellWidth
         }
+        val hScrollKey = "$shardBase:${header.joinToString("|")}"
         Box(
             modifier = Modifier
-                .horizontalScroll(rememberScrollState())
+                .horizontalScroll(TableHScrollStates.stateFor(hScrollKey))
                 .border(stroke, borderColor, shape)
                 .clip(shape),
         ) {
@@ -605,7 +558,7 @@ private fun MarkdownTable(
 
 /** 表格的一格：固定列宽，按对齐方式排内容。 */
 @Composable
-private fun TableCell(
+internal fun TableCell(
     text: String,
     alignment: MarkdownTables.Alignment,
     colors: DshmColors,
@@ -636,7 +589,7 @@ private fun TableCell(
 }
 
 @Composable
-private fun ListLine(
+internal fun ListLine(
     text: String,
     number: Int?,
     checked: Boolean? = null,
@@ -710,6 +663,53 @@ internal fun inlineMarkdown(
     val built = buildInlineMarkdown(text, colors, base, mentionMembers)
     synchronized(inlineCache) { inlineCache[key] = built }
     return built
+}
+
+/**
+ * live tail 的增量行内解析（DeepSearch `inlineIncremental`）：
+ * 已闭合的前缀走 LRU 缓存，只重新扫末尾没闭合的一小段。
+ */
+internal fun inlineMarkdownIncremental(
+    text: String,
+    colors: DshmColors,
+    base: TextStyle,
+    mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi>,
+): AnnotatedString {
+    val exact = InlineKey(colors.hashCode(), base.hashCode(), mentionMembers.hashCode(), text)
+    synchronized(inlineCache) { inlineCache[exact] }?.let { return it }
+    if (text.length < 1_500) return inlineMarkdown(text, colors, base, mentionMembers)
+    val split = safeInlineSplitOffset(text)
+    if (split <= 0) return inlineMarkdown(text, colors, base, mentionMembers)
+    val prefix = inlineMarkdown(text.substring(0, split), colors, base, mentionMembers)
+    val suffix = buildInlineMarkdown(text.substring(split), colors, base, mentionMembers)
+    return androidx.compose.ui.text.buildAnnotatedString {
+        append(prefix)
+        append(suffix)
+    }
+}
+
+/** 找一个不会切开 `**` / `~~` / 反引号 / `*`/`_` / `[...](...)` 的换行边界。 */
+private fun safeInlineSplitOffset(text: String): Int {
+    var bold = false
+    var strike = false
+    var code = false
+    var italic = false
+    var linkDepth = 0
+    for (index in text.indices) {
+        when (val char = text[index]) {
+            '`' -> code = !code
+            '*' -> if (text.startsWith("**", index)) {
+                bold = !bold
+            } else if (!bold) {
+                italic = !italic
+            }
+            '~' -> if (text.startsWith("~~", index)) strike = !strike
+            '[' -> linkDepth += 1
+            ']' -> if (linkDepth > 0) linkDepth -= 1
+            '\n' -> if (!bold && !strike && !code && !italic && linkDepth == 0) return index + 1
+        }
+    }
+    return 0
 }
 
 private fun buildInlineMarkdown(
@@ -792,6 +792,30 @@ private fun buildInlineMarkdown(
                 }
             }
 
+            isBareUrlAt(text, index) -> {
+                val end = bareUrlEnd(text, index)
+                val url = text.substring(index, end)
+                val link = runCatching { LinkAnnotation.Url(url) }.getOrNull()
+                if (link != null) {
+                    withLink(link) {
+                        withStyle(
+                            SpanStyle(
+                                color = colors.accent,
+                                textDecoration = TextDecoration.Underline,
+                            ),
+                        ) { append(url) }
+                    }
+                } else {
+                    withStyle(
+                        SpanStyle(
+                            color = colors.accent,
+                            textDecoration = TextDecoration.Underline,
+                        ),
+                    ) { append(url) }
+                }
+                index = end
+            }
+
             text[index] == '[' -> {
                 val close = text.indexOf(']', index + 1)
                 val urlEnd = if (close > index && close + 1 < text.length && text[close + 1] == '(') {
@@ -851,5 +875,21 @@ private fun buildInlineMarkdown(
             }
         }
     }
+}
+
+/** 只认带 scheme 的裸链接，避免把 `example.com` 这种普通文字误判成链接。 */
+private fun isBareUrlAt(text: String, index: Int): Boolean =
+    text.startsWith("http://", index) || text.startsWith("https://", index)
+
+/** URL 结束：空白、中文标点、右括号 / 方括号 / 尖括号都算终止。 */
+private fun bareUrlEnd(text: String, start: Int): Int {
+    var end = start
+    while (end < text.length) {
+        val char = text[end]
+        if (char.isWhitespace() || char in "，。；！？、）》」』])>\"'" || char == '（') break
+        end += 1
+    }
+    while (end > start && text[end - 1] in ".,;:!?") end -= 1
+    return end
 }
 

@@ -114,6 +114,7 @@ fun ProviderField(
             value = value,
             onValueChange = onValueChange,
             placeholder = placeholder,
+            label = label,
             keyboardType = keyboardType,
             visualTransformation = visualTransformation,
             trailing = suffix,

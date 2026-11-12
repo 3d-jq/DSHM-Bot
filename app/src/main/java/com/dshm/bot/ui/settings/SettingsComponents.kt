@@ -30,16 +30,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -68,6 +70,31 @@ import com.dshm.bot.ui.components.FloatingIconButton
 
 /** 测试用 tag：设置列表。 */
 const val SETTINGS_LIST_TAG = "settings_list"
+
+/**
+ * 全项目表单输入框统一用新建 Bot「名字 / 角色」那套 M3 `OutlinedTextField`：
+ * `radius.md` 圆角 + Dshm 边框/底色/游标色。对话输入框（`ChatComposer`）是带附件、
+ * 语音、发送键的专用复合控件，不在这里、也不要改成这套。
+ */
+@Composable
+fun dshmFieldShape(): Shape = RoundedCornerShape(Dshm.radius.md)
+
+@Composable
+fun dshmFieldColors(): TextFieldColors = OutlinedTextFieldDefaults.colors(
+    unfocusedBorderColor = Dshm.colors.divider,
+    focusedBorderColor = Dshm.colors.accent,
+    disabledBorderColor = Dshm.colors.divider,
+    errorBorderColor = Dshm.colors.danger,
+    unfocusedContainerColor = Dshm.colors.surface,
+    focusedContainerColor = Dshm.colors.surface,
+    disabledContainerColor = Dshm.colors.surface,
+    errorContainerColor = Dshm.colors.surface,
+    cursorColor = Dshm.colors.accent,
+    focusedLabelColor = Dshm.colors.accent,
+    unfocusedLabelColor = Dshm.colors.textSecondary,
+    unfocusedPlaceholderColor = Dshm.colors.textTertiary,
+    focusedPlaceholderColor = Dshm.colors.textTertiary,
+)
 
 /** 设置子页统一骨架：固定顶栏 + LazyColumn 内容。 */
 @Composable
@@ -353,7 +380,12 @@ fun SettingsEmpty(text: String) {
     }
 }
 
-/** 输入框（设置弹层内共用）。 */
+/**
+ * 表单输入框（设置弹层 / Bot 设置 / 定时任务 / 账号 / 模型供应商等共用）。
+ *
+ * 现在统一是 M3 [OutlinedTextField]，和新建 Bot 的名字 / 角色同款；`placeholder`
+ * 文案作为浮动 label 显示，避免和框内占位文字重复。保留原签名，所有调用点无需改。
+ */
 @Composable
 fun SettingsInput(
     value: String,
@@ -363,49 +395,36 @@ fun SettingsInput(
     singleLine: Boolean = true,
     keyboardType: KeyboardType = KeyboardType.Text,
     visualTransformation: VisualTransformation = VisualTransformation.None,
-    /** 输入框内的尾部控件（如 API Key 的显示/隐藏），对齐 dsh-Go 的 suffixIcon。 */
+    /** 输入框尾部控件（如 API Key 的显示/隐藏）。 */
     trailing: (@Composable () -> Unit)? = null,
+    /** 覆盖浮动 label；不传时用 [placeholder]。 */
+    label: String? = null,
+    isError: Boolean = false,
+    enabled: Boolean = true,
 ) {
-    val shape = RoundedCornerShape(Dshm.radius.md)
-    BasicTextField(
+    val fieldLabel = (label ?: placeholder)?.takeIf { it.isNotEmpty() }
+    OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        enabled = enabled,
+        readOnly = false,
         textStyle = Dshm.typography.settingsRowTitle.copy(color = Dshm.colors.textPrimary),
-        cursorBrush = SolidColor(Dshm.colors.accent),
-        singleLine = singleLine,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        visualTransformation = visualTransformation,
-        modifier = modifier
-            .fillMaxWidth()
-            // 所有输入框统一高度：尾部控件不再把某一个框撑高。
-            .heightIn(min = Dshm.spacing.inputHeight)
-            .clip(shape)
-            .background(Dshm.colors.surface)
-            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
-            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-        decorationBox = { inner ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                // 多行输入（例如定时任务的「让他做什么」）要从左上角开始，
-                // 不能垂直居中；单行输入仍居中。
-                verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
-            ) {
-                Box(Modifier.weight(1f)) {
-                    if (value.isEmpty() && placeholder != null) {
-                        Text(
-                            text = placeholder,
-                            style = Dshm.typography.settingsRowTitle,
-                            color = Dshm.colors.textTertiary,
-                        )
-                    }
-                    inner()
-                }
-                if (trailing != null) {
-                    Spacer(Modifier.width(Dshm.spacing.xs))
-                    trailing()
-                }
-            }
+        label = fieldLabel?.let { text -> { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+        placeholder = if (label != null && placeholder != null) {
+            { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        } else {
+            null
         },
+        trailingIcon = trailing,
+        isError = isError,
+        visualTransformation = visualTransformation,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        singleLine = singleLine,
+        minLines = if (singleLine) 1 else 3,
+        maxLines = if (singleLine) 1 else 8,
+        shape = dshmFieldShape(),
+        colors = dshmFieldColors(),
     )
 }
 

@@ -794,7 +794,8 @@ private fun SecretScopeComboBox(
             singleLine = true,
             label = { Text(stringResource(R.string.team_secrets_who)) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            shape = RoundedCornerShape(Dshm.radius.md),
+            shape = dshmFieldShape(),
+            colors = dshmFieldColors(),
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth(),

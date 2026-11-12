@@ -333,6 +333,23 @@ class BotChatViewModel(
     )
     val uiState: StateFlow<BotChatUiState> = _uiState.asStateFlow()
 
+    /**
+     * 流式回复走独立侧通道（对齐 DeepSearch `_streamingById`）：
+     * 高频 token 不写 `_uiState`，只有流式气泡那一小棵树订阅它，
+     * 顶栏 / 输入框 / 历史气泡不会因为每个 chunk 重组。
+     */
+    private val _streamingText = MutableStateFlow("")
+    val streamingText: StateFlow<String> = _streamingText.asStateFlow()
+
+    /** 双路 flush：时间节流 + 换行快车道；状态跨 token 保留，不随重组重置。 */
+    private data class StreamFlush(
+        var lastFlushMs: Long = 0L,
+        var lastFlushedLen: Int = 0,
+        var pending: String? = null,
+        var trailingJob: Job? = null,
+    )
+    private val streamFlush = StreamFlush()
+
     private val seen = LinkedHashSet<String>()
     private var sessionId: String? = null
     /** 最近一次 `state.work.approvals` 里属于本对话的条目 —— 卡片的显示身份。 */
@@ -407,10 +424,7 @@ class BotChatViewModel(
     private var chatRefreshJob: Job? = null
     private var memoryNoticeJob: Job? = null
     private var streamingAttempt: String? = null
-    private var streamingText = ""
-    /** 流式文本的推送节流：每个 token 都推会整页重排，手机上表现为「字追不上模型」。 */
-    private var streamPublishJob: Job? = null
-    private var streamPublishedAt = 0L
+    private var streamBuffer = ""
     private var loadedOnce = false
     /** 这一轮浏览器操作结束后贴的缩略图卡（只活在本次对话里）。 */
     private val browserShots = mutableListOf<ChatEntry>()
@@ -1180,10 +1194,15 @@ class BotChatViewModel(
                 when (data.optString("phase")) {
                     "start" -> {
                         streamingAttempt = data.optString("attemptId").ifEmpty { "stream" }
-                        streamingText = ""
+                        streamBuffer = ""
+                        streamFlush.trailingJob?.cancel()
+                        streamFlush.trailingJob = null
+                        streamFlush.lastFlushMs = 0L
+                        streamFlush.lastFlushedLen = 0
+                        streamFlush.pending = null
+                        _streamingText.value = ""
                         _uiState.update {
                             it.copy(
-                                streaming = "",
                                 running = true,
                                 stopVisible = true,
                                 waitingForReply = false,
@@ -1212,8 +1231,8 @@ class BotChatViewModel(
                     else -> {
                         val chunk = data.optString("text")
                         if (chunk.isNotEmpty()) {
-                            streamingText += chunk
-                            scheduleStreamingPublish()
+                            streamBuffer += chunk
+                            flushStreamingText()
                         }
                     }
                 }
@@ -1800,54 +1819,60 @@ class BotChatViewModel(
     }
 
     private fun clearStreaming() {
-        streamPublishJob?.cancel()
-        streamPublishJob = null
-        streamPublishedAt = 0L
+        streamFlush.trailingJob?.cancel()
+        streamFlush.trailingJob = null
+        streamFlush.lastFlushMs = 0L
+        streamFlush.lastFlushedLen = 0
+        streamFlush.pending = null
         streamingAttempt = null
-        streamingText = ""
-        if (_uiState.value.streaming.isNotEmpty()) {
-            _uiState.update { it.copy(streaming = "") }
-        }
+        streamBuffer = ""
+        _streamingText.value = ""
     }
 
     /**
-     * 流式文本按 [STREAM_PUBLISH_MS] 一批推送，而不是每个 token 都推。
+     * 双路 flush（对齐 DeepSearch `updateAssistantMessage`）：
+     * - 时间路径：按当前总长度取自适应间隔，短回答 30ms、长回答逐级放宽；
+     * - 换行快车道：短文档里新内容满 50 字且带换行就立即推，观感是逐行落字；
+     * - 被节流的 tick 记成 `pending`，尾部延迟任务保证最后一段一定落地。
      *
-     * 每来一个 token 就更新一次状态，会让整个对话页（顶栏 + 输入框 + 列表 +
-     * markdown 重新解析与排版）每帧全量重来一遍；模型很快时就这样「字追不上」。
-     * 这里保证：最多每 [STREAM_PUBLISH_MS] 毫秒推一次，并且最后一段一定会推出去。
+     * 高频更新只写 `streamingText` 侧通道，不碰主 `_uiState`，
+     * 所以顶栏 / 输入框 / 历史气泡不会跟着每个 token 重组。
      */
-    private fun scheduleStreamingPublish() {
+    private fun flushStreamingText() {
+        val content = streamBuffer
+        val state = streamFlush
         val now = System.currentTimeMillis()
-        val wait = streamPublishedAt + STREAM_PUBLISH_MS - now
-        if (wait > 0) {
-            if (streamPublishJob?.isActive != true) {
-                streamPublishJob = viewModelScope.launch {
+        val elapsed = now - state.lastFlushMs
+        val throttle = streamingThrottleMs(content.length)
+        val newChunk = if (content.length > state.lastFlushedLen) {
+            content.substring(state.lastFlushedLen.coerceAtMost(content.length))
+        } else ""
+        val unflushed = content.length - state.lastFlushedLen
+        val newlineFlush = content.length < NEWLINE_FLUSH_MAX_LEN &&
+            newChunk.contains('\n') && unflushed >= NEWLINE_FLUSH_MIN_CHARS
+
+        fun publish(text: String) {
+            StreamRenderLog.flush(text.length, throttle)
+            _streamingText.value = text
+            state.lastFlushMs = System.currentTimeMillis()
+            state.lastFlushedLen = text.length
+            state.pending = null
+        }
+
+        if (state.lastFlushMs == 0L || elapsed >= throttle || newlineFlush) {
+            state.trailingJob?.cancel()
+            state.trailingJob = null
+            publish(content)
+        } else {
+            state.pending = content
+            if (state.trailingJob == null) {
+                val wait = (throttle - elapsed).coerceAtLeast(16L)
+                state.trailingJob = viewModelScope.launch {
                     delay(wait)
-                    pushStreaming()
+                    state.pending?.let(::publish)
+                    state.trailingJob = null
                 }
             }
-            return
-        }
-        streamPublishJob?.cancel()
-        streamPublishJob = null
-        pushStreaming()
-    }
-
-    private fun pushStreaming() {
-        streamPublishedAt = System.currentTimeMillis()
-        val text = streamingText
-        _uiState.update {
-            it.copy(
-                streaming = text,
-                running = true,
-                stopVisible = true,
-                activity = it.activity ?: ChatActivity(
-                    kind = ChatActivityKind.THINKING,
-                    label = null,
-                    startedAtMs = System.currentTimeMillis(),
-                ),
-            )
         }
     }
 
@@ -2172,8 +2197,18 @@ class BotChatViewModel(
         private val RELAY_TOOLS = setOf("group_relay", "message_bot", "post_to_group", "stop_bot")
         /** 对话里最多留几张浏览器缩略图卡（只活在本次对话）。 */
         private const val MAX_BROWSER_SHOTS = 30
-        /** 流式文本的推送间隔：约 20 次/秒，够顺滑又不会每帧全页重排。 */
-        private const val STREAM_PUBLISH_MS = 50L
+        /** 流式刷新间隔：短回答贴帧、长回答逐级放宽（对齐 DeepSearch `streamingThrottleMs`）。 */
+        internal fun streamingThrottleMs(length: Int): Long = when {
+            length < 500 -> 30L
+            length < 2_000 -> 50L
+            length < 32_000 -> 80L
+            length < 64_000 -> 120L
+            length < 128_000 -> 160L
+            else -> 200L
+        }
+        /** 换行快车道：短文档里新满 50 字且遇到换行就立刻推一行。 */
+        private const val NEWLINE_FLUSH_MAX_LEN = 32_000
+        private const val NEWLINE_FLUSH_MIN_CHARS = 50
         private const val STOP_GRACE_NS = 2_000_000_000L
         /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
         /** 群聊里刚发出消息后，等 round 建起来的最长时间（超过就不再乐观显示）。 */

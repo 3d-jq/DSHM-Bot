@@ -41,6 +41,8 @@ import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
 import com.dshm.bot.ui.settings.SettingsSegmentedPill
 import com.dshm.bot.ui.settings.SettingsSheet
+import com.dshm.bot.ui.settings.dshmFieldColors
+import com.dshm.bot.ui.settings.dshmFieldShape
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -545,6 +547,8 @@ fun NewGroupDialog(
                         label = { Text(stringResource(R.string.bot_settings_name)) },
                         placeholder = { Text(stringResource(R.string.room_settings_name_hint)) },
                         singleLine = true,
+                        shape = dshmFieldShape(),
+                        colors = dshmFieldColors(),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

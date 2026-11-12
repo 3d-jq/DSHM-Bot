@@ -492,28 +492,6 @@ private fun ProviderEditorScreen(
             stringResource(R.string.settings_model_edit)
         },
         onBack = onBack,
-        // dsh-Go：保存条固定在底部，不夹在表单流里。
-        bottomBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Dshm.colors.surface)
-                    // 底部保存条要避开系统导航条（dsh-Go 的 FormBottomBar 走 SafeArea）。
-                    .navigationBarsPadding()
-                    .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
-            ) {
-                SettingsPrimaryButton(
-                    text = when {
-                        saving -> stringResource(R.string.action_saving)
-                        // dsh-Go：引擎没连上时，保存按钮显示「等待引擎连接」并禁用。
-                        state.description == null -> stringResource(R.string.settings_model_waiting_engine)
-                        else -> stringResource(R.string.action_save)
-                    },
-                    enabled = !saving && state.description != null,
-                    onClick = { attemptSave() },
-                )
-            }
-        },
     ) {
         item {
             SettingsSection(title = stringResource(R.string.settings_model_basic)) {
@@ -695,7 +673,6 @@ private fun ProviderEditorScreen(
                         }
                     },
                 )
-                SettingsRowDivider()
                 // dsh-Go 的模型卡只有「获取模型」+ 已选模型（逐条可删、可打开设置）+「手动添加」，
                 // 没有「暂无模型」占位行，也没有独立的「模型设置」行。
                 draft.models.forEach { model ->
@@ -736,6 +713,27 @@ private fun ProviderEditorScreen(
 
         if (error != null) {
             item { SettingsError(error.orEmpty()) }
+        }
+
+        // 保存按钮改成表单里的一张卡，跟着内容滚，不再浮在屏幕底部。
+        item {
+            SettingsSection {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+                ) {
+                    SettingsPrimaryButton(
+                        text = when {
+                            saving -> stringResource(R.string.action_saving)
+                            state.description == null -> stringResource(R.string.settings_model_waiting_engine)
+                            else -> stringResource(R.string.action_save)
+                        },
+                        enabled = !saving && state.description != null,
+                        onClick = { attemptSave() },
+                    )
+                }
+            }
         }
 
         if (existing != null && viewModel.providers().removable(existing.route)) {

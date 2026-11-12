@@ -55,6 +55,7 @@ import com.dshm.bot.ui.settings.SettingsAnchoredMenu
 import com.dshm.bot.ui.settings.SettingsInput
 import com.dshm.bot.ui.settings.SettingsMenuItem
 import com.dshm.bot.ui.settings.SettingsSheet
+import com.dshm.bot.ui.settings.ScheduleTimePickerField
 
 /**
  * 记忆面板，对齐 DS Bot 的 `MemoryDialog`：
@@ -964,10 +965,9 @@ internal fun NewScheduleSheet(
             singleLine = false,
         )
         Spacer(Modifier.height(Dshm.spacing.sm))
-        SettingsInput(
+        ScheduleTimePickerField(
             value = time,
             onValueChange = { time = it },
-            placeholder = stringResource(R.string.bot_settings_schedule_time),
         )
         Spacer(Modifier.height(Dshm.spacing.lg))
         TextButton(

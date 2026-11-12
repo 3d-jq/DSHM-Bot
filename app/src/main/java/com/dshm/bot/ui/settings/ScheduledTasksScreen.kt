@@ -419,7 +419,7 @@ private fun NewTaskForm(
                     }
                 }
                 if (kind == 1 || kind == 2) {
-                    TimePickerField(
+                    ScheduleTimePickerField(
                         value = timeText,
                         onValueChange = { timeText = it },
                     )
@@ -473,45 +473,39 @@ private val atFormatter: java.time.format.DateTimeFormatter =
 
 /** 只读点选字段：外观和输入框一致，点它弹选择器；不再让用户手打时间。 */
 @Composable
-private fun PickerField(
+internal fun SchedulePickerField(
     text: String,
     placeholder: String,
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(Dshm.radius.md)
-    Row(
+    // 和刚统一的表单输入框同一套 M3 描边框（只读）；点整块弹选择器。
+    OutlinedTextField(
+        value = text,
+        onValueChange = {},
+        readOnly = true,
+        enabled = false,
+        singleLine = true,
+        label = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        trailingIcon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_lucide_clock_3),
+                contentDescription = null,
+                tint = Dshm.colors.textTertiary,
+                modifier = Modifier.size(Dshm.spacing.icon),
+            )
+        },
+        shape = dshmFieldShape(),
+        colors = dshmFieldColors(),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = Dshm.spacing.inputHeight)
-            .clip(shape)
-            .background(Dshm.colors.surface)
-            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = text.ifBlank { placeholder },
-            style = Dshm.typography.settingsRowTitle,
-            color = if (text.isBlank()) Dshm.colors.textTertiary else Dshm.colors.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(Dshm.spacing.xs))
-        Icon(
-            painter = painterResource(R.drawable.ic_lucide_clock_3),
-            contentDescription = null,
-            tint = Dshm.colors.textTertiary,
-            modifier = Modifier.size(Dshm.spacing.icon),
-        )
-    }
+            .clickable(onClick = onClick),
+    )
 }
 
 /** 每天 / 每周的 24 小时时间轮；对齐 dsh-Go `showClockSheet`。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimePickerField(
+internal fun ScheduleTimePickerField(
     value: String,
     onValueChange: (String) -> Unit,
 ) {
@@ -520,7 +514,7 @@ private fun TimePickerField(
     val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 9
     val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
 
-    PickerField(
+    SchedulePickerField(
         text = value,
         placeholder = stringResource(R.string.schedules_time_hint),
         onClick = { open = true },
@@ -565,7 +559,7 @@ private fun DateTimePickerField(
     var stage by remember { mutableStateOf(0) }
     var pickedDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
 
-    PickerField(
+    SchedulePickerField(
         text = value,
         placeholder = stringResource(R.string.schedules_at_hint),
         onClick = { stage = 1 },
@@ -671,7 +665,8 @@ private fun TargetComboBox(
             singleLine = true,
             enabled = targets.isNotEmpty(),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            shape = RoundedCornerShape(Dshm.radius.md),
+            shape = dshmFieldShape(),
+            colors = dshmFieldColors(),
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth(),

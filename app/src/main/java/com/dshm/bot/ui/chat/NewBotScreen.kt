@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.settings.dshmFieldColors
+import com.dshm.bot.ui.settings.dshmFieldShape
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -143,17 +145,8 @@ fun NewBotScreen(
     val finalName = name.trim().ifEmpty { fallbackName }
     val nameProblem = botNameProblem(finalName, catalog.existingNames)
     val selectedModel = model ?: catalog.defaultModel
-    val fieldShape = RoundedCornerShape(Dshm.radius.md)
-    val fieldColors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-        unfocusedBorderColor = Dshm.colors.divider,
-        focusedBorderColor = Dshm.colors.accent,
-        disabledBorderColor = Dshm.colors.divider,
-        errorBorderColor = Dshm.colors.danger,
-        unfocusedContainerColor = Dshm.colors.surface,
-        focusedContainerColor = Dshm.colors.surface,
-        disabledContainerColor = Dshm.colors.surface,
-        errorContainerColor = Dshm.colors.surface,
-    )
+    val fieldShape = dshmFieldShape()
+    val fieldColors = dshmFieldColors()
 
     SettingsPage(
         title = stringResource(R.string.home_new_bot),

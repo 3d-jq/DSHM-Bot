@@ -18,6 +18,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.settings.dshmFieldColors
+import com.dshm.bot.ui.settings.dshmFieldShape
 
 /**
  * 模型 Combobox：点开后从当前 Bot 可用模型里选一项，选中立即回传；不支持搜索输入。
@@ -36,7 +38,7 @@ fun BotModelComboBox(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedName = models.firstOrNull { it.ref == selectedRef }?.name ?: defaultLabel
-    val shape = RoundedCornerShape(Dshm.radius.md)
+    val shape = dshmFieldShape()
     val menuShape = RoundedCornerShape(Dshm.radius.lg)
 
     ExposedDropdownMenuBox(
@@ -53,6 +55,7 @@ fun BotModelComboBox(
             enabled = enabled,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             shape = shape,
+            colors = dshmFieldColors(),
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth(),
@@ -112,7 +115,7 @@ fun BotEffortComboBox(
     var expanded by remember { mutableStateOf(false) }
     val currentName = efforts.firstOrNull { it.id == current }?.name
         ?: stringResource(R.string.settings_value_default)
-    val shape = RoundedCornerShape(Dshm.radius.md)
+    val shape = dshmFieldShape()
     val menuShape = RoundedCornerShape(Dshm.radius.lg)
 
     ExposedDropdownMenuBox(
@@ -129,6 +132,7 @@ fun BotEffortComboBox(
             enabled = enabled,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             shape = shape,
+            colors = dshmFieldColors(),
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth(),

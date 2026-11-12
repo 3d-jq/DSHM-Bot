@@ -766,3 +766,68 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   改动集中在 `MarkdownText.kt`，不动交互与样式。
 - **验收**：含大表格的对话快速上下滑不掉帧；长按 →「选择文字」面板仍能拖选复制；
   表格外框 / 横线 / 列间线视觉不变。
+
+### 流式渲染推倒重来：完全对齐 DeepSearch（2026-11-12，第二十八轮）
+
+用户要求按 `D:\program\DeepSearch` 的流式架构重做，不好可回滚（已 git）。
+本轮只替换流式回复渲染链，**对话输入框 `ChatComposer` 一行未动**。
+
+- ☑️ **侧通道**：新增 `BotChatViewModel.streamingText: StateFlow<String>`；
+  高频 token 不再写 `_uiState`，只有 `ChatMessages` 的流式气泡订阅它，
+  顶栏 / 输入框 / 历史气泡不再跟着重组（DeepSearch `_streamingById`）。
+- ☑️ **双路 flush**：按总长度自适应间隔（30/50/80/120/160/200ms）+ 换行快车道
+  （短文档新满 50 字且带 `\n` 立即推）+ trailing job 保证最后一段落地；
+  状态跨 token 保留，不随重组重置（DeepSearch `updateAssistantMessage`）。
+- ☑️ **按块冻结 + 后台解析**：`splitStreamingFragments` 按空行 / 代码围栏切块，
+  `MarkdownParseCache` 进程级 LRU 缓存块解析；live tail 在 `Dispatchers.Default`
+  上解析后回主线程（DeepSearch `MarkdownBlockBody`）。
+- ☑️ **增量行内**：`inlineMarkdownIncremental` 对 ≥1500 字的 live 段落找安全换行边界，
+  闭合前缀走缓存、只重扫未闭合后缀（DeepSearch `inlineIncremental`）。
+  **流式期不再跳过样式**，`[文字](url)` / 粗体 / 行内代码实时渲染。
+- ☑️ **裸链接**：`buildInlineMarkdown` 新增 `http(s)://` 裸 URL 分支，
+  包成 `LinkAnnotation.Url` + 主色下划线；修掉截图里
+  `https://shishifenxi.com/...` 被当普通文本折行的问题。
+- ☑️ **表格稳定**：`TableHScrollStates` 按 `shardId + 表头` 复用 `ScrollState`，
+  流式重解析 / live→frozen 切换时横向偏移不回弹（DeepSearch `TableHScrollStates`）。
+- ☑️ **表格滚动开销**：`ShardText` 在 `LocalMinisSelectionController == null`
+  时走极简 `Text`，不再挂 `onTextLayout` / `onGloballyPositioned` / `drawBehind` /
+  shard 构建；这是上一轮记录的「表格还卡」根因，一并修掉。
+- ☑️ 单测 `StreamingMarkdownTest`（分块 / 节流单调性 / 裸链接可点）。
+
+- ☑️ **消息内分片 + 逐词淡入 + 慢解析埋点**（2026-11-12）：
+  - 一条消息按空行 / 代码围栏切成片段，每片是独立 `MarkdownFragment`
+    各自 `produceState` + 进程级 LRU；前缀命中缓存后 Compose skip，只有 live tail 重画。
+  - `StreamingFade.kt`：新追加的词 α 0→1（350ms / 90ms 错开 / 300ms 窗口），
+    超过 160 词整批不透明；frame 循环只在有活跃区间时跑，空闲挂起。
+  - `StreamRenderLog`：单次解析 > 80ms 才 `Log.d("dshm-stream", …)`
+    （layer / chars / ms / thread），平时静默。
+- ⬜ 仍暂未搬：live 超长片段降级纯文本（DeepSearch 阈值 40K 字，我们当前体量用不到）、
+  `MarkdownDocument` 那种 LazyColumn 全文档预览（要有独立 .md 预览页才做）。
+
+### 表单输入框统一（2026-11-12，第二十七轮）
+
+- ☑️ 以新建 Bot 的「名字 / 角色」那套 M3 `OutlinedTextField` 作为**全项目表单输入框基线**：
+  `dshmFieldShape()`（`radius.md`）+ `dshmFieldColors()`（Dshm 边框 / 底色 / 游标 /
+  label / placeholder / 错误色）抽到 `ui/settings/SettingsComponents.kt`。
+- ☑️ `SettingsInput` 内部由手搓 `BasicTextField` 换成 `OutlinedTextField`
+  （浮动 label + M3 聚焦态），保留原签名，14 个调用点（设置弹层、账号、密钥、
+  浏览器设置、定时任务、Bot 设置二级页、模型供应商等）全部跟着统一。
+  `ProviderField` 传 `label`，字段名作浮动 label、提示仍作 placeholder。
+- ☑️ 散落的裸 `OutlinedTextField` 全部接同一 shape/colors：新建 Bot 三个字段、
+  Bot 说明内联编辑、新建群名称、模型/推理强度 combobox、定时任务目标 combobox、
+  密钥「谁能用」combobox。
+- ☑️ **明确不动**：对话输入框 `ChatComposer`（附件缩略图 / 语音 / 发送键 / blur 渐变）
+  及复用其外壳的记忆「问我或直接更新」输入框，是专门做的复合控件；
+  SearchScreen / BotBrowserScreen 地址栏 / PendingDock 这类场景化输入也保持原样。
+- ☑️ **修「Bot 设置里的定时任务还在手输时间」**（2026-11-12）：
+  `SettingsScheduleTimePicker` 从 `ScheduledTasksScreen.kt` 抽成 `internal` 的
+  `SchedulePickerField` / `ScheduleTimePickerField`（24h 时间轮，只读点选字段也换成
+  刚统一的 M3 `OutlinedTextField` 描边样式）。Bot 设置 → 定时任务整屏页
+  （`BotSettingsPages.kt`）和名字胶囊 → 定时任务底部面板（`BotMemoryFolderDialogs.kt`）
+  原来都是 `SettingsInput` 手打 `09:00`，现在三处共用同一个选择器，不再出现手输时间。
+- ☑️ **模型 → 添加渠道表单微调**（2026-11-12）：
+  - 「获取模型」行正下方的 `SettingsRowDivider` 去掉（后面已选模型 / 手动添加本来
+    各自带分割线，重复一条显得断开）。
+  - 「保存」按钮从 `SettingsPage(bottomBar = ...)` 固定浮底改成表单滚动内容里的一张
+    `SettingsSection` 白卡，跟其它卡片一起滚；文案（保存中 / 等待引擎连接 / 保存）
+    和禁用逻辑不变。

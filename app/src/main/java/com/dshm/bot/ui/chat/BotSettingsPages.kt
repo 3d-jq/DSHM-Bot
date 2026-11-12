@@ -39,6 +39,7 @@ import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
 import com.dshm.bot.ui.settings.SettingsSegmentedPill
+import com.dshm.bot.ui.settings.ScheduleTimePickerField
 import org.json.JSONObject
 
 /**
@@ -292,10 +293,10 @@ fun BotSchedulesPage(row: ChatRowUi, endpoint: RuntimeEndpoint?, onBack: () -> U
                             placeholder = stringResource(R.string.bot_settings_schedule_prompt),
                             singleLine = false,
                         )
-                        SettingsInput(
+                        // 和设置里的定时任务页同一个 24h 时间轮，不让用户手打时间。
+                        ScheduleTimePickerField(
                             value = time,
                             onValueChange = { time = it },
-                            placeholder = stringResource(R.string.bot_settings_schedule_time),
                         )
                         Spacer(Modifier.height(Dshm.spacing.xs))
                         SettingsPrimaryButton(

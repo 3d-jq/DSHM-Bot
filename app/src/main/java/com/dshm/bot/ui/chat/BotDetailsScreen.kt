@@ -61,6 +61,8 @@ import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
 import com.dshm.bot.ui.settings.SettingsSegmentedPill
 import com.dshm.bot.ui.settings.SettingsTextSheet
+import com.dshm.bot.ui.settings.dshmFieldColors
+import com.dshm.bot.ui.settings.dshmFieldShape
 import com.dshm.bot.ui.settings.settingsLanguage
 import org.json.JSONObject
 
@@ -232,6 +234,8 @@ fun BotDetailsScreen(
                     placeholder = { Text(stringResource(R.string.bot_settings_note_hint)) },
                     minLines = 4,
                     maxLines = 8,
+                    shape = dshmFieldShape(),
+                    colors = dshmFieldColors(),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(Dshm.spacing.md),
