@@ -29,6 +29,9 @@ data class ChatActivity(
 /** DS Bot `ActivityIndicator` 的状态行文案与最短换词间隔。 */
 const val CHAT_ACTIVITY_PHRASE_HOLD_MS = 800L
 
+/** 活动状态文案的扫光一轮用时（DS Bot `bt-shimmer` 是 2.2s）。 */
+const val CHAT_ACTIVITY_SHIMMER_MS = 2_200
+
 /**
  * 单聊这一轮在跑吗（按优先级，顺序就是几年前踩过的坑）：
  *

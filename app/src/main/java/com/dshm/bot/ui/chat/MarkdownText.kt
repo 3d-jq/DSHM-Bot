@@ -13,11 +13,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -28,7 +26,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -314,6 +311,11 @@ fun MarkdownText(
     messageId: String = "",
     /** false：短消息按内容宽度排版，不把气泡撑满（Bot 气泡用）。 */
     fillWidth: Boolean = true,
+    /**
+     * 流式输出中：行内样式（粗体 / 行内代码 / 链接）先不扫，按纯文本画。
+     * 对齐 dsh-Go `MarkdownBody` 的 `inlinePatterns = [_cursorPattern]`。
+     */
+    streaming: Boolean = false,
 ) {
     val colors = Dshm.colors
     val blocks = remember(markdown) { parseMarkdown(markdown) }
@@ -324,6 +326,11 @@ fun MarkdownText(
     )
 
     val allocator = remember(messageId) { ShardSubIndexAllocator() }
+    val inline: (String) -> AnnotatedString = if (streaming) {
+        { raw -> AnnotatedString(raw) }
+    } else {
+        { raw -> inlineMarkdown(raw, colors, base, mentionMembers) }
+    }
     CompositionLocalProvider(
         LocalMarkdownMessageId provides messageId,
         LocalShardSubIndex provides allocator,
@@ -336,14 +343,14 @@ fun MarkdownText(
             val baseId = "b$index"
             when (block) {
                 is MarkdownBlock.Paragraph -> ShardText(
-                    text = inlineMarkdown(block.text, colors, base, mentionMembers),
+                    text = inline(block.text),
                     style = base,
                     shardId = "$baseId:p",
                     fillWidth = fillWidth,
                 )
 
                 is MarkdownBlock.Heading -> ShardText(
-                    text = inlineMarkdown(block.text, colors, base, mentionMembers),
+                    text = inline(block.text),
                     style = base.copy(
                         fontSize = base.fontSize * if (block.level <= 2) 1.18f else 1.08f,
                         lineHeight = base.lineHeight * if (block.level <= 2) 1.18f else 1.08f,
@@ -362,10 +369,11 @@ fun MarkdownText(
                     mentionMembers = mentionMembers,
                     shardId = "$baseId:l",
                     fillWidth = fillWidth,
+                    streaming = streaming,
                 )
 
                 is MarkdownBlock.Quote -> ShardText(
-                    text = inlineMarkdown(block.text, colors, base, mentionMembers),
+                    text = inline(block.text),
                     style = base.copy(
                         color = colors.textSecondary,
                         fontStyle = FontStyle.Italic,
@@ -540,12 +548,25 @@ private fun MarkdownTable(
                 .border(stroke, borderColor, shape)
                 .clip(shape),
         ) {
+            // 竖线画在行背景上，不用 `IntrinsicSize.Min` + `fillMaxHeight()`：
+            // 那个组合会让每行都做一次固有测量，表格长的时候滚动明显掉帧。
+            val verticalLines: Modifier = Modifier.drawBehind {
+                val lineWidth = stroke.toPx()
+                for (column in 1 until columns) {
+                    val x = cellWidth.toPx() * column + stroke.toPx() * (column - 1)
+                    drawLine(
+                        color = borderColor,
+                        start = androidx.compose.ui.geometry.Offset(x, 0f),
+                        end = androidx.compose.ui.geometry.Offset(x, size.height),
+                        strokeWidth = lineWidth,
+                    )
+                }
+            }
             Column(Modifier.width(tableWidth)) {
                 // 表头行
                 Row(
-                    modifier = Modifier
-                        .background(headerFill)
-                        .height(IntrinsicSize.Min),
+                    modifier = verticalLines
+                        .background(headerFill),
                 ) {
                     header.forEachIndexed { column, cell ->
                         TableCell(
@@ -557,19 +578,12 @@ private fun MarkdownTable(
                             modifier = Modifier.width(cellWidth),
                             shardId = "$shardBase:h$column",
                         )
-                        if (column < header.lastIndex) {
-                            VerticalDivider(
-                                thickness = stroke,
-                                color = borderColor,
-                                modifier = Modifier.fillMaxHeight(),
-                            )
-                        }
                     }
                 }
                 HorizontalDivider(thickness = stroke, color = borderColor)
                 // 数据行
                 rows.forEachIndexed { rowIndex, row ->
-                    Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                    Row(modifier = verticalLines) {
                         header.indices.forEach { column ->
                             TableCell(
                                 text = row.getOrNull(column).orEmpty(),
@@ -580,13 +594,6 @@ private fun MarkdownTable(
                                 modifier = Modifier.width(cellWidth),
                                 shardId = "$shardBase:r$rowIndex$column",
                             )
-                            if (column < header.lastIndex) {
-                                VerticalDivider(
-                                    thickness = stroke,
-                                    color = borderColor,
-                                    modifier = Modifier.fillMaxHeight(),
-                                )
-                            }
                         }
                     }
                     HorizontalDivider(thickness = stroke, color = borderColor)
@@ -638,6 +645,7 @@ private fun ListLine(
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
     shardId: String = "",
     fillWidth: Boolean = true,
+    streaming: Boolean = false,
 ) {
     Row(
         modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier.wrapContentWidth(Alignment.Start),
@@ -661,7 +669,7 @@ private fun ListLine(
         // 直接把 weight 挂在 Text 上时，它在 Compose 的选择注册里会漏掉（长按选不中）。
         Box(modifier = Modifier.weight(1f)) {
             ShardText(
-                text = inlineMarkdown(text, colors, base, mentionMembers),
+                text = if (streaming) AnnotatedString(text) else inlineMarkdown(text, colors, base, mentionMembers),
                 style = base,
                 shardId = shardId,
                 fillWidth = fillWidth,
@@ -671,11 +679,44 @@ private fun ListLine(
 }
 
 /** 行内 Markdown → AnnotatedString；`@名字` 会按成员颜色着色。 */
+/**
+ * 行内样式的解析结果缓存。
+ *
+ * 流式输出时整条气泡每几十毫秒重画一次：前面的段落文本一个字都没变，
+ * 但 `inlineMarkdown` 每次都会重新扫一遍、重新建 AnnotatedString。
+ * 按「主题 + 字号 + 提及列表 + 原文」缓存后，只有正在长的那一段会重新扫。
+ */
+private data class InlineKey(
+    val colors: Int,
+    val base: Int,
+    val mentions: Int,
+    val text: String,
+)
+
+private val inlineCache = object : LinkedHashMap<InlineKey, AnnotatedString>(64, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InlineKey, AnnotatedString>?): Boolean =
+        size > 96
+}
+
 internal fun inlineMarkdown(
     text: String,
     colors: DshmColors,
     base: TextStyle,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
+): AnnotatedString {
+    if (text.isEmpty()) return AnnotatedString("")
+    val key = InlineKey(colors.hashCode(), base.hashCode(), mentionMembers.hashCode(), text)
+    synchronized(inlineCache) { inlineCache[key] }?.let { return it }
+    val built = buildInlineMarkdown(text, colors, base, mentionMembers)
+    synchronized(inlineCache) { inlineCache[key] = built }
+    return built
+}
+
+private fun buildInlineMarkdown(
+    text: String,
+    colors: DshmColors,
+    base: TextStyle,
+    mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi>,
 ): AnnotatedString = buildAnnotatedString {
     var index = 0
     while (index < text.length) {

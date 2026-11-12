@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -22,6 +23,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -91,6 +93,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -439,9 +442,6 @@ fun BotChatScreen(
                         onOpenExchange = { id -> exchangeWith = id },
                         onOpenBrowser = onOpenBrowser,
                         onEditMessage = { text -> draft = text },
-                        onAddToInput = { text ->
-                            draft = if (draft.isBlank()) text else draft.trimEnd() + "\n" + text
-                        },
                     )
                 }
             }
@@ -709,14 +709,20 @@ private fun ChatMessages(
     onLoadEarlier: () -> Unit = {},
     /** 长按用户气泡 → 编辑：把内容填回输入框。 */
     onEditMessage: (String) -> Unit = {},
-    /** 选中文字浮条 → 加入输入框。 */
-    onAddToInput: (String) -> Unit = {},
 ) {
-    val selectionController = remember { SelectionController() }
-    var selectionRootCoords by remember {
-        mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null)
+    // 普通引用，不用 `mutableStateOf`：`onGloballyPositioned` 每帧都会触发，
+    // 写快照状态会让滑动时整页跟着无效重组。
+    val selectionRootCoords = remember {
+        arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1)
     }
     val listState = rememberLazyListState()
+    /** 每条气泡的窗口矩形：长按文字时按坐标认人，不靠会撞车的 messageId。 */
+    val bubbleBounds = remember { BubbleBoundsRegistry() }
+    /** 长按消息弹出的操作面板（用户气泡 + 助手气泡共用一套）。 */
+    var messageMenu by remember { mutableStateOf<MessageMenuTarget?>(null) }
+    /** 「选择文字」面板（两种气泡共用；回复按 markdown 画）。 */
+    var selectText by remember { mutableStateOf<MessageMenuTarget?>(null) }
+    val appContextForMenu = LocalContext.current
     val streamingNow = streaming.isNotEmpty()
     // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
     // 但如果这一刻有工具在跑（写入/搜索…），活动行仍然留着。
@@ -835,21 +841,29 @@ private fun ChatMessages(
         isGroup = bot.isGroup,
     )
 
-    CompositionLocalProvider(LocalSelectionAddToInput provides onAddToInput) {
-    ProvideSelectionController(selectionController) {
+    // 长按已全部走 MessageActionSheet（面板里用系统 SelectionContainer 选字），
+    // 聊天列表不再需要 MinisTextKit 那套「每个表格单元格注册一个选区分片」的机制。
+    // 它会在滚动时反复写 `mutableStateMap` / `onTextLayout` 状态，表格越大越卡。
+    CompositionLocalProvider(LocalMinisSelectionController provides null) {
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             reverseLayout = true,
             modifier = Modifier
                 .fillMaxSize()
-                .onGloballyPositioned { selectionRootCoords = it }
-                .minisTextKitSelectionGesture(
-                    controller = selectionController,
-                    listState = listState,
-                    rootCoordinates = { selectionRootCoords },
-                    reverseLayout = true,
-                ),
+                .onGloballyPositioned { selectionRootCoords[0] = it }
+                .pointerInput(Unit) {
+                    // 长按大模型气泡：按手指位置认人（不碰文字选区，不写快照状态）。
+                    detectTapGestures(onLongPress = { offset ->
+                        val root = selectionRootCoords[0]
+                        if (root == null || !root.isAttached) return@detectTapGestures
+                        val origin = root.positionInWindow()
+                        val windowPoint = Offset(origin.x + offset.x, origin.y + offset.y)
+                        bubbleBounds.targetAt(windowPoint)?.let { target ->
+                            messageMenu = target
+                        }
+                    })
+                },
             userScrollEnabled = true,
             contentPadding = PaddingValues(
                 start = Dshm.spacing.lg,
@@ -881,7 +895,20 @@ private fun ChatMessages(
             }
             if (streaming.isNotEmpty()) {
                 item(key = "streaming") {
-                    Box(Modifier.padding(top = pendingSpacing.top)) {
+                    val boundsListener = rememberBubbleBounds(
+                        key = "streaming",
+                        registry = bubbleBounds,
+                        target = MessageMenuTarget(
+                            messageId = "streaming",
+                            text = streaming,
+                            isUser = false,
+                        ),
+                    )
+                    Box(
+                        Modifier
+                            .padding(top = pendingSpacing.top)
+                            .onGloballyPositioned(boundsListener),
+                    ) {
                         BotBubble(
                             text = streaming,
                             author = bot.name,
@@ -895,6 +922,7 @@ private fun ChatMessages(
                             adminId = bot.roomAdmin,
                             onOpenMember = onOpenMember,
                             messageId = "streaming",
+                            streaming = true,
                         )
                     }
                 }
@@ -914,7 +942,25 @@ private fun ChatMessages(
                     isGroup = bot.isGroup,
                 )
                 Column(
-                    modifier = Modifier.padding(top = spacing.top),
+                    modifier = Modifier
+                        .padding(top = spacing.top)
+                        .then(
+                            if (entry.kind == ChatEntryKind.BOT) {
+                                Modifier.onGloballyPositioned(
+                                    rememberBubbleBounds(
+                                        key = entry.id,
+                                        registry = bubbleBounds,
+                                        target = MessageMenuTarget(
+                                            messageId = entry.id,
+                                            text = entry.text,
+                                            isUser = false,
+                                        ),
+                                    ),
+                                )
+                            } else {
+                                Modifier
+                            },
+                        ),
                 ) {
                 when (entry.kind) {
                     ChatEntryKind.USER -> UserBubble(
@@ -924,7 +970,13 @@ private fun ChatMessages(
                         items = entry.attachmentItems,
                         images = entry.images,
                         timeMs = null,
-                        onEdit = onEditMessage,
+                        onLongPress = {
+                            messageMenu = MessageMenuTarget(
+                                messageId = entry.id,
+                                text = entry.text,
+                                isUser = true,
+                            )
+                        },
                     )
                     ChatEntryKind.BOT -> BotBubble(
                         text = entry.text,
@@ -1000,18 +1052,47 @@ private fun ChatMessages(
                 }
             }
         }
-        SelectionDragTracker(
-            controller = selectionController,
-            listState = listState,
-            listRootCoordinates = { selectionRootCoords },
-            reverseLayout = true,
-        )
-        MinisSelectionHandlesHost(
-            controller = selectionController,
-            listState = listState,
-            reverseLayout = true,
-        )
-        MinisSelectionToolbarHost(controller = selectionController)
+        // 长按消息已统一走 `MessageActionSheet`（面板里用系统 SelectionContainer 选字）：
+        // 聊天列表里的 MinisTextKit 选区浮条、把手、拖拽跟踪全部不再挂。
+        // 长按消息的操作面板（dsh-Go `showMessageMenu` 的同款入口）。
+        messageMenu?.let { target ->
+            MessageActionSheet(
+                target = target,
+                onDismiss = { messageMenu = null },
+                onCopy = {
+                    messageMenu = null
+                    copyMessage(appContextForMenu, target.text)
+                },
+                onSelectText = {
+                    messageMenu = null
+                    // 两种气泡都是底部面板（对齐 dsh-Go `showSelectTextSheet`）。
+                    selectText = target
+                },
+                onShare = {
+                    messageMenu = null
+                    shareText(appContextForMenu, target.text)
+                },
+                onEdit = if (target.isUser) {
+                    {
+                        messageMenu = null
+                        onEditMessage(target.text)
+                    }
+                } else {
+                    null
+                },
+            )
+        }
+        selectText?.let { target ->
+            SelectTextSheet(
+                text = target.text,
+                markdown = !target.isUser,
+                onDismiss = { selectText = null },
+                onCopyAll = {
+                    selectText = null
+                    copyMessage(appContextForMenu, target.text)
+                },
+            )
+        }
         // 普通高斯模糊 + 渐变遮罩（B 方案）：`Modifier.blur` 底层就是 Android
         // RenderEffect 的高斯模糊，只作用在这层渐变上；不录消息层、不做 DstIn /
         // 混合采样，也就不会把液态玻璃那套带进来导致渲染一闪一闪。
@@ -1067,8 +1148,7 @@ private fun ChatMessages(
             }
         }
     }
-    }
-    }
+}
 }
 
 /**
@@ -1168,20 +1248,53 @@ private fun ChatActivityRow(
                 },
             )
         }
-        Text(
-            text = label,
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
+        // DS Bot `bt-shimmer`：状态文案上有一道从左扫到右的高光（2.2s 一轮）。
+        BoxWithConstraints(modifier = Modifier.weight(1f, fill = false)) {
+            val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
+            Text(
+                text = label,
+                style = Dshm.typography.rowPreview.copy(brush = activityShimmerBrush(widthPx)),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
             text = "· ${chatActivityElapsed(elapsedMs)}",
             style = Dshm.typography.rowTime,
             color = Dshm.colors.textTertiary,
         )
     }
+}
+
+/**
+ * 活动状态文案的扫光笔刷（DS Bot `bt-shimmer`）。
+ *
+ * 底色是淡的文字色，中间一段是实色，整段高光从左扫到右；2.2s 一轮。
+ */
+@Composable
+private fun activityShimmerBrush(widthPx: Float): Brush {
+    val base = Dshm.colors.textSecondary.copy(alpha = 0.32f)
+    val highlight = Dshm.colors.textSecondary
+    val transition = rememberInfiniteTransition(label = "activity-shimmer")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(CHAT_ACTIVITY_SHIMMER_MS, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "activity-shimmer-progress",
+    )
+    // 高光窗口大概一段文字宽；整轮里它从左边外面一路扫到右边外面，
+    // 中间没有空档（之前窗口太窄，扫过去以后要等大半轮才再来一次）。
+    val span = (widthPx * 1.15f).coerceAtLeast(160f)
+    val center = -span / 2f + progress * (widthPx + span)
+    val start = center - span / 2f
+    return Brush.linearGradient(
+        colors = listOf(base, base, highlight, base, base),
+        start = Offset(start, 0f),
+        end = Offset(start + span, 0f),
+    )
 }
 
 @Composable
@@ -1248,11 +1361,9 @@ private fun UserBubble(
     /** 历史回读里的图片数量（只有计数，没有图）。 */
     images: Int = 0,
     timeMs: Long? = null,
-    /** 长按面板的「编辑」：把这条内容填回输入框。 */
-    onEdit: (String) -> Unit = {},
+    /** 长按气泡：弹统一的消息操作面板。 */
+    onLongPress: () -> Unit = {},
 ) {
-    val context = LocalContext.current
-    var menuOpen by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.End,
@@ -1262,9 +1373,7 @@ private fun UserBubble(
                 horizontalAlignment = Alignment.End,
                 modifier = Modifier
                     .pointerInput(text) {
-                        detectTapGestures(onLongPress = {
-                            menuOpen = true
-                        })
+                        detectTapGestures(onLongPress = { onLongPress() })
                     }
                     .background(
                         Dshm.colors.bubbleUser,
@@ -1300,47 +1409,6 @@ private fun UserBubble(
                     )
                 }
                 ImageCountCaption(count = images)
-            }
-            DropdownMenu(
-                expanded = menuOpen,
-                onDismissRequest = { menuOpen = false },
-                offset = DpOffset(0.dp, 6.dp),
-                shape = RoundedCornerShape(Dshm.radius.md),
-                containerColor = Dshm.colors.surface,
-                modifier = Modifier.widthIn(max = 220.dp),
-            ) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.chat_longpress_copy)) },
-                    leadingIcon = {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_lucide_copy),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = Dshm.colors.textSecondary,
-                        )
-                    },
-                    onClick = {
-                        menuOpen = false
-                        copyMessage(context, text)
-                    },
-                )
-                if (text.isNotBlank()) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_longpress_edit)) },
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_lucide_pencil),
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = Dshm.colors.textSecondary,
-                            )
-                        },
-                        onClick = {
-                            menuOpen = false
-                            onEdit(text)
-                        },
-                    )
-                }
             }
         }
         timeMs?.let { t ->
@@ -1465,6 +1533,8 @@ private fun BotBubble(
     endpoint: RuntimeEndpoint? = null,
     /** 时间线条目 id：选区按消息定位，也是「复制全文」的键。 */
     messageId: String = "",
+    /** 流式输出中的临时气泡：行内 markdown 先不扫（对齐 dsh-Go）。 */
+    streaming: Boolean = false,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
@@ -1475,10 +1545,6 @@ private fun BotBubble(
     val collapsible = isGroup && text.length > 600
 
     val bubble: @Composable () -> Unit = {
-        val selectionController = LocalMinisSelectionController.current
-        LaunchedEffect(selectionController, messageId, text) {
-            if (messageId.isNotEmpty()) selectionController?.rememberMessageMarkdown(messageId, text)
-        }
         Column(modifier = Modifier.wrapContentWidth(Alignment.Start)) {
             Column(
                 modifier = Modifier
@@ -1503,6 +1569,7 @@ private fun BotBubble(
                         mentionMembers = members,
                         messageId = messageId,
                         fillWidth = false,
+                        streaming = streaming,
                     )
                 }
                 if (collapsible) {

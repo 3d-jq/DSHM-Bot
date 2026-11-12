@@ -219,6 +219,12 @@
     <string name="chat_selection_add_to_input">Add to input</string>
     <string name="chat_selection_copy_markdown">Copy full message</string>
     <string name="chat_longpress_copy">Copy</string>
+    <string name="chat_menu_copy">Copy</string>
+    <string name="chat_menu_select_text">Select text</string>
+    <string name="chat_copy_all">Copy all</string>
+    <string name="chat_menu_share">Share</string>
+    <string name="chat_menu_edit_resend">Edit and resend</string>
+    <string name="chat_menu_edit_resend_hint">Change it, then send again</string>
     <string name="chat_longpress_edit">Edit</string>
     <string name="home_pin">Pin</string>
     <string name="home_unpin">Unpin</string>

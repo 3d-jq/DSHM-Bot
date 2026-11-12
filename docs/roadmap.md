@@ -711,3 +711,58 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   `BotDetailsViewModel.setMain` 支持 `main` 开关；主 Bot 的「删除」栏整段隐藏。
 - ⬜ 差异（有意保留）：DS Bot 用 Switch 行、行上还有「Main Bot」标签和头像主色环；
   我们用行式按钮 + 文案提示，主界面行暂不加主 Bot 标记。
+
+### 流式与消息菜单（2026-11-12，第二十六轮）
+
+- ☑️ 活动状态文案加 DS Bot `bt-shimmer` 的扫光笔刷（2.2s 一轮、整轮连续，无空档）。
+- ☑️ 流式渲染对齐 dsh-Go：流式文本按 50ms 合并推送（不再每 token 全页重组）；
+  流式气泡跳过行内 markdown 扫描；`inlineMarkdown` 加 LRU 缓存。
+  实测 7.4KB markdown 的块解析只要 0.30ms/次，瓶颈是每帧重建行内样式。
+- ☑️ 长按两种气泡统一走 `MessageActionSheet`（预览 + 复制/选择文字/分享，用户气泡多
+  「编辑后重发」）；`SelectTextSheet` 按 dsh-Go `showSelectTextSheet` 做成 85% 底部面板
+  （回复按 markdown 画、用户消息纯文本，标题右侧「复制全部」）。
+- ☑️ **修「选择文字串到别的气泡」**：全局选区手势原来用 `position.shard.messageId`
+  反查消息；引擎 `displayItems` 很多 item 不带 `id`，`scope:seq` / `history:index` 在
+  刷新、缓存、多段分页后会撞车，于是反查到别的气泡。新增 `BubbleBoundsRegistry`：
+  每条气泡登记自己的窗口矩形和 `MessageMenuTarget`，长按按手指坐标（重叠时取面积最小）
+  直接拿到被按的那条内容，不再经过 messageId。
+- ☑️ **修「有表格的消息滑动卡顿」**（2026-11-12）：
+  - `BubbleBoundsRegistry` 改用普通 `LinkedHashMap` 存 `LayoutCoordinates`，坐标在长按
+    那一刻现算。之前用 `SnapshotStateMap`，滚动时 `onGloballyPositioned` 每帧对所有
+    可见气泡写快照状态，表格越长可见气泡越多、越明显。
+  - 表格去掉 `IntrinsicSize.Min` + `fillMaxHeight()` 的竖向分隔线组合（每行都要做一次
+    固有测量），改成在行背景 `drawBehind` 上按列宽直接画竖线，外框/横线/列间线不变。
+- ☑️ **表格仍卡的根因：聊天列表里的旧文字选区系统整套去掉**（2026-11-12）：
+  每个表格单元格都通过 `ShardText` 注册一个选区分片（`mutableStateMap` + `onTextLayout`
+  写状态），滚动时表格单元格越多越重。长按既然已经统一走 `MessageActionSheet` /
+  `SelectTextSheet`（面板内用系统 `SelectionContainer` 选字），
+  `ChatMessages` 里就把 `LocalMinisSelectionController` 置空，并撤掉
+  `MinisSelectionToolbarHost`（复制 / 加入输入框 / 复制全文）、把手、拖拽跟踪、
+  `minisTextKitSelectionGesture`；长按改成列表上一个轻量 `detectTapGestures`，
+  按 `BubbleBoundsRegistry` 的坐标认人。`selectionRootCoords` 也改成普通数组引用，
+  不再 `mutableStateOf` 每帧写快照。
+
+### ⬜ 待办：含表格的对话滑动仍有一顿一顿（2026-11-12，**未修，用户要求先记录**）
+
+- **现象**：对话里有 markdown 表格时上下滑仍会一顿一顿；纯文字对话没有。
+  2026-11-12 用户反馈，明确要求「先记录，现在先不改」。
+- **已排除**（前两轮已做，仍有残留卡顿）：`BubbleBoundsRegistry` 的快照写入、
+  表格的 `IntrinsicSize.Min` + `fillMaxHeight()` 固有测量、聊天列表里 MinisTextKit 的
+  toolbar / 把手 / 拖拽跟踪 / 手势整套；也不是引擎 / SSE / 模型速度问题。
+- **剩余根因（只读排查结论）**：`ShardText`（`ui/chat/MarkdownText.kt`）在
+  `LocalMinisSelectionController == null` 时**仍然无条件**给每个文本片段挂
+  `mutableStateOf<TextLayoutResult?>` + `onTextLayout`、`onGloballyPositioned`、
+  `drawBehind`，以及 `remember(id, layoutResult, plainText, ...)` 构建 `TextShard`。
+  `RegisterSelectionShard` 此时会直接 return，这些开销却一个没省。
+  `TableCell` 走的正是 `ShardText`，表格有 `行数 × 列数` 个单元格，
+  滚动/复用时会成片写状态 —— 所以只有表格明显，普通气泡只有几个片段感觉不到。
+- **次要叠加项**（不是主因）：底部 `Modifier.blur(40.dp)` 渐变遮罩会让高对比表格线
+  滑过时更显「闪」，但不产生重组；`MarkdownTable` 的 `BoxWithConstraints` +
+  每行 `drawBehind` 竖线 + `horizontalScroll(rememberScrollState())` 仍是 LazyColumn
+  里最重的单个 item。
+- **建议修法（等用户发话再动手）**：`ShardText` 按 `controller == null` 分两条路 ——
+  聊天列表走极简 `Text`（无 `onTextLayout` / `onGloballyPositioned` / `drawBehind` /
+  shard 构建）；`SelectTextSheet` 用系统 `SelectionContainer` 选字，本就不需要 shard。
+  改动集中在 `MarkdownText.kt`，不动交互与样式。
+- **验收**：含大表格的对话快速上下滑不掉帧；长按 →「选择文字」面板仍能拖选复制；
+  表格外框 / 横线 / 列间线视觉不变。

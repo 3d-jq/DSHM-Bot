@@ -408,6 +408,9 @@ class BotChatViewModel(
     private var memoryNoticeJob: Job? = null
     private var streamingAttempt: String? = null
     private var streamingText = ""
+    /** 流式文本的推送节流：每个 token 都推会整页重排，手机上表现为「字追不上模型」。 */
+    private var streamPublishJob: Job? = null
+    private var streamPublishedAt = 0L
     private var loadedOnce = false
     /** 这一轮浏览器操作结束后贴的缩略图卡（只活在本次对话里）。 */
     private val browserShots = mutableListOf<ChatEntry>()
@@ -1210,18 +1213,7 @@ class BotChatViewModel(
                         val chunk = data.optString("text")
                         if (chunk.isNotEmpty()) {
                             streamingText += chunk
-                            _uiState.update {
-                                it.copy(
-                                    streaming = streamingText,
-                                    running = true,
-                                    stopVisible = true,
-                                    activity = it.activity ?: ChatActivity(
-                                        kind = ChatActivityKind.THINKING,
-                                        label = null,
-                                        startedAtMs = System.currentTimeMillis(),
-                                    ),
-                                )
-                            }
+                            scheduleStreamingPublish()
                         }
                     }
                 }
@@ -1808,10 +1800,54 @@ class BotChatViewModel(
     }
 
     private fun clearStreaming() {
+        streamPublishJob?.cancel()
+        streamPublishJob = null
+        streamPublishedAt = 0L
         streamingAttempt = null
         streamingText = ""
         if (_uiState.value.streaming.isNotEmpty()) {
             _uiState.update { it.copy(streaming = "") }
+        }
+    }
+
+    /**
+     * 流式文本按 [STREAM_PUBLISH_MS] 一批推送，而不是每个 token 都推。
+     *
+     * 每来一个 token 就更新一次状态，会让整个对话页（顶栏 + 输入框 + 列表 +
+     * markdown 重新解析与排版）每帧全量重来一遍；模型很快时就这样「字追不上」。
+     * 这里保证：最多每 [STREAM_PUBLISH_MS] 毫秒推一次，并且最后一段一定会推出去。
+     */
+    private fun scheduleStreamingPublish() {
+        val now = System.currentTimeMillis()
+        val wait = streamPublishedAt + STREAM_PUBLISH_MS - now
+        if (wait > 0) {
+            if (streamPublishJob?.isActive != true) {
+                streamPublishJob = viewModelScope.launch {
+                    delay(wait)
+                    pushStreaming()
+                }
+            }
+            return
+        }
+        streamPublishJob?.cancel()
+        streamPublishJob = null
+        pushStreaming()
+    }
+
+    private fun pushStreaming() {
+        streamPublishedAt = System.currentTimeMillis()
+        val text = streamingText
+        _uiState.update {
+            it.copy(
+                streaming = text,
+                running = true,
+                stopVisible = true,
+                activity = it.activity ?: ChatActivity(
+                    kind = ChatActivityKind.THINKING,
+                    label = null,
+                    startedAtMs = System.currentTimeMillis(),
+                ),
+            )
         }
     }
 
@@ -2136,6 +2172,8 @@ class BotChatViewModel(
         private val RELAY_TOOLS = setOf("group_relay", "message_bot", "post_to_group", "stop_bot")
         /** 对话里最多留几张浏览器缩略图卡（只活在本次对话）。 */
         private const val MAX_BROWSER_SHOTS = 30
+        /** 流式文本的推送间隔：约 20 次/秒，够顺滑又不会每帧全页重排。 */
+        private const val STREAM_PUBLISH_MS = 50L
         private const val STOP_GRACE_NS = 2_000_000_000L
         /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
         /** 群聊里刚发出消息后，等 round 建起来的最长时间（超过就不再乐观显示）。 */

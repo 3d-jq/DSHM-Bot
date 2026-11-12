@@ -113,8 +113,25 @@ fun Modifier.minisTextKitSelectionGesture(
     /** Set true when the LazyColumn uses `reverseLayout = true` (chat lists). */
     reverseLayout: Boolean = false,
     onLongPressEngaged: () -> Unit = {},
+    /**
+     * 长按命中某段文字时先问调用方要不要接管（弹消息面板）。
+     *
+     * 返回 true = 这次长按给面板用了，不开始选字；面板里的「选择文字」再调
+     * [SelectionController.beginSelectionWord] 从同一个位置开始选。
+     */
+    /**
+     * 长按命中文字时先问调用方要不要接管（弹消息面板）。
+     *
+     * 参数里带的是**手指的窗口坐标**，不是 shard 的 messageId —— 消息 id 并不总是唯一
+     * （引擎的 `displayItems` 不给 id，刷新/缓存后还可能撞），用 id 反查会串到别的气泡。
+     * 调用方按气泡自己的布局范围认人，才是准的。
+     */
+    onLongPressMenu: ((TextPosition, Offset) -> Boolean)? = null,
 ): Modifier = composed {
     val hapticFeedback = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // 用 rememberUpdatedState 拿回调：它每个重组都会换新实例，
+    // 直接进 pointerInput 的 key 会让手势每帧重启（选字直接断掉）。
+    val menuHandler = androidx.compose.runtime.rememberUpdatedState(onLongPressMenu)
     pointerInput(controller, listState, reverseLayout) {
     val longPressTimeoutMs = android.view.ViewConfiguration.getLongPressTimeout().toLong()
     val touchSlopPx = viewConfiguration.touchSlop
@@ -193,6 +210,14 @@ fun Modifier.minisTextKitSelectionGesture(
         // user bubble's own long-press → action menu).
         val hit = controller.hitTestStrict(lastWindowPoint) ?: return@awaitEachGesture
         controller.selectionFromMouse.value = false
+        if (menuHandler.value?.invoke(hit, lastWindowPoint) == true) {
+            // 面板接管：同样要吃住这次手势，别让 LazyColumn 当成滚动。
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            onLongPressEngaged()
+            down.consume()
+            consumeUntilRelease(down.id)
+            return@awaitEachGesture
+        }
         controller.beginSelectionWord(hit)
         // Fired HERE, not at the long-press timeout: the strict hit-test above
         // returns null over a non-selectable region, and buzzing before it
