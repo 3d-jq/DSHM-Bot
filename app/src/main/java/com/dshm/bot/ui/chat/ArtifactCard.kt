@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.data.remote.ArtifactKind
+import com.dshm.bot.data.remote.artifactKindOf
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
@@ -74,6 +76,8 @@ fun ArtifactCard(
     endpoint: RuntimeEndpoint?,
     sessionId: String,
     modifier: Modifier = Modifier,
+    /** `present` 声明的交付物（「交付了」）还是兜底推出来的（「生成了」）。 */
+    delivered: Boolean = true,
 ) {
     if (artifacts.isEmpty()) return
     val context = LocalContext.current
@@ -171,7 +175,10 @@ fun ArtifactCard(
             )
             Spacer(Modifier.width(Dshm.spacing.sm))
             Text(
-                text = stringResource(R.string.chat_artifacts_delivered, artifacts.size),
+                text = stringResource(
+                    if (delivered) R.string.chat_artifacts_delivered else R.string.chat_artifacts_generated,
+                    artifacts.size,
+                ),
                 style = Dshm.typography.settingsRowTitle,
                 color = Dshm.colors.textPrimary,
             )
@@ -338,9 +345,14 @@ private fun artifactTint(artifact: ChatArtifact): Color = when (artifact.extensi
     else -> Dshm.colors.textSecondary
 }
 
-private fun artifactIcon(artifact: ChatArtifact): Int = when (artifact.extension) {
-    "png", "jpg", "jpeg", "gif", "webp", "svg" -> R.drawable.ic_lucide_image
-    "zip", "tar", "gz", "7z", "rar" -> R.drawable.ic_lucide_package
+/** 类型图标（对齐 dsh-Go `artifactIcon`）：按 `ArtifactKind` 分，不再是粗粒度两三种。 */
+private fun artifactIcon(artifact: ChatArtifact): Int = when (artifactKindOf(artifact.path)) {
+    ArtifactKind.IMAGE -> R.drawable.ic_lucide_image
+    ArtifactKind.VIDEO -> R.drawable.ic_lucide_file_video
+    ArtifactKind.AUDIO -> R.drawable.ic_lucide_audio_lines
+    ArtifactKind.ARCHIVE -> R.drawable.ic_lucide_package
+    ArtifactKind.WEB -> R.drawable.ic_lucide_globe
+    ArtifactKind.MARKDOWN -> R.drawable.ic_lucide_book_open
     else -> R.drawable.ic_lucide_file_text
 }
 

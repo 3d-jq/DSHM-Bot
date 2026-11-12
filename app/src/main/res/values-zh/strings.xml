@@ -276,6 +276,7 @@
     <string name="chat_expand">展开全文</string>
     <string name="chat_collapse">收起</string>
     <string name="chat_artifacts_delivered">交付了 %1$d 个文件</string>
+    <string name="chat_artifacts_generated">生成了 %1$d 个文件</string>
     <string name="chat_artifacts_all">全部 %1$d 个文件</string>
     <string name="chat_artifact_more">更多操作</string>
     <string name="chat_artifact_fetching">正在从引擎取文件…</string>

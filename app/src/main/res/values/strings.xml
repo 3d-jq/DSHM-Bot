@@ -276,6 +276,7 @@
     <string name="chat_expand">Show all</string>
     <string name="chat_collapse">Collapse</string>
     <string name="chat_artifacts_delivered">Delivered %1$d files</string>
+    <string name="chat_artifacts_generated">Generated %1$d files</string>
     <string name="chat_artifacts_all">All %1$d files</string>
     <string name="chat_artifact_more">More actions</string>
     <string name="chat_artifact_fetching">Getting the file from the engine…</string>

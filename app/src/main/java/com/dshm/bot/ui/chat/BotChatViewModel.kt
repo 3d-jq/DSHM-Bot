@@ -33,6 +33,7 @@ import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.RemoteSpeechRepository
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import com.dshm.bot.data.runtime.RuntimeInstaller
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
 import com.dshm.bot.domain.model.DshGoPreferences
@@ -42,6 +43,8 @@ import com.dshm.bot.service.DshmAccessibilityService
 import com.dshm.bot.ui.home.RoomMemberUi
 import com.dshm.bot.ui.home.TeamRoomUi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -168,6 +171,8 @@ data class ChatEntry(
     val seq: Long? = null,
     /** 一轮结束时交付的文件（`present` 声明）；非空时画成产物卡。 */
     val artifacts: List<ChatArtifact> = emptyList(),
+    /** 这些产物是 `present` 声明的（「交付了」）还是兜底推出来的（「生成了」）。 */
+    val artifactsDelivered: Boolean = false,
     /** 工具事件的目标（Bot / 群聊名字）；界面用它在团队里认头像。 */
     val target: String? = null,
     /** 产生这条事件的 DS Bot 工具名（`message_bot` / `remember`…），界面据此选图标。 */
@@ -367,16 +372,22 @@ class BotChatViewModel(
     private var followStreamId: String? = null
     private var followSessionId: String? = null
     private val toolEvents = LinkedHashMap<Long, ChatEntry>()
-    /** 每个 turn 的交付声明（按声明顺序，路径去重）：turn → 文件。 */
-    private val presentedByTurn = LinkedHashMap<Int, MutableList<ChatArtifact>>()
-    /** 声明所在的 seq：这一轮还没结束（没有 turn/end）时用它占位。 */
-    private val presentedSeq = HashMap<Int, Long>()
-    /** 没有 `present` 时，从成功的 write / str_replace_editor create 补出来的产物。 */
-    private val writtenByTurn = LinkedHashMap<Int, MutableList<ChatArtifact>>()
-    private val writtenSeq = HashMap<Int, Long>()
-    private val artifactCalls = HashMap<String, PendingArtifactCall>()
-    /** 每个 turn 的 `turn/end` seq —— 产物卡按官方口径贴在一轮结束处。 */
-    private val turnEndSeq = HashMap<Int, Long>()
+    /**
+     * 会话事件记录（seq → event）。
+     *
+     * 产物卡是**从它推导**出来的（对齐 dsh-Go 的 `deriveArtifacts`）：
+     * 交付声明 / 新建文件 / 回复里的链接 / 输出目录，四个来源都在事件里，
+     * 边流边攒容易丢，重算不会。
+     */
+    private val sessionEvents = LinkedHashMap<Long, JSONObject>()
+    private val eventsCache = appContext?.let { ChatEventsCache(it, botId) }
+    private var eventsSaveJob: Job? = null
+    /** 引擎 rootfs：输出目录兜底要直接扫工作区。 */
+    private val rootfsDir = appContext?.let { RuntimeInstaller(it).rootfsDir }
+    /** 输出目录扫描的短缓存：合并在每次事件后都会跑，别每次都扫盘。 */
+    private var outputsCache: List<OutputFile> = emptyList()
+    private var outputsCacheAt = 0L
+    private var outputsScanJob: Job? = null
     /**
      * DSH 的会话运行状态（mux 的 `api-session/status`）：会话 id → 这一轮还在跑吗。
      *
@@ -440,6 +451,13 @@ class BotChatViewModel(
 
     init {
         cachedHistory?.let { restoreHistory(it) }
+        // 上次的事件记录先灌进来：首帧就能把产物卡推导出来，不用等 follow 快照。
+        eventsCache?.load()?.forEach { event ->
+            val seq = event.optLong("seq", -1L)
+            if (seq >= 0L) sessionEvents[seq] = event
+        }
+        // 用落盘的事件先推导一次：产物卡和第一条消息同一帧出现，不用等 follow 快照。
+        if (sessionEvents.isNotEmpty()) mergeSessionEvents()
         if (client != null) {
             // 先读历史，别让补模型/探测目录的 state 调用挡住对话首屏。
             load(initial = true)
@@ -484,7 +502,6 @@ class BotChatViewModel(
         followStreamId?.let { mux?.closeStream(it) }
         followSessionId = session
         toolEvents.clear()
-        clearPresented()
         pendingTools.clear()
         lastTurnStartSeq = 0L
         lastTurnEndSeq = 0L
@@ -515,7 +532,6 @@ class BotChatViewModel(
         when (frame.optString("type")) {
             "snapshot" -> {
                 toolEvents.clear()
-                clearPresented()
                 pendingTools.clear()
                 lastTurnStartSeq = 0L
                 lastTurnEndSeq = 0L
@@ -542,6 +558,7 @@ class BotChatViewModel(
         val data = event.optJSONObject("data") ?: return
         val seq = event.optLong("seq", -1L).takeIf { it >= 0L } ?: return
         if (seq > maxSeenSeq) maxSeenSeq = seq
+        recordSessionEvent(seq, event)
         val time = event.optLong("time", 0L)
         when (type) {
             "tool/call" -> {
@@ -551,14 +568,6 @@ class BotChatViewModel(
                 }
                 if (callId.isEmpty()) return
                 val turn = data.optInt("turn", -1)
-                if (turn > 0) {
-                    artifactCalls[callId] = PendingArtifactCall(
-                        name = name,
-                        args = toolArguments(data),
-                        turn = turn,
-                        seq = seq,
-                    )
-                }
                 if (name !in FOLLOW_TOOLS) return
                 pendingTools[callId] = PendingTool(name, toolArguments(data), callId, time)
             }
@@ -570,7 +579,6 @@ class BotChatViewModel(
                 val isError = data.optBoolean("isError") ||
                     message?.optBoolean("isError") == true ||
                     data.optBoolean("error")
-                if (!isError) captureWrittenArtifact(callId, seq)
                 val pending = pendingTools.remove(callId) ?: return
                 val resultText = textContent(message?.opt("content"))
                 val line = toolEventLine(pending.name, pending.args, resultText, isError, botName) ?: return
@@ -587,29 +595,13 @@ class BotChatViewModel(
                 // 它们只在 `chat` / `room-chat` 的 items 里，得重拉一次才会出现在界面上。
                 if (pending.name in RELAY_TOOLS) refreshChatSoon()
             }
-            DELIVERABLES_PRESENTED_EVENT -> {
-                val presented = presentedFilesOf(event) ?: return
-                if (presented.isEmpty()) return
-                val turn = presented.first().turn
-                val files = presentedByTurn.getOrPut(turn) { mutableListOf() }
-                val known = files.mapTo(HashSet()) { it.path }
-                presented.forEach { file ->
-                    if (known.add(file.path)) {
-                        files += ChatArtifact(path = file.path, description = file.description)
-                    }
-                }
-                presentedSeq.putIfAbsent(turn, seq)
-            }
-            // 一轮的结束点：产物卡贴在这里（官方网页版也是画在一轮结束处，而不是
-            // `present` 调用发生的位置 —— 后面往往还有一段收尾文字）。
+            // 交付声明（`deliverables/presented`）不用在这里攒：产物卡统一由
+            // `artifactEntries()` 从会话事件记录推导（对齐 dsh-Go）。
+            DELIVERABLES_PRESENTED_EVENT -> Unit
+            // 轮的边界：浏览器缩略图之类要贴着这一轮放。
             "turn/start" -> lastTurnStartSeq = maxOf(lastTurnStartSeq, seq)
             "turn/end" -> {
                 lastTurnEndSeq = maxOf(lastTurnEndSeq, seq)
-                val turn = data.optInt("turn", -1)
-                if (turn >= 0) {
-                    turnEndSeq[turn] = seq
-                    artifactCalls.values.removeAll { it.turn == turn }
-                }
             }
 
             // dsh-Go 把 `llm/retry` 渲染成一条 `kind: 'retry'` 的普通事件行：
@@ -646,24 +638,6 @@ class BotChatViewModel(
         return runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
     }
 
-    /**
-     * 一些模型不会调用 `present`，但 Web 端仍会把 write 创建的文件当产物。
-     * 只在没有 `present` 声明的回合补这层，避免重复。
-     */
-    private fun captureWrittenArtifact(callId: String, seq: Long) {
-        val call = artifactCalls.remove(callId) ?: return
-        val command = call.args.optString("command")
-        if (call.name == "str_replace_editor" && command != "create") return
-        if (call.name != "write" && call.name != "str_replace_editor") return
-        val path = call.args.optString("file_path")
-            .ifEmpty { call.args.optString("path") }
-            .trim()
-        if (path.isEmpty() || !isArtifactPath(path)) return
-        val files = writtenByTurn.getOrPut(call.turn) { mutableListOf() }
-        if (files.none { it.path == path }) files += ChatArtifact(path = path, description = null)
-        writtenSeq.putIfAbsent(call.turn, seq)
-    }
-
     private fun textContent(value: Any?): String {
         val array = value as? JSONArray ?: return (value as? String).orEmpty()
         return buildString {
@@ -674,34 +648,111 @@ class BotChatViewModel(
         }.trim()
     }
 
-    /** 每个 turn 的产物卡：有 `turn/end` 就贴在那一轮结束处，否则留在声明的位置。 */
-    private fun presentedEntries(): List<ChatEntry> {
-        val turns = (presentedByTurn.keys + writtenByTurn.keys).distinct()
-        return turns.mapNotNull { turn ->
-            val declared = presentedByTurn[turn]
-            val files = when {
-                !declared.isNullOrEmpty() -> declared
-                else -> writtenByTurn[turn]
-            } ?: return@mapNotNull null
-            if (files.isEmpty()) return@mapNotNull null
-            val seq = turnEndSeq[turn] ?: presentedSeq[turn] ?: writtenSeq[turn] ?: return@mapNotNull null
-        ChatEntry(
-            id = "present:$turn",
-            kind = ChatEntryKind.ARTIFACTS,
-            text = "",
-            seq = seq,
-            artifacts = files.toList(),
-        )
+    /**
+     * 记一条会话事件（产物推导的输入），并按上限裁剪后落盘。
+     *
+     * 落盘是去抖的：一轮里几百条事件，不能每条都写一次 SharedPreferences。
+     */
+    private fun recordSessionEvent(seq: Long, event: JSONObject) {
+        sessionEvents[seq] = event
+        while (sessionEvents.size > MAX_SESSION_EVENTS) {
+            sessionEvents.remove(sessionEvents.keys.first())
+        }
+        val cache = eventsCache ?: return
+        eventsSaveJob?.cancel()
+        eventsSaveJob = viewModelScope.launch {
+            delay(800)
+            cache.save(sessionEvents.values.toList())
         }
     }
 
-    private fun clearPresented() {
-        presentedByTurn.clear()
-        presentedSeq.clear()
-        writtenByTurn.clear()
-        writtenSeq.clear()
-        artifactCalls.clear()
-        turnEndSeq.clear()
+    /**
+     * 每一轮完成的产物卡。
+     *
+     * 对齐 dsh-Go：**从会话事件记录重新推导**（交付声明 / 本轮新建的文件 /
+     * 回复里链接的文件 / 输出目录兜底），卡贴在这一轮 `turn/end` 处。
+     * 以前是边流边攒，事件一旦不在 follow 快照窗口里就永久丢失
+     * （比如 `present` 发生在几轮之前，或者当时对话页没开着）。
+     */
+    private fun artifactEntries(): List<ChatEntry> {
+        if (sessionEvents.isEmpty()) return emptyList()
+        // 顺手把输出目录扫描排到后台（带 TTL + 单飞）；推导先用上一次的结果，
+        // 绝不在这里扫盘 —— 这个函数跑在主线程的一帧里。
+        scheduleOutputsScan()
+        val events = sessionEvents.values.toList()
+        val turns = turnTraces(events)
+        if (turns.none { !it.running && it.endSeq != null }) return emptyList()
+        val derived = deriveArtifacts(
+            events = events,
+            turns = turns,
+            cwd = _uiState.value.botWorkDir,
+            outputs = outputsCache,
+        )
+        return derived.map { group ->
+            ChatEntry(
+                id = "present:${group.turn}",
+                kind = ChatEntryKind.ARTIFACTS,
+                text = "",
+                seq = group.endSeq,
+                artifacts = group.files.map { file ->
+                    ChatArtifact(path = file.path, description = file.description)
+                },
+                artifactsDelivered = group.delivered,
+            )
+        }
+    }
+
+    /**
+     * 输出目录兜底：会话工作区里最近改动的文件。
+     *
+     * dsh-Go 扫的是手机下载目录（它的运行时把产物写在那儿）；我们的引擎写工作区，
+     * 所以扫工作区。扫描放后台（带 TTL + 单飞），扫完再合并一次 —— 推导本身在主线程，
+     * 不能让它去扫盘。
+     */
+    private fun scheduleOutputsScan() {
+        val now = System.currentTimeMillis()
+        if (now - outputsCacheAt < OUTPUTS_CACHE_MS) return
+        if (outputsScanJob?.isActive == true) return
+        outputsCacheAt = now
+        outputsScanJob = viewModelScope.launch(Dispatchers.IO) {
+            val scanned = runCatching { scanWorkspaceOutputs() }.getOrDefault(emptyList())
+            withContext(Dispatchers.Main) {
+                if (scanned != outputsCache) {
+                    outputsCache = scanned
+                    mergeSessionEvents()
+                }
+            }
+        }
+    }
+
+    private fun scanWorkspaceOutputs(): List<OutputFile> {
+        val rootfs = rootfsDir ?: return emptyList()
+        val guest = _uiState.value.botWorkDir?.takeIf { it.startsWith("/") } ?: DEFAULT_WORKSPACE
+        val dir = java.io.File(rootfs, guest.removePrefix("/"))
+        if (!dir.isDirectory) return emptyList()
+        val cutoff = System.currentTimeMillis() - WORKSPACE_SCAN_WINDOW_MS
+        val out = ArrayList<OutputFile>()
+        fun walk(current: java.io.File, depth: Int) {
+            if (depth > WORKSPACE_SCAN_DEPTH || out.size >= WORKSPACE_SCAN_LIMIT) return
+            for (child in current.listFiles().orEmpty()) {
+                if (out.size >= WORKSPACE_SCAN_LIMIT) return
+                if (child.isDirectory) {
+                    if (child.name in WORKSPACE_SKIP_DIRS) continue
+                    walk(child, depth + 1)
+                } else if (child.lastModified() >= cutoff) {
+                    val guestPath = "/" + child.absolutePath
+                        .removePrefix(rootfs.absolutePath)
+                        .trimStart('/')
+                    out += OutputFile(
+                        path = guestPath,
+                        modifiedMs = child.lastModified(),
+                        bytes = child.length(),
+                    )
+                }
+            }
+        }
+        walk(dir, 0)
+        return out
     }
 
     /**
@@ -742,7 +793,7 @@ class BotChatViewModel(
     }
 
     private fun mergeSessionEvents() {
-        if (toolEvents.isEmpty() && presentedByTurn.isEmpty() && writtenByTurn.isEmpty() && browserShots.isEmpty()) return
+        if (toolEvents.isEmpty() && browserShots.isEmpty() && sessionEvents.isEmpty()) return
         _uiState.update { state ->
             val base = state.entries.filterNot {
                 it.id.startsWith("tool:") ||
@@ -757,7 +808,7 @@ class BotChatViewModel(
             // 要等下一次重载才有真 seq），按 seq 排序会把它甩到列表最后 ——
             // 倒序列表里就是最下面，表现成「大模型的回复跑到了问题上面」。
             // 所以只把事件插进「有 seq 的那段历史」的正确位置，插不进去就放末尾。
-            val incoming = (toolEvents.values + presentedEntries() + browserShots).filter(::loaded)
+            val incoming = (toolEvents.values + artifactEntries() + browserShots).filter(::loaded)
             state.copy(entries = mergeTimeline(base, incoming))
         }
     }
@@ -2236,6 +2287,17 @@ class BotChatViewModel(
         private const val NEWLINE_FLUSH_MAX_LEN = 32_000
         private const val NEWLINE_FLUSH_MIN_CHARS = 50
         private const val STOP_GRACE_NS = 2_000_000_000L
+        /** 会话事件记录的内存上限（够覆盖最近若干轮；产物推导只看完成的轮）。 */
+        private const val MAX_SESSION_EVENTS = 4_000
+        /** 输出目录扫描的缓存时长：合并在每条事件后都跑，不能每次都扫盘。 */
+        private const val OUTPUTS_CACHE_MS = 5_000L
+        /** 输出目录扫描只看最近这段时间内改动的文件。 */
+        private const val WORKSPACE_SCAN_WINDOW_MS = 6 * 60 * 60 * 1000L
+        private const val WORKSPACE_SCAN_DEPTH = 3
+        private const val WORKSPACE_SCAN_LIMIT = 200
+        private val WORKSPACE_SKIP_DIRS = setOf("node_modules", ".git", "shots", "__pycache__", ".venv")
+        /** 引擎默认工作区（guest 路径）；Bot 没自定义 workDir 时用它。 */
+        private const val DEFAULT_WORKSPACE = "/root/.dsh/bot/workspace"
         /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
         /** 群聊里刚发出消息后，等 round 建起来的最长时间（超过就不再乐观显示）。 */
 

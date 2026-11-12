@@ -1051,6 +1051,7 @@ private fun ChatMessages(
                         artifacts = entry.artifacts,
                         endpoint = endpoint,
                         sessionId = bot.id,
+                        delivered = entry.artifactsDelivered,
                     )
 
                     ChatEntryKind.BROWSER_SHOT -> BrowserShotCard(
