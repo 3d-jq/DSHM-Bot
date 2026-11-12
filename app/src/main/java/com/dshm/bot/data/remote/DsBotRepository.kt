@@ -24,17 +24,36 @@ class DsBotRepository(
 
     override fun observeBots(): Flow<List<BotSummary>> = flow {
         // 冷启动先给上次的团队快照，界面不用一直转圈等引擎。
-        cache?.load()?.takeIf { it.isNotEmpty() }?.let { emit(it) }
-        emit(fetchWithRetry())
+        //
+        // ⚠️ 必须把持久化的预览一起贴回去：快照里 `bots[].preview` 是 `state` 的
+        // role（角色描述），直接 emit 会把 `HomeViewModel` 用预览缓存拼好的那一版
+        // 顶掉 —— 表现就是「界面早就画好了，预览却先显示角色标签、过一会儿才跳回来」。
+        cache?.load()?.takeIf { it.isNotEmpty() }?.let { emit(applyKnownPreviews(it, previews)) }
+        var current = fetchWithRetry()
+        emit(current)
         client.feed().collect { event ->
             when (event.event) {
-                // 模型的新输出 —— 记下来当这个 Bot 的预览（不用再问引擎）。
+                // 模型的新输出 —— 记下来当这个 Bot 的预览，并**立刻**推给界面。
+                //
+                // 以前这里只写本地表、不发新列表，主页要等下一次 `revision`
+                // （引擎保存团队状态时才发）才重新拉一遍 —— 表现为「答案早就出来了，
+                // 预览还是上一轮」。feed 已经把文本送到了，就地打补丁零网络。
                 EVENT_MESSAGE -> event.data.let(::previewFromFeed)?.let { (botId, text) ->
-                    previews[botId] = BotPreview.oneLine(text)
-                    previewCache?.save(previews)
+                    val preview = BotPreview.oneLine(text)
+                    if (previews[botId] != preview) {
+                        previews[botId] = preview
+                        previewCache?.save(previews)
+                        patchBotPreview(current, botId, preview)?.let { patched ->
+                            current = patched
+                            emit(patched)
+                        }
+                    }
                 }
 
-                EVENT_HELLO, EVENT_REVISION, EVENT_LIVE -> emit(fetchWithRetry())
+                EVENT_HELLO, EVENT_REVISION, EVENT_LIVE -> {
+                    current = fetchWithRetry()
+                    emit(current)
+                }
             }
         }
     }.conflate().flowOn(Dispatchers.IO)
@@ -157,5 +176,45 @@ class DsBotRepository(
         const val EVENT_LIVE = "live"
         const val MAX_FETCH_ATTEMPTS = 3
         const val FETCH_RETRY_DELAY_MS = 500L
+    }
+}
+
+/**
+ * 把一条新预览就地打进当前列表（feed `message` 事件用）。
+ *
+ * 只改单 Bot 行：群聊预览以 `state.rooms[].preview` 为准，不在这里混。
+ * 返回 null 表示这一行没变化，调用方就不用重复 emit（省一次整表重组）。
+ */
+internal fun patchBotPreview(
+    bots: List<BotSummary>,
+    botId: String,
+    preview: String,
+): List<BotSummary>? {
+    var changed = false
+    val patched = bots.map { bot ->
+        if (!bot.isGroup && bot.id == botId && bot.preview != preview) {
+            changed = true
+            bot.copy(preview = preview)
+        } else {
+            bot
+        }
+    }
+    return if (changed) patched else null
+}
+
+/**
+ * 把已知的预览（持久化 + feed 累积）贴到名单上。
+ *
+ * 冷启动的名单快照来自 `state`，单 Bot 的 `preview` 字段是 role（角色描述）——
+ * 不贴回来的话，界面会先把画好的对话预览顶成角色标签，等 `chat` 回来再跳一次。
+ */
+internal fun applyKnownPreviews(
+    bots: List<BotSummary>,
+    previews: Map<String, String>,
+): List<BotSummary> = bots.map { bot ->
+    if (bot.isGroup) {
+        bot
+    } else {
+        previews[bot.id]?.takeIf { it.isNotBlank() }?.let { bot.copy(preview = it) } ?: bot
     }
 }
