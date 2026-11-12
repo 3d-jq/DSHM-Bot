@@ -100,6 +100,44 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - ⬜ 正式签名（release keystore）、应用内更新、发布流程
 - ⬜ `targetSdk` 升级评估：当前 28 是 PRoot 的取舍，见架构文档
 
+## 更新与版本跟随（2026-11-12，**只记录，暂不实现**）
+
+用户明确：**现在不做更新功能**，先把事实与风险记在这里，后面单开一轮。
+
+会牵动“更新”的是三条独立线。任何一条变动都要**我们自己适配**，不存在“装上新版就行”：
+
+1. **本项目自身**
+   - 发版有两个产物：**APK**（里面带着 `assets/ds-bot` 插件）和 **runtime zip**（rootfs）。
+2. **上游 DSH 更新**
+   - `assets/runtime/manifest.json` 钉住 `runtimeVersion` / `dshVersion` / `nodeVersion`，
+     以及 13 个我们自己的 dsh 补丁（见 manifest 的 `dshPatches`）。
+   - 上游升级 = 逐个重打这些补丁 → 重建 rootfs → 更新 manifest 与 sha256 → 发新 runtime zip。
+   - 应用内下载地址：`releases/latest/download/dshm-runtime-arm64-v8a.zip`
+     （`EngineScreen.DEFAULT_RUNTIME_URL`）；zip 内自带 CI 生成的 manifest，哈希校验在
+     `RuntimeInstaller.installFromZip()`。
+3. **上游 DS Bot 插件更新**
+   - 插件打进 APK 的 `assets/ds-bot`，每次引擎启动由 `DsBotPluginInstaller` 覆盖进 rootfs
+     （指纹 = 插件版本 + APK `lastUpdateTime`）→ **插件升级只能发新 APK**。
+   - 我们改过插件源码，上游新版必须 merge，不能直接覆盖：
+     - `src/host/browser.js`（手机浏览器自动化 / `read_browser` / `browser-*` / 截图 / 守卫 / 交接）
+     - `src/host/channel.js`（`browser-wait` / `browser-result` / `phone-wait` / `phone-result` 等端点）
+     - `src/host/phone.js`（手机控制，`DSH_PHONE_CONTROL` / `DSH_PHONE_OWNER`）
+     - `src/host/dsh-update.js`、`src/host/update.js`（`DS_BOT_APP=1` 时视为整个 App 一起更新）
+   - `client.js` 是 `npm run build` 的产物：改完源码必须重新构建，不能手改。
+   - Android 侧消费的 RPC / feed 契约（`state`、`feed` 的 message/stream/revision/live/notice/room、
+     `chat` / `room-chat` / `send` / `capability-*` / `memory-view` / `usage` / `browser-*` …）
+     字段或语义一变，我们界面不会自动跟上，必须真机回归。
+
+**当前状态（未实现）**
+- 应用内“检查更新”只是打开 GitHub Releases 页面（`AboutScreen.RELEASES_URL`），
+  没有版本比较、没有下载、没有自动更新。
+- ⬜ **运行时升级会丢数据（已知，暂不修）**：`RuntimeInstaller.installFromZip()` 会
+  `rootfsDir.deleteRecursively()`，而自动 `stash(KEEP_PATHS)` 没有接进 `installFromUrl`。
+  已安装状态下直接重装会丢 `root/.dsh/bot`（对话 / 记忆 / Bot 设置）、
+  `root/.dsh/sessions`、`root/.dsh/AGENTS.md`。
+  用户明确：**数据保留升级先不做，只记录**。
+- ⬜ 插件是否支持“不更新 APK 也能升级”（从远端拉新插件包）未定；目前跟随 APK。
+
 ## DSH 完整化（2026-11-05 起，按 dsh-Go 对齐）
 
 范围：DSH 层照 dsh-Go 完整化，Bot 能力层照 DS-Bot 补齐（边界见 [reference-baselines.md](reference-baselines.md)）。

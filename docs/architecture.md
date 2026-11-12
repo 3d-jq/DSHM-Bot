@@ -111,3 +111,6 @@ Repository 换不掉：纯规则已抽成 `ApprovalMerge` 等函数覆盖 JVM �
   正文 = 动态状态、点通知回 App、「停止引擎」动作走 `RuntimeLauncher.stopAll()`（按 `/proc` 反查，
   不依赖内存里的 Process 句柄）。
   代价是一条常驻通知（IMPORTANCE_LOW + 静音）；targetSdk 28 让它不需要运行时通知授权。
+- **版本跟随**：本项目同时受「自身发版 / 上游 DSH / 上游 DS Bot 插件」三条线牵动，
+  任何一条都要我们自己适配（补丁重打 + 插件 merge + 界面契约回归）。
+  现状、待办与已知的升级丢数据风险见 `docs/roadmap.md` 的「更新与版本跟随」一节。
