@@ -182,7 +182,11 @@ fun ReadOnlyCardFrame(
     }
 }
 
-/** 用户消息下的图片计数（历史回读只有数量，没有图）。 */
+/**
+ * 用户消息下的图片计数（历史回读只有数量，没有图）。
+ *
+ * 画在气泡**外面**（附件区），所以用页面上的次要文字色，而不是气泡里的白字。
+ */
 @Composable
 fun ImageCountCaption(count: Int, modifier: Modifier = Modifier) {
     if (count <= 0) return
@@ -193,14 +197,14 @@ fun ImageCountCaption(count: Int, modifier: Modifier = Modifier) {
         Icon(
             painter = painterResource(R.drawable.ic_lucide_image),
             contentDescription = null,
-            tint = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
+            tint = Dshm.colors.textSecondary,
             modifier = Modifier.size(Dshm.spacing.md),
         )
         Spacer(Modifier.width(Dshm.spacing.xxs))
         Text(
             text = stringResource(R.string.chat_user_images, count),
             style = Dshm.typography.rowTime,
-            color = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
+            color = Dshm.colors.textSecondary,
         )
     }
 }

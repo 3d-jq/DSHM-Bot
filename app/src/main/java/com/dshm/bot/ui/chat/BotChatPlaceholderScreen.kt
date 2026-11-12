@@ -1371,6 +1371,7 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
 }
 
 /** 用户消息气泡，右对齐。 */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun UserBubble(
     text: String,
@@ -1385,28 +1386,43 @@ private fun UserBubble(
     /** 点图片缩略图：打开全屏查看器。 */
     onOpenImage: (ChatAttachmentItem) -> Unit = {},
 ) {
+    val hasAttachments = items.isNotEmpty() || attachments.isNotEmpty() || images > 0
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.End,
     ) {
-        Box {
-            Column(
-                horizontalAlignment = Alignment.End,
-                modifier = Modifier
-                    .pointerInput(text) {
-                        detectTapGestures(onLongPress = { onLongPress() })
-                    }
-                    .background(
-                        Dshm.colors.bubbleUser,
-                        RoundedCornerShape(Dshm.radius.lg),
-                    )
-                    .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
-            ) {
-                if (items.isNotEmpty()) {
-                    UserAttachmentCards(items, onOpenImage)
-                    if (text.isNotBlank()) Spacer(Modifier.height(Dshm.spacing.xs))
-                }
-                if (text.isNotBlank()) {
+        // 附件在气泡**外面**（对齐 DeepSearch：`VStack { attachments; 文字气泡 }`）——
+        // 图片 / 文档有自己的圆角底色，不该被用户气泡的蓝底包住。
+        // 长按挂在整条消息上，所以「只有附件没有文字」的消息也能弹操作面板。
+        Column(
+            modifier = Modifier.pointerInput(text) {
+                detectTapGestures(onLongPress = { onLongPress() })
+            },
+            horizontalAlignment = Alignment.End,
+        ) {
+            if (items.isNotEmpty()) {
+                UserAttachmentCards(items, onOpenImage)
+            } else if (attachments.isNotEmpty()) {
+                UserAttachmentCards(
+                    attachments.map { name -> ChatAttachmentItem(name, "", false) },
+                    onOpenImage = {},
+                )
+            }
+            // 有本地缩略图时不再写「N 张图片」；只有回读拿不到图才提示数量。
+            if (items.none { it.isImage } && images > 0) {
+                ImageCountCaption(count = images)
+            }
+            // 只有附件没有文字时，不画空气泡。
+            if (text.isNotBlank()) {
+                Column(
+                    modifier = Modifier
+                        .then(if (hasAttachments) Modifier.padding(top = Dshm.spacing.xs) else Modifier)
+                        .background(
+                            Dshm.colors.bubbleUser,
+                            RoundedCornerShape(Dshm.radius.lg),
+                        )
+                        .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+                ) {
                     // 列表整体在 SelectionContainer 里；用户气泡的长按要留给面板，
                     // 所以这段退出文字选择（DeepSearch 也是这么做的）。
                     androidx.compose.foundation.text.selection.DisableSelection {
@@ -1420,17 +1436,6 @@ private fun UserBubble(
                         )
                     }
                 }
-                // 老路径（只拿到名字，没有本地文件）：保留原来的回退样子。
-                if (items.isEmpty()) attachments.forEach { name ->
-                    Text(
-                        text = "📎 $name",
-                        style = Dshm.typography.rowTime,
-                        color = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
-                        modifier = Modifier.padding(top = Dshm.spacing.xxs),
-                    )
-                }
-                // 有本地缩略图时不再写「N 张图片」；只有回读拿不到图才提示数量。
-                if (items.none { it.isImage } && images > 0) ImageCountCaption(count = images)
             }
         }
         timeMs?.let { t ->
@@ -1444,61 +1449,32 @@ private fun UserBubble(
     }
 }
 
-/** 用户气泡里的附件：图片缩略图 + 文件卡（都画在气泡的主色底上）。 */
+/**
+ * 用户附件区：图片缩略图 + 文件块，右对齐自动折行（对齐 DeepSearch 的
+ * `UserAttachmentList`：64dp 方块、6dp 间距、不带气泡底色）。
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun UserAttachmentCards(
     items: List<ChatAttachmentItem>,
     onOpenImage: (ChatAttachmentItem) -> Unit,
 ) {
-    val images = items.filter { it.isImage }
-    val files = items.filterNot { it.isImage }
-    Column(horizontalAlignment = Alignment.End) {
-        if (images.isNotEmpty()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
-            ) {
-                images.take(MAX_USER_THUMBS).forEach { item ->
-                    UserThumb(item, Modifier.size(THUMB_SIZE), onClick = { onOpenImage(item) })
-                }
-            }
-            if (images.size > MAX_USER_THUMBS) {
-                Text(
-                    text = "+${images.size - MAX_USER_THUMBS}",
-                    style = Dshm.typography.rowTime,
-                    color = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
-                    modifier = Modifier.padding(top = Dshm.spacing.xxs),
-                )
-            }
-        }
-        files.forEach { item ->
-            Row(
-                modifier = Modifier
-                    .padding(top = Dshm.spacing.xs)
-                    .clip(RoundedCornerShape(Dshm.radius.sm))
-                    .background(Dshm.colors.onBubbleUser.copy(alpha = 0.16f))
-                    .padding(horizontal = Dshm.spacing.sm, vertical = Dshm.spacing.xxs),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_lucide_file_text),
-                    contentDescription = null,
-                    tint = Dshm.colors.onBubbleUser.copy(alpha = 0.85f),
-                    modifier = Modifier.size(Dshm.spacing.md),
-                )
-                Spacer(Modifier.width(Dshm.spacing.xxs))
-                Text(
-                    text = item.name,
-                    style = Dshm.typography.rowTime,
-                    color = Dshm.colors.onBubbleUser,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xs, Alignment.End),
+        verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
+    ) {
+        items.forEach { item ->
+            if (item.isImage) {
+                UserThumb(item, Modifier.size(TILE_SIZE), onClick = { onOpenImage(item) })
+            } else {
+                UserFileTile(item.name)
             }
         }
     }
 }
 
-/** 气泡里的一张图片缩略图（方形、圆角、按高度裁切）。 */
+/** 图片缩略图（方形、圆角、按高度裁切；在页面底色上自带浅底 + 描边）。 */
 @Composable
 private fun UserThumb(
     item: ChatAttachmentItem,
@@ -1506,16 +1482,18 @@ private fun UserThumb(
     onClick: () -> Unit = {},
 ) {
     val bitmap = remember(item.path) {
-        runCatching {
+        if (item.path.isEmpty()) null else runCatching {
             val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
             android.graphics.BitmapFactory.decodeFile(item.path, options)
         }.getOrNull()
     }
+    val shape = RoundedCornerShape(Dshm.radius.sm)
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(Dshm.spacing.sm))
-            .clickable(onClick = onClick)
-            .background(Dshm.colors.onBubbleUser.copy(alpha = 0.16f)),
+            .clip(shape)
+            .background(Dshm.colors.surfaceMuted)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
@@ -1529,15 +1507,46 @@ private fun UserThumb(
             Icon(
                 painter = painterResource(R.drawable.ic_lucide_image),
                 contentDescription = item.name,
-                tint = Dshm.colors.onBubbleUser.copy(alpha = 0.8f),
+                tint = Dshm.colors.textSecondary,
                 modifier = Modifier.size(Dshm.spacing.lg),
             )
         }
     }
 }
 
-private const val MAX_USER_THUMBS = 3
-private val THUMB_SIZE = 96.dp
+/** 文件块：图标 + 两行文件名（对齐 DeepSearch 的 `FileAttachmentTile`）。 */
+@Composable
+private fun UserFileTile(name: String) {
+    val shape = RoundedCornerShape(Dshm.radius.sm)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .size(TILE_SIZE)
+            .clip(shape)
+            .background(Dshm.colors.surfaceMuted)
+            .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
+            .padding(horizontal = Dshm.spacing.xxs, vertical = Dshm.spacing.xs),
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_lucide_file_text),
+            contentDescription = null,
+            tint = Dshm.colors.textSecondary,
+            modifier = Modifier.size(Dshm.spacing.md),
+        )
+        Spacer(Modifier.height(Dshm.spacing.hairline))
+        Text(
+            text = name,
+            style = Dshm.typography.rowTime.copy(fontSize = 9.sp, lineHeight = 11.sp),
+            color = Dshm.colors.textPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+private val TILE_SIZE = 64.dp
 
 /**
  * Bot 消息气泡：
