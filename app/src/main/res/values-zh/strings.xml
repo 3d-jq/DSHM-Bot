@@ -640,6 +640,8 @@
     <string name="image_action_share">分享</string>
     <string name="image_action_save">保存</string>
     <string name="image_copied">图片已复制</string>
+    <string name="image_copy_failed">复制失败</string>
+    <string name="image_share_failed">分享失败</string>
     <string name="image_saved">已保存到相册</string>
     <string name="image_save_failed">保存失败</string>
     <string name="providers_count">%1$d 个渠道</string>

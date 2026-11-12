@@ -640,6 +640,8 @@
     <string name="image_action_share">Share</string>
     <string name="image_action_save">Save</string>
     <string name="image_copied">Image copied</string>
+    <string name="image_copy_failed">Couldn\'t copy image</string>
+    <string name="image_share_failed">Couldn\'t share image</string>
     <string name="image_saved">Saved to gallery</string>
     <string name="image_save_failed">Couldn\'t save image</string>
     <string name="providers_count">%1$d providers</string>

@@ -2,4 +2,12 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="camera" path="camera/" />
     <cache-path name="artifacts" path="artifacts/" />
+    <!--
+      对话里自己发的图片 / 文档：复制或分享时要交给别的应用读，
+      所以必须在这里声明 filesDir 下的目录，否则 getUriForFile 直接抛
+      IllegalArgumentException（分享/复制闪退就是这个原因）。
+    -->
+    <files-path name="chat_attachments" path="chat-attachments/" />
+    <!-- 改成 filesDir 之前，同一批附件放在 cacheDir，兼容那时候发的老消息。 -->
+    <cache-path name="chat_attachments_legacy" path="chat-attachments/" />
 </paths>

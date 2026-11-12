@@ -224,27 +224,40 @@ private fun ImageAction(label: String, icon: Int, onClick: () -> Unit) {
 
 private suspend fun copyImageToClipboard(context: Context, file: File) {
     withContext(Dispatchers.IO) {
-        val uri = fileUri(context, file)
-        // 允许任何粘贴目标读取这张图（图库 / 输入法预览 / 文件管理器）。
-        runCatching { context.grantUriPermission("*", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        val clip = ClipData.newUri(context.contentResolver, file.name, uri)
+        // FileProvider 没配到这个路径就会抛 IllegalArgumentException —— 不能让整个
+        // App 挂在一次「复制」上，失败就提示。
+        val clip = runCatching {
+            val uri = fileUri(context, file)
+            // 允许任何粘贴目标读取这张图（图库 / 输入法预览 / 文件管理器）。
+            context.grantUriPermission("*", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            ClipData.newUri(context.contentResolver, file.name, uri)
+        }.getOrNull()
         withContext(Dispatchers.Main) {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            clipboard?.setPrimaryClip(clip)
-            Toast.makeText(context, R.string.image_copied, Toast.LENGTH_SHORT).show()
+            if (clip == null || clipboard == null) {
+                Toast.makeText(context, R.string.image_copy_failed, Toast.LENGTH_SHORT).show()
+            } else {
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(context, R.string.image_copied, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }
 
 private fun shareImage(context: Context, file: File, name: String) {
-    val uri = fileUri(context, file)
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = mimeOf(name)
-        putExtra(Intent.EXTRA_STREAM, uri)
-        putExtra(Intent.EXTRA_TITLE, name)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val shared = runCatching {
+        val uri = fileUri(context, file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeOf(name)
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, name))
     }
-    runCatching { context.startActivity(Intent.createChooser(intent, name)) }
+    if (shared.isFailure) {
+        Toast.makeText(context, R.string.image_share_failed, Toast.LENGTH_SHORT).show()
+    }
 }
 
 private suspend fun saveImageToGallery(context: Context, file: File, name: String) {
