@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -43,6 +45,19 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/dshm_accessibility_service" />
+        </service>
+
+        <!--
+          引擎常驻前台服务：把 App 保持在 FOREGROUND_SERVICE importance，
+          避免 PRoot/Node 子进程（Android 12+ 的幽灵进程）在后台被系统裁掉。
+        -->
+        <service
+            android:name=".service.RuntimeForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="DSH runtime engine (proot + node) stays alive so the local AI agent keeps working in background" />
         </service>
 
         <receiver

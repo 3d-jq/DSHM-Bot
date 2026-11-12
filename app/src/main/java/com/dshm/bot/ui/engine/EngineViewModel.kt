@@ -1,6 +1,9 @@
 package com.dshm.bot.ui.engine
 
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -18,6 +21,9 @@ import com.dshm.bot.data.runtime.TextMasking
 import com.dshm.bot.data.runtime.buildDiagnosticsReport
 import com.dshm.bot.data.runtime.phaseName
 import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.R
+import com.dshm.bot.service.RuntimeForegroundService
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -96,6 +102,7 @@ class EngineViewModel(
     init {
         restoredState = _state.value
         restoreRunningEngine()
+        observeNotificationStop()
         viewModelScope.launch {
             manager.state.collect { state ->
                 // StateFlow 会给新订阅者重放当前值（Installed / NotInstalled）。它可能
@@ -122,7 +129,41 @@ class EngineViewModel(
         _state.value = RuntimeState.Running(endpoint)
         restoredState = _state.value
         EngineLog.log("startup: restored running engine at ${endpoint.baseUrl}")
+        // 引擎是长驻的：热启动也要把前台服务挂上，否则进程掉回 cached，
+        // 系统裁幽灵进程时就可能把引擎带走。
+        RuntimeForegroundService.start(appContext, appContext.getString(R.string.engine_notification_running))
     }
+
+    /**
+     * 通知栏里的「停止引擎」由 [RuntimeForegroundService] 执行；
+     * 它杀掉引擎后广播回来，让还开着的引擎页立刻回到「已停止」，不留下过期的运行态。
+     */
+    private val notificationStopReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            EngineLog.log("engine stopped from notification")
+            _state.value = RuntimeState.Stopped
+            restoredState = _state.value
+        }
+    }
+
+    private fun observeNotificationStop() {
+        runCatching {
+            ContextCompat.registerReceiver(
+                appContext,
+                notificationStopReceiver,
+                IntentFilter(RuntimeForegroundService.ACTION_ENGINE_STOPPED),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
+    }
+
+    override fun onCleared() {
+        runCatching { appContext.unregisterReceiver(notificationStopReceiver) }
+        super.onCleared()
+    }
+
+    private fun runningStatus(): String =
+        appContext.getString(R.string.engine_notification_running)
 
     fun install(url: String) {
         viewModelScope.launch { manager.installFromUrl(url) }
@@ -141,10 +182,16 @@ class EngineViewModel(
                 _state.value = RuntimeState.Running(adopted)
                 restoredState = _state.value
                 EngineLog.log("startup: adopted running engine at ${adopted.baseUrl}")
+                RuntimeForegroundService.start(appContext, runningStatus())
                 return@launch
             }
             _state.value = RuntimeState.Starting
             restoredState = _state.value
+            RuntimeForegroundService.start(
+                appContext,
+                appContext.getString(R.string.engine_notification_starting),
+                busy = true,
+            )
             runCatching {
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
@@ -155,10 +202,13 @@ class EngineViewModel(
                 .onSuccess {
                     _state.value = RuntimeState.Running(it)
                     restoredState = _state.value
+                    RuntimeForegroundService.start(appContext, runningStatus())
                 }
                 .onFailure {
                     _state.value = RuntimeState.Failed(it.message ?: "启动失败")
                     restoredState = _state.value
+                    // 引擎没起来就别留一条「运行中」的常驻通知。
+                    RuntimeForegroundService.stop(appContext)
                 }
         }
     }
@@ -168,6 +218,11 @@ class EngineViewModel(
             withContext(Dispatchers.IO) { launcher.stop() }
             _state.value = RuntimeState.Starting
             restoredState = _state.value
+            RuntimeForegroundService.start(
+                appContext,
+                appContext.getString(R.string.engine_notification_starting),
+                busy = true,
+            )
             runCatching {
                 withContext(Dispatchers.IO) {
                     runCatching { DsBotPluginInstaller.install(appContext, installer.rootfsDir) }
@@ -178,10 +233,12 @@ class EngineViewModel(
                 .onSuccess {
                     _state.value = RuntimeState.Running(it)
                     restoredState = _state.value
+                    RuntimeForegroundService.start(appContext, runningStatus())
                 }
                 .onFailure {
                     _state.value = RuntimeState.Failed(it.message ?: "启动失败")
                     restoredState = _state.value
+                    RuntimeForegroundService.stop(appContext)
                 }
         }
     }
@@ -191,6 +248,7 @@ class EngineViewModel(
             withContext(Dispatchers.IO) { launcher.stop() }
             _state.value = RuntimeState.Stopped
             restoredState = _state.value
+            RuntimeForegroundService.stop(appContext)
         }
     }
 
@@ -207,6 +265,7 @@ class EngineViewModel(
             }
             _state.value = RuntimeState.NotInstalled
             restoredState = _state.value
+            RuntimeForegroundService.stop(appContext)
         }
     }
 

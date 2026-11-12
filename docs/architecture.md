@@ -103,3 +103,11 @@ Repository 换不掉：纯规则已抽成 `ApprovalMerge` 等函数覆盖 JVM �
   提升 targetSdk 前必须重新验证本机引擎能否启动，不要只改数字。
 - 本机 NDK 若缺 `source.properties`，`stripDebugDebugSymbols` 会跳过 `libproot.so` 等 native 库，
   APK 偏大；这是本机 SDK 安装问题，补齐 NDK 即可，不要在构建脚本里屏蔽告警。
+- **引擎常驻前台服务**（`service/RuntimeForegroundService`）：引擎是 PRoot + Node 子进程，
+  Android 12+ 会把它们登记成 `PhantomProcessRecord`；父 App 落进 cached 后，系统裁剪幽灵进程时
+  引擎可能被**单独杀掉**（表现为切出去回来又得冷启动十几秒）。
+  挂上前台服务后 App importance 停在 `FOREGROUND_SERVICE`（实测 `adj=200`，子进程不再进幽灵列表），
+  引擎就稳了。对齐 dsh-Go 的 `runtime.DshService`：通知渠道 `dshm-runtime`、标题 = App 名、
+  正文 = 动态状态、点通知回 App、「停止引擎」动作走 `RuntimeLauncher.stopAll()`（按 `/proc` 反查，
+  不依赖内存里的 Process 句柄）。
+  代价是一条常驻通知（IMPORTANCE_LOW + 静音）；targetSdk 28 让它不需要运行时通知授权。

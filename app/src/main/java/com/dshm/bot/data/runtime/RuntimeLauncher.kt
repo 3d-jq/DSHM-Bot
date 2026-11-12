@@ -165,6 +165,26 @@ class RuntimeLauncher(
     private data class EngineProcess(val pid: Int, val cmdline: String)
 
     /**
+     * 只要引擎还活着就杀掉它 —— 不依赖本实例 [start] 时持有的 `Process` 句柄。
+     *
+     * 需要它是因为「停引擎」不只发生在 App 里：通知栏上的「停止引擎」、
+     * 以及 App 被系统杀过之后留下的孤儿引擎，都拿不到那个句柄，
+     * 只能按 `/proc` 里的 cmdline 反查（和启动前的清扫同一套逻辑）。
+     */
+    fun stopAll() {
+        forgetEndpoint()
+        val rootfs = installer.rootfsDir
+        if (!rootfs.isDirectory) return
+        EngineLog.log("stopping engine (by process scan)")
+        clearOrphanEngines(rootfs)
+        process?.let { running ->
+            if (!waitExit(running, 2_000)) runCatching { running.destroyForcibly() }
+        }
+        process = null
+        runCatching { File(rootfs, "tmp/dsh-web.pid").delete() }
+    }
+
+    /**
      * 启动前清掉上一次的残留引擎进程。
      *
      * App 被系统杀掉时走不到 [stop]，proot 与 node 会变成孤儿继续跑着，

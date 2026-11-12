@@ -502,6 +502,11 @@
     <string name="engine_value_not_installed">Not installed</string>
     <string name="engine_restart_action">Restart</string>
     <string name="engine_local_title">Local engine</string>
+    <string name="engine_notification_channel">Local engine</string>
+    <string name="engine_notification_channel_desc">Keeps the local DSH engine alive in the background so bots keep working.</string>
+    <string name="engine_notification_starting">Starting the engine…</string>
+    <string name="engine_notification_running">Engine is running</string>
+    <string name="engine_notification_stop">Stop engine</string>
     <string name="engine_logs">Logs</string>
     <string name="engine_logs_copy">Copy</string>
     <string name="engine_logs_copied">Copied</string>
@@ -589,9 +594,6 @@
     <string name="info_pets">Pet support will be ported from dsh-Go later.</string>
     <string name="info_licenses">DSHM Bot is released under AGPL-3.0. Runtime build recipe from dsh-Go (AGPL-3.0). Bot team semantics from DS-Bot (Apache-2.0). Icons from Lucide (ISC).</string>
     <string name="settings_privacy">Privacy &amp; sharing</string>
-    <string name="notify_channel_engine">Local engine</string>
-    <string name="notify_engine_ready_title">Local engine ready</string>
-    <string name="notify_engine_ready_body">DSHM Bot can talk to DSH now.</string>
     <string name="notify_channel_chat">Chat</string>
     <string name="notify_channel_attention">Needs attention</string>
     <string name="notify_done_title">%1$s finished</string>
@@ -633,6 +635,13 @@
     <string name="chat_thinking">Thinking it through…</string>
     <string name="chat_memory_updated">Memory updated</string>
     <string name="chat_jump_bottom">Jump to latest</string>
+    <string name="image_viewer_close">Close</string>
+    <string name="image_action_copy">Copy</string>
+    <string name="image_action_share">Share</string>
+    <string name="image_action_save">Save</string>
+    <string name="image_copied">Image copied</string>
+    <string name="image_saved">Saved to gallery</string>
+    <string name="image_save_failed">Couldn\'t save image</string>
     <string name="providers_count">%1$d providers</string>
     <string name="providers_group_official">Official</string>
     <string name="providers_group_subscription">Subscriptions</string>

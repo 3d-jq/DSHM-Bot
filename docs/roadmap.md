@@ -87,7 +87,10 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 ## M3：本机引擎与多主机（🔄）
 
 - ☑️ 运行时层：PRoot + Node 运行时、dsh-go-bridge 原生桥接、dsh-media 插件、依赖锁（`runtime/`）
-- 🔄 引擎就绪通知（`EngineNotifier`）；后台保活、通知直达会话未做
+- ☑️ 引擎常驻前台服务（`RuntimeForegroundService`，通知渠道 `dshm-runtime`）：
+  把 App 稳在 `FOREGROUND_SERVICE`，PRoot/Node 子进程不再被当幽灵进程裁掉；
+  通知带「停止引擎」动作。原来的「引擎就绪」通知（`EngineNotifier`）已删除，避免重复打扰。
+- ⬜ 通知直达会话（点通知跳进对应对话）
 - ⬜ 主机切换（本机 / SSH / Remote）
 
 ## M4：体验与发布（⬜）

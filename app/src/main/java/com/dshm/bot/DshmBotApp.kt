@@ -36,7 +36,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmMotion
-import com.dshm.bot.data.notify.EngineNotifier
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.ui.account.AccountScreen
 import com.dshm.bot.ui.account.AccountViewModel
@@ -195,11 +194,8 @@ fun DshmBotApp(
         key = "chat-alerts:${chatAlertEndpoint?.baseUrl.orEmpty()}:${chatAlertEndpoint?.token.orEmpty()}",
         factory = ChatAlertViewModel.factory(appContext, chatAlertEndpoint),
     )
-    LaunchedEffect(engineState) {
-        if (engineState is RuntimeState.Running && settingsUiState.notificationsEnabled) {
-            EngineNotifier.notifyReady(appContext)
-        }
-    }
+    // 「引擎就绪」不再单独弹通知：引擎常驻前台服务自己有一条
+    // （`RuntimeForegroundService`），再来一条只是重复打扰。
     LaunchedEffect((engineState as? RuntimeState.Running)?.endpoint) {
         val endpoint = (engineState as? RuntimeState.Running)?.endpoint
         accountViewModel.setEndpoint(endpoint)
