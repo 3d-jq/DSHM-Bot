@@ -622,7 +622,13 @@ internal fun ListLine(
         // 直接把 weight 挂在 Text 上时，它在 Compose 的选择注册里会漏掉（长按选不中）。
         Box(modifier = Modifier.weight(1f)) {
             ShardText(
-                text = if (streaming) AnnotatedString(text) else inlineMarkdown(text, colors, base, mentionMembers),
+                text = if (streaming) {
+                    // 流式列表行也要走行内解析（否则 `[text](url)` 原样显示成黑字），
+                    // 增量版自带前缀缓存，只重扫未闭合的尾部，不会带来额外卡顿。
+                    inlineMarkdownIncremental(text, colors, base, mentionMembers)
+                } else {
+                    inlineMarkdown(text, colors, base, mentionMembers)
+                },
                 style = base,
                 shardId = shardId,
                 fillWidth = fillWidth,
@@ -718,6 +724,23 @@ private fun buildInlineMarkdown(
     base: TextStyle,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi>,
 ): AnnotatedString = buildAnnotatedString {
+    appendInlineMarkdown(text, colors, base, mentionMembers)
+}
+
+/**
+ * 行内解析的递归内核。
+ *
+ * 关键：`**[标题](url)**` 这种「强调里套链接」很常见，模型输出榜单/新闻时几乎必用。
+ * 旧实现遇到 `**` 就把中间文本整段 append，内层链接永远解析不到，表现为
+ * `[标题](https://…)` 原样显示。这里强调类分支递归解析内部内容，
+ * 链接标签也递归，保证粗体/斜体/删除线/链接可以任意嵌套。
+ */
+private fun AnnotatedString.Builder.appendInlineMarkdown(
+    text: String,
+    colors: DshmColors,
+    base: TextStyle,
+    mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi>,
+) {
     var index = 0
     while (index < text.length) {
         when {
@@ -748,7 +771,7 @@ private fun buildInlineMarkdown(
                 val end = text.indexOf("**", index + 2)
                 if (end > index) {
                     withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                        append(text.substring(index + 2, end))
+                        appendInlineMarkdown(text.substring(index + 2, end), colors, base, mentionMembers)
                     }
                     index = end + 2
                 } else {
@@ -761,7 +784,7 @@ private fun buildInlineMarkdown(
                 val end = text.indexOf("~~", index + 2)
                 if (end > index) {
                     withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-                        append(text.substring(index + 2, end))
+                        appendInlineMarkdown(text.substring(index + 2, end), colors, base, mentionMembers)
                     }
                     index = end + 2
                 } else {
@@ -818,13 +841,19 @@ private fun buildInlineMarkdown(
 
             text[index] == '[' -> {
                 val close = text.indexOf(']', index + 1)
-                val urlEnd = if (close > index && close + 1 < text.length && text[close + 1] == '(') {
-                    text.indexOf(')', close + 2)
+                // `]` 和 `(` 之间允许空格/换行：模型经常把 `[标题]`
+                // 和 `(https://…)` 拆成两行，严格只认紧挨的 `](` 会漏掉。
+                var open = close + 1
+                while (open < text.length && text[open].isWhitespace()) open += 1
+                val urlEnd = if (close > index && open < text.length && text[open] == '(') {
+                    text.indexOf(')', open + 1)
                 } else {
                     -1
                 }
-                if (close > index && urlEnd > close) {
-                    val url = text.substring(close + 2, urlEnd).trim()
+                if (close > index && urlEnd > open) {
+                    // URL 里可能被换行/空格打断（视觉折行也会漏进来），拼回去再建链接。
+                    val url = text.substring(open + 1, urlEnd).filterNot { it.isWhitespace() }
+                    val label = text.substring(index + 1, close)
                     // 可点：Compose 的 LinkAnnotation 交给系统打开浏览器。
                     val link = runCatching { LinkAnnotation.Url(url) }.getOrNull()
                     if (link != null) {
@@ -835,7 +864,7 @@ private fun buildInlineMarkdown(
                                     textDecoration = TextDecoration.Underline,
                                 ),
                             ) {
-                                append(text.substring(index + 1, close))
+                                appendInlineMarkdown(label, colors, base, mentionMembers)
                             }
                         }
                     } else {
@@ -845,7 +874,7 @@ private fun buildInlineMarkdown(
                                 textDecoration = TextDecoration.Underline,
                             ),
                         ) {
-                            append(text.substring(index + 1, close))
+                            appendInlineMarkdown(label, colors, base, mentionMembers)
                         }
                     }
                     index = urlEnd + 1
@@ -860,7 +889,7 @@ private fun buildInlineMarkdown(
                 val end = text.indexOf(marker, index + 1)
                 if (end > index + 1) {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                        append(text.substring(index + 1, end))
+                        appendInlineMarkdown(text.substring(index + 1, end), colors, base, mentionMembers)
                     }
                     index = end + 1
                 } else {
