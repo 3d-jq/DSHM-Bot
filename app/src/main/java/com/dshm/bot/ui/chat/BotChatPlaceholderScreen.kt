@@ -279,6 +279,18 @@ fun BotChatScreen(
     // 发送了几次 —— 每发一次就重新钉到底（照 DeepSearch 的 SEND-PATH）。
     var sendCount by remember { mutableIntStateOf(0) }
     var lastSendAt by remember { mutableStateOf(0L) }
+    // 刚发出消息、引擎还没上报 `state.work` 的一两秒空窗：本地先显示状态行。
+    // 否则要等 `watchForRunEnd()` 1 秒后的第一次轮询（或 stream/start）才出现，
+    // 观感上就是「消息发出去了，状态行迟到」。
+    val shownActivity = state.activity ?: if (!bot.isGroup && (state.sending || state.running)) {
+        ChatActivity(
+            kind = ChatActivityKind.THINKING,
+            label = null,
+            startedAtMs = lastSendAt.takeIf { it > 0L },
+        )
+    } else {
+        null
+    }
     // 输入框的实际高度 —— 列表要留出这么多，消息才不会被输入框压住
     // （照 DeepSearch 的 bottomChromeHeight + bottomReserve）。
     var composerHeight by remember { mutableStateOf(56.dp) }
@@ -419,7 +431,7 @@ fun BotChatScreen(
                     else -> ChatMessages(
                         entries = state.entries,
                         streaming = streaming,
-                        activity = state.activity,
+                        activity = shownActivity,
                         lastSendAt = lastSendAt,
                         bot = bot,
                         endpoint = endpoint,
