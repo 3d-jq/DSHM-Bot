@@ -329,6 +329,7 @@ fun CapabilitiesScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
                         if (index > 0) SettingsRowDivider()
                         val users = state.attached.count { (_, names) -> capability.name in names }
                         SettingsRow(
+                            leading = { CapabilityMark(capability.name) },
                             title = capability.name,
                             subtitle = listOfNotNull(
                                 capabilityKindLabel(capability.kind),
@@ -359,7 +360,7 @@ fun CapabilitiesScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
     }
 
     open?.let { capability ->
-        CapabilityDialog(
+        CapabilitySheet(
             capability = capability,
             state = state,
             busy = state.busy,
@@ -375,8 +376,37 @@ fun CapabilitiesScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
     }
 }
 
+/**
+ * 能力列表左侧的首字母方块 —— 和连接器 / 插件列表同一套写法。
+ */
 @Composable
-private fun CapabilityDialog(
+private fun CapabilityMark(
+    name: String,
+    size: androidx.compose.ui.unit.Dp = Dshm.spacing.avatar,
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(Dshm.radius.sm))
+            .background(Dshm.colors.surfaceMuted),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.trim().take(1).uppercase().ifEmpty { "?" },
+            style = Dshm.typography.rowTitle,
+            color = Dshm.colors.textSecondary,
+        )
+    }
+}
+
+/**
+ * 点能力白卡弹出的**底部面板**（以前是 AlertDialog）。
+ *
+ * 内容沿用原来的信息层级：类型/传输 → 描述 → 未批准时的批准入口 →
+ * 「哪些 Bot 能用」的挂载开关；底部固定「删除（二次确认） / 好」。
+ */
+@Composable
+private fun CapabilitySheet(
     capability: TeamCapability,
     state: TeamSettingsUi,
     busy: Boolean,
@@ -386,98 +416,128 @@ private fun CapabilityDialog(
     onDelete: () -> Unit,
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(capability.name) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
-                Text(
-                    text = listOfNotNull(
-                        capabilityKindLabel(capability.kind),
-                        capability.transport,
-                    ).joinToString(" · "),
-                    style = Dshm.typography.rowTime,
-                    color = Dshm.colors.textTertiary,
-                )
-                capability.description?.let { description ->
+    SettingsSheet(
+        title = capability.name,
+        onDismiss = onDismiss,
+        bottomBar = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Dshm.spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        if (confirmDelete) onDelete() else confirmDelete = true
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = Dshm.spacing.iconButton),
+                    shape = RoundedCornerShape(Dshm.radius.md),
+                ) {
                     Text(
-                        text = description,
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.textSecondary,
+                        text = stringResource(
+                            if (confirmDelete) R.string.team_caps_delete_confirm else R.string.team_caps_delete,
+                        ),
+                        color = Dshm.colors.danger,
                     )
                 }
-                if (!capability.approved) {
+                SettingsPrimaryButton(
+                    text = stringResource(android.R.string.ok),
+                    enabled = !busy,
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CapabilityMark(capability.name, size = Dshm.spacing.settingsAvatar)
+                Spacer(Modifier.size(Dshm.spacing.md))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = listOfNotNull(
+                            capabilityKindLabel(capability.kind),
+                            capability.transport,
+                        ).joinToString(" · "),
+                        style = Dshm.typography.rowTime,
+                        color = Dshm.colors.textTertiary,
+                    )
+                    capability.description?.let { description ->
+                        Text(
+                            text = description,
+                            style = Dshm.typography.rowPreview,
+                            color = Dshm.colors.textSecondary,
+                        )
+                    }
+                }
+            }
+            if (!capability.approved) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = stringResource(R.string.team_caps_needs_approval),
                         style = Dshm.typography.rowPreview,
                         color = Dshm.colors.warning,
+                        modifier = Modifier.weight(1f),
                     )
                     TextButton(enabled = !busy, onClick = onApprove) {
                         Text(stringResource(R.string.team_caps_approve))
                     }
                 }
-                Text(
-                    text = stringResource(R.string.team_caps_attach_title),
-                    style = Dshm.typography.settingsSectionTitle,
-                    color = Dshm.colors.textSecondary,
-                )
-                state.members.forEach { member ->
-                    val attached = capability.name in state.attached[member.id].orEmpty()
-                    val status = state.statuses[member.id]?.get(capability.name)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(Dshm.radius.sm))
-                            .clickable(enabled = !busy) { onAttach(member.id, !attached) }
-                            .padding(horizontal = Dshm.spacing.xs, vertical = Dshm.spacing.xs),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+            }
+            Text(
+                text = stringResource(R.string.team_caps_attach_title),
+                style = Dshm.typography.settingsSectionTitle,
+                color = Dshm.colors.textSecondary,
+            )
+            state.members.forEachIndexed { index, member ->
+                if (index > 0) {
+                    androidx.compose.material3.HorizontalDivider(
+                        thickness = Dshm.spacing.hairline,
+                        color = Dshm.colors.divider,
+                    )
+                }
+                val attached = capability.name in state.attached[member.id].orEmpty()
+                val status = state.statuses[member.id]?.get(capability.name)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(Dshm.radius.sm))
+                        .clickable(enabled = !busy) { onAttach(member.id, !attached) }
+                        .padding(horizontal = Dshm.spacing.xs, vertical = Dshm.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = member.name,
+                        style = Dshm.typography.rowPreview,
+                        color = if (attached) Dshm.colors.accent else Dshm.colors.textPrimary,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (status != null) {
                         Text(
-                            text = member.name,
-                            style = Dshm.typography.rowPreview,
-                            color = if (attached) Dshm.colors.accent else Dshm.colors.textPrimary,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            text = capabilityStatusLabel(status),
+                            style = Dshm.typography.rowTime,
+                            color = if (status == "error") Dshm.colors.danger else Dshm.colors.textTertiary,
                         )
-                        if (status != null) {
-                            Text(
-                                text = capabilityStatusLabel(status),
-                                style = Dshm.typography.rowTime,
-                                color = if (status == "error") Dshm.colors.danger else Dshm.colors.textTertiary,
-                            )
-                            Spacer(Modifier.size(Dshm.spacing.xs))
-                        }
-                        Text(
-                            text = if (attached) "✓" else "",
-                            style = Dshm.typography.rowPreview,
-                            color = Dshm.colors.accent,
-                        )
+                        Spacer(Modifier.size(Dshm.spacing.xs))
                     }
+                    Text(
+                        text = if (attached) "✓" else "",
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.accent,
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.ok))
-            }
-        },
-        dismissButton = {
-            TextButton(
-                enabled = !busy,
-                onClick = {
-                    if (confirmDelete) onDelete() else confirmDelete = true
-                },
-            ) {
-                Text(
-                    text = stringResource(
-                        if (confirmDelete) R.string.team_caps_delete_confirm else R.string.team_caps_delete,
-                    ),
-                    color = Dshm.colors.danger,
-                )
-            }
-        },
-    )
+        }
+    }
 }
 
 /**
