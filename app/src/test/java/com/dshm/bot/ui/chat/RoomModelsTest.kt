@@ -93,4 +93,77 @@ class RoomModelsTest {
         assertNull(parseGroupProgress(JSONObject()))
         assertNull(parseGroupProgress(null))
     }
+
+    /**
+     * 单 Bot 在**自己私聊**里干活（`work.bots[id]`，不带 roomId）不该让群聊的
+     * 成员 dock 冒出状态。这里**有意偏离**官方 `member-status.js` 的 `memberWork`
+     * （官方 `local ?? work.bots[id]` 无条件兜底）——见 `RoomModels.kt` 的注释。
+     */
+    @Test
+    fun privateChatWorkDoesNotShowAsGroupMemberStatus() {
+        val state = JSONObject()
+            .put("bots", JSONArray().put(JSONObject().put("id", "bot-1").put("name", "总管")))
+            .put(
+                "work",
+                JSONObject()
+                    .put("rooms", JSONObject()) // 这个群没有任何活
+                    .put(
+                        "bots",
+                        JSONObject().put(
+                            "bot-1",
+                            JSONObject().put("tool", "bash").put("since", 1_000L),
+                        ),
+                    ),
+            )
+        val status = parseMemberStatus(state, "room-1")
+        assertEquals("idle", status["bot-1"]?.state)
+        assertFalse("私聊工作不该标成 here", status["bot-1"]?.here == true)
+    }
+
+    /** 「在**别的群**里干活」仍应显示（带 `roomId`），这是保留的官方语义。 */
+    @Test
+    fun workInAnotherGroupStillShowsAsMemberStatus() {
+        val state = JSONObject()
+            .put("bots", JSONArray().put(JSONObject().put("id", "bot-1").put("name", "总管")))
+            .put(
+                "work",
+                JSONObject()
+                    .put("rooms", JSONObject()) // 当前群没活
+                    .put(
+                        "bots",
+                        JSONObject().put(
+                            "bot-1",
+                            JSONObject().put("tool", "bash").put("roomId", "room-2"),
+                        ),
+                    ),
+            )
+        val status = parseMemberStatus(state, "room-1")
+        assertEquals("work", status["bot-1"]?.state)
+        assertFalse("别的群的活不该标成 here", status["bot-1"]?.here == true)
+    }
+
+    @Test
+    fun groupLocalWorkStillShowsInMemberStatus() {
+        val state = JSONObject()
+            .put("bots", JSONArray().put(JSONObject().put("id", "bot-1").put("name", "总管")))
+            .put(
+                "work",
+                JSONObject()
+                    .put(
+                        "rooms",
+                        JSONObject().put(
+                            "room-1",
+                            JSONArray().put(
+                                JSONObject().put("botId", "bot-1").put("tool", "web_search")
+                                    .put("speaking", true),
+                            ),
+                        ),
+                    )
+                    .put("bots", JSONObject()),
+            )
+        val status = parseMemberStatus(state, "room-1")
+        assertEquals("work", status["bot-1"]?.state)
+        assertTrue("本群的活必须是 here", status["bot-1"]?.here == true)
+        assertTrue(status["bot-1"]?.speaking == true)
+    }
 }

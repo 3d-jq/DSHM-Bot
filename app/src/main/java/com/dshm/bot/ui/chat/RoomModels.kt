@@ -192,7 +192,17 @@ internal fun parseMemberStatus(state: JSONObject, roomId: String): Map<String, R
                 .mapNotNull { array.optJSONObject(it) }
                 .firstOrNull { it.optString("botId") == id }
         }
-        val doing = local ?: botWork?.optJSONObject(id)
+        // 本群的活优先。没有本群的活时，`work.bots[id]` 只有代表「这个 Bot 在**别的群**
+        // 里干活」（带 `roomId`，见 `turns.js` 的 `workView`）时才用；不带 `roomId` 的是它
+        // 在自己**私聊**里的工作，跟当前群无关，不显示。
+        //
+        // ⚠️ 这里**有意偏离**官方 `member-status.js` 的 `memberWork`：官方是
+        // `local ?? work.bots[id]` 无条件兜底，于是 Bot 在私聊里干活时，所有包含它的群
+        // 都会冒出一条「在忙」（`here=false`）。我们判断这不合理：群成员 dock 只该反映
+        // 「跟这个群有关的工作」。`RoomMemberStatus.here` 的语义本来就是
+        // 「活是这个群里的，而不是它自己会话里的」。
+        val global = botWork?.optJSONObject(id)
+        val doing = local ?: global?.takeIf { it.optString("roomId").isNotEmpty() }
         if (doing != null) {
             return RoomMemberStatus(
                 state = "work",
