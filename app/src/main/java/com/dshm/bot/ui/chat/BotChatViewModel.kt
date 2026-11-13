@@ -186,8 +186,6 @@ data class ChatEntry(
     val images: Int = 0,
     /** 长文消息（`whole`）：正文折起，完整内容在附件里。 */
     val whole: ChatWholePost? = null,
-    /** 思考过程（模型这一轮的 reasoning）；团队偏好打开「显示思考过程」时才画。 */
-    val reasoning: String? = null,
 )
 
 /** 待发送的本地附件。 */
@@ -628,6 +626,23 @@ class BotChatViewModel internal constructor(
             "turn/start" -> lastTurnStartSeq = maxOf(lastTurnStartSeq, seq)
             "turn/end" -> {
                 lastTurnEndSeq = maxOf(lastTurnEndSeq, seq)
+                // 模型请求最终失败（重试耗尽或不可重试的错误码）：引擎只在这里
+                // 记 `reason.kind == "error"`，之前不渲染就是整条静默 —— 用户看到的
+                // 是「转完圈什么都没有」。画成一条红色事件行（同群聊的「没能回答」）。
+                val failure = turnEndError(data.optJSONObject("reason")) ?: return
+                val (code, message) = failure
+                toolEvents[seq] = ChatEntry(
+                    id = "turnfail:$seq",
+                    kind = ChatEntryKind.EVENT,
+                    // code 认识就翻成人话；不认识用引擎的原文。
+                    text = message.orEmpty(),
+                    author = botName,
+                    botId = botId,
+                    eventKind = "failed",
+                    eventCode = code,
+                    seq = seq,
+                    timeMs = time,
+                )
             }
 
             // dsh-Go 把 `llm/retry` 渲染成一条 `kind: 'retry'` 的普通事件行：
@@ -639,21 +654,18 @@ class BotChatViewModel internal constructor(
                 val reason = failure?.optString("message")?.takeIf { it.isNotBlank() }
                     ?: failure?.optString("code")?.takeIf { it.isNotBlank() }
                 val retrySuffix = max?.let { "（$retry/$it）" } ?: "（$retry）"
-                val reasonSuffix = reason?.let { "：$it" } ?: ""
-                val id = "retry:$seq"
-                if (seen.add(id)) {
-                    toolEvents[seq] = ChatEntry(
-                        id = id,
-                        kind = ChatEntryKind.EVENT,
-                        text = "模型请求失败，正在重试$retrySuffix$reasonSuffix",
-                        author = botName,
-                        botId = botId,
-                        eventKind = "retry",
-                        eventCode = failure?.optString("code")?.takeIf { it.isNotBlank() },
-                        seq = seq,
-                        timeMs = time,
-                    )
-                }
+                val reasonSuffix = reason?.let { it -> "：$it" } ?: ""
+                toolEvents[seq] = ChatEntry(
+                    id = "retry:$seq",
+                    kind = ChatEntryKind.EVENT,
+                    text = "模型请求失败，正在重试$retrySuffix$reasonSuffix",
+                    author = botName,
+                    botId = botId,
+                    eventKind = "retry",
+                    eventCode = failure?.optString("code")?.takeIf { it.isNotBlank() },
+                    seq = seq,
+                    timeMs = time,
+                )
             }
         }
     }
@@ -841,10 +853,14 @@ class BotChatViewModel internal constructor(
     private fun mergeSessionEvents() {
         if (toolEvents.isEmpty() && browserShots.isEmpty() && sessionEvents.isEmpty()) return
         _uiState.update { state ->
+            // 事件行都由下面的 incoming 重新灌入，base 里要把旧的同 id 行剥掉，
+            // 否则每次合并都会再插一份（`retry:` / `turnfail:` 行会越叠越多）。
             val base = state.entries.filterNot {
                 it.id.startsWith("tool:") ||
                     it.id.startsWith("present:") ||
-                    it.id.startsWith("shot:")
+                    it.id.startsWith("shot:") ||
+                    it.id.startsWith("retry:") ||
+                    it.id.startsWith("turnfail:")
             }
             // follow 的快照覆盖整个会话；只把「已经加载出来的这段历史」里的事件并进去，
             // 否则列表顶部会堆一堆比最早一条消息还老的事件行。
@@ -2107,8 +2123,6 @@ class BotChatViewModel internal constructor(
                         durationMs = duration,
                         seq = seqValue,
                         whole = wholePost(item),
-                        // 思考过程：插件在 `assistant/message` 里带上（默认没有）。
-                        reasoning = item.optString("reasoning").takeIf { it.isNotBlank() },
                     )
                 }
 

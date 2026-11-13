@@ -33,9 +33,9 @@ data class DshmColors(
     val onAccent: Color,
     /** 对话里 AI 气泡（浅灰，和页面白底区分）。 */
     val bubbleAssistant: Color,
-    /** 用户气泡的实心蓝（参考 DS Bot 手机端的亮蓝；不做渐变）。 */
+    /** 用户气泡：跟强调色走（同一个主色；见 `DshmPalettes.withPalette`）。 */
     val bubbleUser: Color,
-    /** 用户气泡上的文字 / 图标（蓝底永远用白，不跟 onAccent 走 —— 深色主题的 onAccent 是深色）。 */
+    /** 用户气泡上的文字 / 图标：按强调色亮度算墨色（亮底白墨 / 近白底深墨）。 */
     val onBubbleUser: Color,
     val onInk: Color,
     val iconTint: Color,
@@ -69,10 +69,12 @@ data class DshmColors(
             textSecondary = Color(0xFF8A8F98),
             textTertiary = Color(0xFFB3B8C0),
             divider = Color(0xFFECEEF1),
-            accent = Color(0xFF1F4FD8),
+            // 主色统一成强调色第一个色板的蓝（DS Bot 品牌蓝）：
+            // 按钮 / 链接 / 用户气泡都是它 —— 用户气泡跟强调色走（DshmPalettes）。
+            accent = Color(0xFF4D6BFE),
             onAccent = Color(0xFFFFFFFF),
             bubbleAssistant = Color(0xFFF2F3F5),
-            bubbleUser = Color(0xFF2F6BFF),
+            bubbleUser = Color(0xFF4D6BFE),
             onBubbleUser = Color(0xFFFFFFFF),
             onInk = Color(0xFFFFFFFF),
             iconTint = Color(0xFF111318),
@@ -102,8 +104,8 @@ data class DshmColors(
             accent = Color(0xFF6A84FF),
             onAccent = Color(0xFF0B0D12),
             bubbleAssistant = Color(0xFF1C1F25),
-            // 深色主题下用更深的蓝：原来的亮蓝在深底上太刺眼（白字对比度 ~6.5:1）。
-            bubbleUser = Color(0xFF2B4FD6),
+            // 深色主题用亮一档的蓝（跟 accent 同一个色）：气泡跟强调色走。
+            bubbleUser = Color(0xFF6A84FF),
             onBubbleUser = Color(0xFFFFFFFF),
             onInk = Color(0xFFFFFFFF),
             iconTint = Color(0xFFF2F3F5),

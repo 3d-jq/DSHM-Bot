@@ -96,6 +96,28 @@ class DshmPalettesTest {
         assertEquals(Color(0xFF4D6BFE), colors.accent)
     }
 
+    /**
+     * **用户气泡跟强调色走**：换强调色时用户气泡立刻换成同一个主色，
+     * 压在气泡上的文字按亮度重算墨色。
+     */
+    @Test
+    fun userBubbleFollowsTheAccent() {
+        val rose = DshmColors.Light.withPalette(AppPalette.DEEPSEEK, Color(0xFFE8688A))
+        assertEquals(Color(0xFFE8688A), rose.bubbleUser)
+        assertEquals(inkOn(Color(0xFFE8688A)), rose.onBubbleUser)
+        // 没指定强调色时，气泡用配色自带的主色（默认主题就是那个品牌蓝）。
+        val defaultTheme = DshmColors.Light.withPalette(AppPalette.DEEPSEEK)
+        assertEquals(defaultTheme.accent, defaultTheme.bubbleUser)
+        assertEquals(Color(0xFF4D6BFE), defaultTheme.bubbleUser)
+    }
+
+    /** 默认主题的主色就是强调色**第一个**色板的蓝（用户定的：默认 = 第一个蓝）。 */
+    @Test
+    fun defaultThemeAccentIsTheFirstSwatchBlue() {
+        assertEquals(Color(0xFF4D6BFE), DshmColors.Light.accent)
+        assertEquals(Color(0xFF4D6BFE), DshmColors.Light.bubbleUser)
+    }
+
     /** 亮色上压深墨，暗色上压白（网页端 `accentInk`）。 */
     @Test
     fun inkOnAccentFollowsLuminance() {

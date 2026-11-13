@@ -121,7 +121,6 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.rememberLoopValue
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.runtime.RuntimeEndpoint
-import com.dshm.bot.data.settings.BotPrefsStore
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.ui.components.BotAvatar
@@ -758,11 +757,6 @@ private fun ChatMessages(
     var viewingImage by remember { mutableStateOf<ChatAttachmentItem?>(null) }
     val appContextForMenu = LocalContext.current
     val streamingNow = streaming.isNotEmpty()
-    // 团队偏好（设置 → 个性化）：只取「显示思考过程」。
-    // 配色 / 强调色 / 动效在 `DshmTheme` 那层生效；气泡样式和排版宽度是本机
-    // 设计系统自己的事，不跟网页端的布局偏好走。
-    val prefs by BotPrefsStore.prefs.collectAsStateWithLifecycle()
-    val showThinking = prefs.thinking
     // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
     // 但如果这一刻有工具在跑（写入/搜索…），活动行仍然留着。
     val typing = activity != null && (!streamingNow || activity.kind != ChatActivityKind.THINKING)
@@ -1033,8 +1027,6 @@ private fun ChatMessages(
                         whole = entry.whole,
                         endpoint = endpoint,
                         messageId = entry.id,
-                        // 思考过程只在团队偏好打开时画（网页端 `thinking` 同一个开关）。
-                        reasoning = entry.reasoning.takeIf { showThinking },
                     )
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
@@ -1403,55 +1395,6 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
     }
 }
 
-/**
- * 思考过程：模型这一轮的 reasoning。
- *
- * 网页端画成回复上方的一条 `ThinkingRow`（`client.js` 的 `ThinkingRow`，
- * 是个 `<details>`：默认收起，点开才看正文），本机是同一件事：
- * 一行可点的标题 + 展开后的正文。
- *
- * 团队偏好「显示思考过程」关掉时根本不会有这一行（引擎那边也不带 reasoning）。
- */
-@Composable
-private fun ThinkingRow(text: String) {
-    var open by remember { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            // 不撑满：贴着正文宽度（网页端的思考行也是贴着内容）。
-            .wrapContentWidth()
-            .padding(bottom = Dshm.spacing.xs),
-    ) {
-        Row(
-            modifier = Modifier.clickable { open = !open },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.chat_thinking),
-                style = Dshm.typography.rowTime,
-                color = Dshm.colors.textTertiary,
-            )
-            Icon(
-                painter = painterResource(
-                    if (open) R.drawable.ic_lucide_chevron_down else R.drawable.ic_lucide_chevron_right,
-                ),
-                contentDescription = null,
-                tint = Dshm.colors.textTertiary,
-                modifier = Modifier
-                    .padding(start = Dshm.spacing.xxs)
-                    .size(14.dp),
-            )
-        }
-        if (open) {
-            Text(
-                text = text,
-                style = Dshm.typography.composerText.copy(fontSize = 13.sp),
-                color = Dshm.colors.textSecondary,
-                modifier = Modifier.padding(top = Dshm.spacing.xxs),
-            )
-        }
-    }
-}
-
 /** 用户消息气泡，右对齐。 */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -1656,8 +1599,6 @@ private fun BotBubble(
     messageId: String = "",
     /** 流式输出中的临时气泡：行内 markdown 先不扫（对齐 dsh-Go）。 */
     streaming: Boolean = false,
-    /** 思考过程（团队偏好「显示思考过程」打开时才有内容）。 */
-    reasoning: String? = null,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
@@ -1669,8 +1610,6 @@ private fun BotBubble(
 
     val bubble: @Composable () -> Unit = {
         Column(modifier = Modifier.wrapContentWidth(Alignment.Start)) {
-            // 思考过程：画在回答上方（网页端 `ThinkingRow` 的位置）。
-            reasoning?.takeIf { it.isNotBlank() }?.let { ThinkingRow(it) }
             Column(
                 modifier = Modifier
                     .clip(RoundedCornerShape(Dshm.radius.lg))

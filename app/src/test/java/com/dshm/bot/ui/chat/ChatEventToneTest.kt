@@ -1,6 +1,8 @@
 package com.dshm.bot.ui.chat
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** 事件行分级 + 失败码文案（对齐 DS Bot `client.js` 的 `FAILURES`）。 */
@@ -47,5 +49,37 @@ class ChatEventToneTest {
         assertEquals("socket closed", failureLabel("WEIRD", "socket closed"))
         assertEquals("WEIRD", failureLabel("WEIRD", ""))
         assertEquals("未知错误", failureLabel(null, ""))
+    }
+
+    /** `turn/end` 的 `reason.kind == "error"` 才是运行失败（重试耗尽 / 不可重试）。 */
+    @Test
+    fun turnEndErrorReadsCodeAndMessage() {
+        val (code, message) = turnEndError(
+            JSONObject()
+                .put("kind", "error")
+                .put(
+                    "error",
+                    JSONObject().put("code", "QUOTA").put("message", "balance exhausted"),
+                ),
+        )!!
+        assertEquals("QUOTA", code)
+        assertEquals("balance exhausted", message)
+    }
+
+    /** 失败但没有细节（没有 error 对象）也要算失败：code / message 都是 null。 */
+    @Test
+    fun turnEndErrorWithoutDetailsStillFails() {
+        val (code, message) = turnEndError(JSONObject().put("kind", "error"))!!
+        assertNull(code)
+        assertNull(message)
+    }
+
+    /** completed / aborted 不是运行失败；reason 缺失也不是。 */
+    @Test
+    fun nonErrorReasonsAreNotFailures() {
+        assertNull(turnEndError(JSONObject().put("kind", "completed")))
+        assertNull(turnEndError(JSONObject().put("kind", "aborted")))
+        assertNull(turnEndError(JSONObject()))
+        assertNull(turnEndError(null))
     }
 }

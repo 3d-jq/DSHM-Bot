@@ -1329,3 +1329,48 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
   主题 id 不变（引擎那边是 `deepseek` / `mono`），只改显示名。
 
 **验证**：81 测试类 / 481 用例全绿，lint 零 warning，assembleDebug 通过。
+
+### 收尾三件：撤思考过程 + 运行失败可见 + 强调色统一主色（2026-11-13）
+
+**1）「显示思考过程」整个撤掉**（用户：不要了现在）
+
+- ☑️ 个性化页的开关删掉；原生 `ThinkingRow` / `ChatEntry.reasoning` / 解析删掉；
+  插件 `parts.js` 回退成上游原样（不再带 reasoning 字段）；相关字符串删掉。
+- ☑️ `BotPrefs.thinking` 字段**保留**（引擎真值、网页端还在用，我们照常读写透传），
+  只是本机不再消费它。
+- ☑️ 引擎自动重启机制保留（插件指纹变化 → 重启一次引擎，这轮回退也会触发一次）。
+
+**2）「请求模型失败 / 运行失败」静默 —— 根因 + 修复**
+
+读引擎源码（设备 rootfs 里的 `dsh-agent-loop` / `dsh-llm-retry`）确认：
+
+- 重试中：每次调度重试记 `llm/retry {retry, maxRetries, failure}`（我们**已有**渲染
+  「模型请求失败，正在重试(n/max)：原因」）；
+- **最终失败**：`dsh-agent-loop` 的 catch 分支记
+  `turn/end { reason: { kind: "error", error: { code, message } } }`，而我们对
+  `turn/end` **只记 seq 什么都不画** —— 这就是静默。而且很多失败（额度用尽等）
+  错误码不可重试，从头到尾**一条 `llm/retry` 都没有**，只有这条 turn/end。
+- ☑️ 修复：`turnEndError()` 解析 `reason.kind == "error"`（completed / aborted 不算），
+  画一条红色事件行 `eventKind = "failed"`（复用群聊失败那轮的全套基建：
+  `failureLabel` 把 AUTH/QUOTA/SERVER/TIMEOUT… 翻成人话）→ 界面显示
+  「**小助手 没能回答：余额不足**」。
+- ☑️ 顺带修两个隐患：`mergeSessionEvents` 的 base 过滤只剥 `tool:/present:/shot:`
+  前缀，`retry:` 行每次合并都会再插一份（越叠越多）—— 加剥 `retry:` / `turnfail:`；
+  这两类事件行的 `seen.add()` 守卫去掉（`seen` 是聊天条目的去重集，follow 重连
+  快照重放时它会把事件行挡掉导致消失；去重靠 `toolEvents` 的 seq 键就够了）。
+
+**3）强调色 = 全局主色（用户：强调色怎么没改用户气泡 / 主题蓝统一成色板蓝 / 删「自」）**
+
+- ☑️ **用户气泡跟强调色走**：`withPalette` 里 `bubbleUser = accent`、
+  `onBubbleUser = inkOn(accent)` —— 按钮 / 链接 / 用户气泡是同一个主色，
+  团队换强调色气泡立刻跟着换。配色表的 `user` / `userText` 字段删掉。
+- ☑️ **默认主题的蓝统一成第一个色板的蓝**（DS Bot 品牌蓝 `#4D6BFE`）：
+  `DshmColors.Light` 的 accent / bubbleUser 都换成 `#4D6BFE`（原来是两 глубок разных
+  蓝 `#1F4FD8` / `#2F6BFF`）；深色主题气泡跟 accent（`#6A84FF`）。
+  「默认 = 第一个蓝」，`defaultThemeAccentIsTheFirstSwatchBlue` 锁住。
+- ☑️ **删掉「自」（跟随主题）色板**：强调色一行只剩 7 个颜色圆点；
+  accent 没设值时**第一个圆点显示选中**（默认主题下它就是实际生效的主色）；
+  点任意圆点都写显式 hex。`deepseekPaletteIsExactlyTheNativeTokens` 继续锁
+  「deepseek 配色 = 原生令牌」。
+
+**验证**：82 测试类 / 486 用例全绿，lint 零 warning，assembleDebug 通过。

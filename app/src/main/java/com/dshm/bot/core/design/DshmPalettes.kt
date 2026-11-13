@@ -8,7 +8,7 @@ import kotlin.math.pow
  * 配色方案的色值表。
  *
  * 网页端把一套配色写成 8 个语义色（bg / sidebar / bubble / card / text /
- * user / userText / accent），本机令牌更多，这里按语义对齐：
+ * user / userText / accent），本机按语义对齐：
  *
  * | 网页端 | 本机 |
  * |---|---|
@@ -17,9 +17,11 @@ import kotlin.math.pow
  * | `bubble` | `bubbleAssistant` / `surfaceMuted` |
  * | `card` | `surface` / `floatingSurface` |
  * | `text` | `textPrimary`（次级/三级/分隔线按网页端的 ink-2 / ink-3 / line 派生） |
- * | `user` | `bubbleUser` |
- * | `userText` | `onBubbleUser` |
  * | `accent` | `accent`（可被团队偏好的强调色覆盖） |
+ *
+ * **用户气泡跟强调色走**（`bubbleUser = accent`）：强调色是「这套界面的主色」，
+ * 按钮 / 链接 / 用户气泡都该是它 —— 网页端的 `user` 是主题自带的，本机改成
+ * 跟强调色统一，团队换强调色时气泡立刻跟着换。
  *
  * **`deepseek` 就是本机原生令牌那套**（`DshmColors.Light` / `DshmColors.Dark`
  * 的原值，一个色都不差）—— 团队没动过主题时，界面和现在完全一样。
@@ -35,8 +37,6 @@ data class PaletteColors(
     val bubble: Color,
     val card: Color,
     val text: Color,
-    val user: Color,
-    val userText: Color,
     val accent: Color,
     /** 压在强调色上的文字色；默认按亮度算（网页端 `accentInk`）。 */
     val onAccent: Color = inkOn(accent),
@@ -87,9 +87,7 @@ object AppPalettes {
         bubble = Color(0xFFF2F3F5),
         card = Color(0xFFFFFFFF),
         text = Color(0xFF0B0B0F),
-        user = Color(0xFF2F6BFF),
-        userText = Color(0xFFFFFFFF),
-        accent = Color(0xFF1F4FD8),
+        accent = Color(0xFF4D6BFE),
         onAccent = Color(0xFFFFFFFF),
         textSecondary = Color(0xFF8A8F98),
         textTertiary = Color(0xFFB3B8C0),
@@ -104,8 +102,6 @@ object AppPalettes {
         bubble = Color(0xFF1C1F25),
         card = Color(0xFF14161A),
         text = Color(0xFFF2F3F5),
-        user = Color(0xFF2B4FD6),
-        userText = Color(0xFFFFFFFF),
         accent = Color(0xFF6A84FF),
         onAccent = Color(0xFF0B0D12),
         textSecondary = Color(0xFF9AA0AA),
@@ -121,8 +117,6 @@ object AppPalettes {
         bubble = Color(0xFFF0F0F0),
         card = Color(0xFFFFFFFF),
         text = Color(0xFF0D0D0D),
-        user = Color(0xFF0D0D0D),
-        userText = Color(0xFFFFFFFF),
         accent = Color(0xFF0D0D0D),
     )
 
@@ -132,8 +126,6 @@ object AppPalettes {
         bubble = Color(0xFF242424),
         card = Color(0xFF1C1C1C),
         text = Color(0xFFF4F4F4),
-        user = Color(0xFFF4F4F4),
-        userText = Color(0xFF0F0F0F),
         accent = Color(0xFFF4F4F4),
         floatingSurface = Color(0xFF2A2A2A),
     )
@@ -144,8 +136,6 @@ object AppPalettes {
         bubble = Color(0xFFEBE7DC),
         card = Color(0xFFFFFFFF),
         text = Color(0xFF1F1E1B),
-        user = Color(0xFF2B2A26),
-        userText = Color(0xFFFAF9F5),
         accent = Color(0xFFD97757),
     )
 
@@ -155,8 +145,6 @@ object AppPalettes {
         bubble = Color(0xFF34322D),
         card = Color(0xFF2A2925),
         text = Color(0xFFF3F0E8),
-        user = Color(0xFFF3F0E8),
-        userText = Color(0xFF1F1E1B),
         accent = Color(0xFFE08A6D),
         floatingSurface = Color(0xFF3A3833),
     )
@@ -167,8 +155,6 @@ object AppPalettes {
         bubble = Color(0xFFE5EBF5),
         card = Color(0xFFFFFFFF),
         text = Color(0xFF121826),
-        user = Color(0xFF1E3A8A),
-        userText = Color(0xFFFFFFFF),
         accent = Color(0xFF1E86FF),
     )
 
@@ -178,8 +164,6 @@ object AppPalettes {
         bubble = Color(0xFF1A2340),
         card = Color(0xFF141C33),
         text = Color(0xFFE8EDF7),
-        user = Color(0xFF3B6FD8),
-        userText = Color(0xFFFFFFFF),
         accent = Color(0xFF4F9DFF),
         floatingSurface = Color(0xFF232C47),
     )
@@ -221,7 +205,9 @@ private fun Color.luminance(): Double {
  * 把配色套到本机令牌上。
  *
  * 团队偏好的强调色（`prefs.accent`）覆盖配色自带的 accent —— 网页端也是
- * 这个优先级（`themeCss(theme, accent)`）。
+ * 这个优先级（`themeCss(theme, accent)`）。**用户气泡跟强调色走**：按钮 /
+ * 链接 / 用户气泡是同一个主色，团队换强调色时气泡立刻跟着换，压在气泡上的
+ * 文字按亮度重算墨色。
  *
  * **不动**的令牌：图标色和三档阴影。它们是「遮蔽」不是「墨色」，跟着文字色
  * 派生的话深色主题下会变成发亮的雾（原来都是黑的）。
@@ -240,8 +226,9 @@ fun DshmColors.withPalette(palette: AppPalette, accent: Color? = null): DshmColo
         textTertiary = set.textTertiary,
         divider = set.divider,
         bubbleAssistant = set.bubble,
-        bubbleUser = set.user,
-        onBubbleUser = set.userText,
+        // 用户气泡 = 主色（强调色），墨色按亮度算 —— 换强调色气泡立刻跟着换。
+        bubbleUser = accentColor,
+        onBubbleUser = inkOn(accentColor),
         accent = accentColor,
         // 团队指定了强调色才重算墨色；没指定就用配色自带的（原生那套的深墨
         // 是 #0B0D12，不是按亮度算出来的 #141414）。

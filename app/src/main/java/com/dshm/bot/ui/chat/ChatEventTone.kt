@@ -1,5 +1,7 @@
 package com.dshm.bot.ui.chat
 
+import org.json.JSONObject
+
 /** 事件行的语气：`ERROR` 用危险色，跟普通事件行（灰字）区分开。 */
 enum class ChatEventTone { NORMAL, ERROR }
 
@@ -44,4 +46,22 @@ fun failureLabel(code: String?, fallback: String): String {
     return fallback.takeIf { it.isNotBlank() }
         ?: code?.takeIf { it.isNotBlank() }
         ?: "未知错误"
+}
+
+/**
+ * `turn/end` 的 `reason` 里的**最终失败**信息。
+ *
+ * 模型请求重试耗尽（或错误码不可重试）时，引擎记的是
+ * `turn/end { reason: { kind: "error", error: { code, message } } }`
+ * （`dsh-agent-loop` 的 catch 分支）—— 之前我们对 `turn/end` 只记 seq，
+ * 这条失败**整条静默**，表现就是「运行失败在界面上看不到」。
+ *
+ * 返回 `(code, message)`；不是以错误结尾（completed / aborted…）返回 null。
+ */
+internal fun turnEndError(reason: JSONObject?): Pair<String?, String?>? {
+    if (reason == null || reason.optString("kind") != "error") return null
+    val failure = reason.optJSONObject("error")
+    val code = failure?.optString("code")?.takeIf { it.isNotEmpty() }
+    val message = failure?.optString("message")?.takeIf { it.isNotEmpty() }
+    return code to message
 }

@@ -20,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -92,36 +91,20 @@ fun PersonalizationScreen(
                                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                AccentSwatch(
-                                    color = null,
-                                    label = stringResource(R.string.bot_prefs_accent_default),
-                                    selected = prefs.accent == null,
-                                    enabled = enabled,
-                                    onClick = { viewModel.set(JSONObject().put("accent", JSONObject.NULL)) },
-                                )
-                                BOT_ACCENTS.forEach { (id, color) ->
+                                BOT_ACCENTS.forEachIndexed { index, (id, color) ->
                                     AccentSwatch(
                                         color = color,
                                         label = id,
-                                        selected = prefs.accent.equals(color, ignoreCase = true),
+                                        // 没有「跟随主题」那个选项了：默认就是第一个蓝
+                                        // （accent 没设值时引擎用配色自带的主色，默认主题正是这个蓝）。
+                                        selected = prefs.accent.equals(color, ignoreCase = true) ||
+                                            (prefs.accent == null && index == 0),
                                         enabled = enabled,
                                         onClick = { viewModel.set(JSONObject().put("accent", color)) },
                                     )
                                 }
                             }
                         }
-                    }
-                }
-
-                item {
-                    SettingsSection(title = stringResource(R.string.bot_prefs_chat)) {
-                        SettingsSwitchRow(
-                            title = stringResource(R.string.bot_prefs_thinking),
-                            subtitle = stringResource(R.string.bot_prefs_thinking_hint),
-                            checked = prefs.thinking,
-                            enabled = enabled,
-                            onCheckedChange = { viewModel.set(JSONObject().put("thinking", it)) },
-                        )
                     }
                 }
 
@@ -225,13 +208,13 @@ private fun ChoiceRow(
 }
 @Composable
 private fun AccentSwatch(
-    color: String?,
+    color: String,
     label: String,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val fill = color?.let { runCatching { Color(it.toColorInt()) }.getOrNull() }
+    val fill = runCatching { Color(color.toColorInt()) }.getOrNull() ?: Dshm.colors.accent
     Box(
         modifier = Modifier
             // 圆盘大小**恒定**：网页端 `.bt-swatch` 就是固定 22px + 固定 2px 边框，
@@ -239,22 +222,7 @@ private fun AccentSwatch(
             // 选中的那个可见色块就少一圈，看着比别的圆小一号。
             .size(ACCENT_SWATCH_SIZE)
             .clip(CircleShape)
-            .then(
-                if (fill != null) {
-                    Modifier.background(fill)
-                } else {
-                    // 「跟随主题」那一个：斜切一半（网页端 `.bt-swatch-default` 同款）。
-                    Modifier.background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Dshm.colors.surface,
-                                Dshm.colors.divider,
-                                Dshm.colors.surface,
-                            ),
-                        ),
-                    )
-                },
-            )
+            .background(fill)
             .border(
                 width = 2.dp,
                 // 选中 = 高对比墨色（网页端用 `--bt-ink`）；未选中 = 淡分隔线。
@@ -263,16 +231,7 @@ private fun AccentSwatch(
             )
             .clickable(enabled = enabled) { onClick() }
             .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        if (fill == null) {
-            Text(
-                text = stringResource(R.string.bot_prefs_accent_auto_short),
-                style = Dshm.typography.rowTime,
-                color = Dshm.colors.textTertiary,
-            )
-        }
-    }
+    )
 }
 
 /** 强调色圆点的直径；几个圆点必须一样大。 */

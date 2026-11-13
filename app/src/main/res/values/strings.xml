@@ -250,7 +250,6 @@
     <string name="composer_attach_remove">Remove attachment</string>
     <string name="composer_mention_everyone">Everyone</string>
     <string name="chat_collapse">Collapse</string>
-    <string name="chat_thinking">Thinking</string>
     <string name="chat_artifacts_delivered">Delivered %1$d files</string>
     <string name="chat_artifacts_generated">Generated %1$d files</string>
     <string name="chat_artifacts_all">All %1$d files</string>
@@ -404,11 +403,6 @@
     <string name="bot_prefs_theme_moonlight">Moonlight</string>
     <string name="bot_prefs_accent">Accent</string>
     <string name="bot_prefs_accent_hint">The accent color of buttons, links and bubbles.</string>
-    <string name="bot_prefs_accent_default">Theme accent</string>
-    <string name="bot_prefs_accent_auto_short">A</string>
-    <string name="bot_prefs_chat">Conversation</string>
-    <string name="bot_prefs_thinking">Show thinking</string>
-    <string name="bot_prefs_thinking_hint">Show the model thinking above its replies.</string>
     <string name="bot_prefs_motion">Animation</string>
     <string name="bot_prefs_motion_level">Motion</string>
     <string name="bot_prefs_motion_normal">Normal</string>

@@ -1230,11 +1230,6 @@ export function install(rt) {
     // it; only another turn/start moves on. A later page does not repeat the
     // turn/start from the page before, so seed that turn when the projection has it.
     let turn = openTurnAt(ctx.get?.('sessionProjections'), session, events[0]?.seq)
-    // The reasoning of the turn being read. A step that only thinks (and calls a
-    // tool) has no text block at all, so the thinking of a turn is collected here
-    // and shown above that turn's reply — the web draws the same thing as a
-    // ThinkingRow, and a native client reads the same field.
-    let turnReasoning = ''
     const stamp = (event, item) => {
       if (typeof event.seq === 'number' && Number.isInteger(event.seq)) item.seq = event.seq
       if (turn !== undefined) item.turn = turn
@@ -1243,37 +1238,14 @@ export function install(rt) {
     for (const event of events) {
       if (event.type === 'turn/start') {
         if (typeof event.data?.turn === 'number' && Number.isInteger(event.data.turn)) turn = event.data.turn
-        turnReasoning = ''
         continue
       }
       if (event.type === 'assistant/message') {
         if (hidden.has(event.data?.turn)) continue
         // One entry per text block: the chat shows each block in a bubble of its own.
         const content = Array.isArray(event.data?.message?.content) ? event.data.message.content : []
-        // The model's reasoning rides along with the message: it can be several
-        // steps long (think → tool → think → tool) before the turn answers.
-        const thinking = content
-          .filter(block => block?.type === 'reasoning' && typeof block.text === 'string')
-          .map(block => block.text)
-          .join('\n')
-          .trim()
-        if (thinking !== '') {
-          turnReasoning = turnReasoning === '' ? thinking : `${turnReasoning}\n${thinking}`
-        }
-        let first = true
         for (const block of content) {
-          if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
-            stamp(event, {
-              kind: 'bot',
-              text: block.text,
-              time: event.time,
-              ...(first && turnReasoning !== '' ? { reasoning: turnReasoning } : {}),
-            })
-            // The thinking belongs to the turn's reply; later bubbles of the same
-            // turn do not repeat it.
-            if (first) turnReasoning = ''
-            first = false
-          }
+          if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') stamp(event, { kind: 'bot', text: block.text, time: event.time })
         }
         continue
       }
