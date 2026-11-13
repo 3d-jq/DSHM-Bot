@@ -72,7 +72,7 @@ class ArtifactDerivationTest {
         val out = deriveArtifacts(events, turnTraces(events), cwd = "/root/.dsh/bot/workspace")
 
         assertEquals(1, out.size)
-        assertEquals(10L, out.single().endSeq)
+        assertEquals(10L, out.single().seq)
         assertTrue(out.single().delivered)
         assertEquals(listOf("/root/.dsh/bot/workspace/final.docx"), out.single().files.map { it.path })
         assertEquals(ArtifactOrigin.DELIVERED, out.single().files.single().origin)
@@ -130,13 +130,29 @@ class ArtifactDerivationTest {
     }
 
     @Test
-    fun `还没结束的轮不出产物卡`() {
+    fun `已声明交付但还没 end 的轮也出卡，贴 present 处`() {
         val events = listOf(
             event("turn/start", 1, JSONObject().put("turn", 5)),
             presented(9, 5, "/root/.dsh/bot/workspace/x.docx" to null),
         )
 
-        assertTrue(deriveArtifacts(events, turnTraces(events), cwd = null).isEmpty())
+        val out = deriveArtifacts(events, turnTraces(events), cwd = null)
+        assertEquals(1, out.size)
+        assertEquals(9L, out.single().seq) // 卡先出现在 present 位置
+        assertEquals(listOf("/root/.dsh/bot/workspace/x.docx"), out.single().files.map { it.path })
+    }
+
+    @Test
+    fun `已交付的轮 end 后卡位置前移到 turn end`() {
+        val events = buildList {
+            add(event("turn/start", 1, JSONObject().put("turn", 6)))
+            add(presented(9, 6, "/root/.dsh/bot/workspace/x.docx" to null))
+            add(event("turn/end", 20, JSONObject().put("turn", 6)))
+        }
+
+        val out = deriveArtifacts(events, turnTraces(events), cwd = null)
+        assertEquals(1, out.size)
+        assertEquals(20L, out.single().seq) // end 之后卡落到轮末
     }
 
     @Test
@@ -151,7 +167,7 @@ class ArtifactDerivationTest {
         val out = deriveArtifacts(events, turnTraces(events), cwd = "/root/.dsh/bot/workspace")
 
         assertEquals(listOf("/root/.dsh/bot/workspace/a.png", "/root/.dsh/bot/workspace/b.png"), out.flatMap { it.files.map { f -> f.path } })
-        assertEquals(listOf(10L, 25L), out.map { it.endSeq })
+        assertEquals(listOf(10L, 25L), out.map { it.seq })
     }
 
     @Test

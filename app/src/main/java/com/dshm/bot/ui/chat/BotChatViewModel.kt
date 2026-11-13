@@ -424,10 +424,16 @@ class BotChatViewModel internal constructor(
     /** 会话事件里最近一次 `turn/start` / `turn/end` 的 seq：最后的边界是哪一边。 */
     private var lastTurnStartSeq = 0L
     private var lastTurnEndSeq = 0L
-    /** 见过的最大会话 seq：乐观用户气泡用它往上抬，保证事件卡能插到自己上面。 */
+    /**
+     * 见过的最大会话 seq。
+     *
+     * 乐观用户气泡的占位 seq 取 `maxSeenSeq + 1`：比「已加载的历史」大一档，
+     * 于是本轮的新事件（seq 更大）会被插到它**后面**，更早的事件插到它前面。
+     * **不能**再往上加（曾经写成 `maxSeenSeq + ++optimisticSeq`）：占位 seq 一旦
+     * 高过本轮的真实 seq，`mergeTimeline` 就会把本轮事件插到用户气泡上面 ——
+     * 表现成「流式期间用户气泡错位」。
+     */
     private var maxSeenSeq = 0L
-    /** 每发一条乐观气泡往上抬一档，避免同一次重试撞到同一个占位 seq。 */
-    private var optimisticSeq = 0L
     private val pendingTools = LinkedHashMap<String, PendingTool>()
 
     private data class PendingTool(
@@ -696,9 +702,10 @@ class BotChatViewModel internal constructor(
         // 顺手把输出目录扫描排到后台（带 TTL + 单飞）；推导先用上一次的结果，
         // 绝不在这里扫盘 —— 这个函数跑在主线程的一帧里。
         scheduleOutputsScan()
+        // 「至少有一轮已结束」不再是出卡前提：`deriveArtifacts` 对「已交付但轮还在跑」
+        // 的轮也会出卡（贴 `present` 处），所以这里不再提前 return。
         val events = sessionEvents.values.toList()
         val turns = turnTraces(events)
-        if (turns.none { !it.running && it.endSeq != null }) return emptyList()
         val derived = deriveArtifacts(
             events = events,
             turns = turns,
@@ -710,7 +717,7 @@ class BotChatViewModel internal constructor(
                 id = "present:${group.turn}",
                 kind = ChatEntryKind.ARTIFACTS,
                 text = "",
-                seq = group.endSeq,
+                seq = group.seq,
                 artifacts = group.files.map { file ->
                     ChatArtifact(path = file.path, description = file.description)
                 },
@@ -807,6 +814,25 @@ class BotChatViewModel internal constructor(
             )
         }
         browserShots.sortBy { it.seq ?: Long.MAX_VALUE }
+    }
+
+    /**
+     * 服务端回显带来的**真实 seq** 认领回本地乐观气泡。
+     *
+     * 本地气泡只有占位 seq（`maxSeenSeq + 1`）；真 seq 更大时改写它，
+     * 之后本轮事件按真 seq 插在气泡后面，不会再出现「用户气泡错位」。
+     */
+    private fun adoptLocalSeq(id: String, seq: Long?) {
+        if (seq == null) return
+        val key = localUserEntries.entries.firstOrNull { it.value.id == id }?.key ?: return
+        val current = localUserEntries.getValue(key)
+        if (seq <= (current.seq ?: Long.MIN_VALUE)) return
+        val updated = current.copy(seq = seq)
+        localUserEntries[key] = updated
+        _uiState.update { state ->
+            state.copy(entries = state.entries.map { entry -> if (entry.id == id) updated else entry })
+        }
+        mergeSessionEvents()
     }
 
     private fun mergeSessionEvents() {
@@ -1042,9 +1068,10 @@ class BotChatViewModel internal constructor(
             kind = ChatEntryKind.USER,
             text = text,
             attachments = attachments.map { it.name },
-            // 占位 seq：比当前所有历史都大，事件卡（网页卡/产物卡）能据此插到自己上面，
-            // 不会因为“本地气泡没有 seq”被甩到列表末尾（倒序里就是冒到气泡下面）。
-            seq = maxSeenSeq + ++optimisticSeq,
+            // 占位 seq：比「已加载的历史」大一档（= 本轮这条消息的真实 seq）。
+            // 本轮事件 seq 更大 → 插在气泡后面；更早的事件 → 插在气泡前面。
+            // 服务端回显到达后用 `adoptLocalSeq()` 认领真实 seq，进一步对齐。
+            seq = maxSeenSeq + 1,
             attachmentItems = attachments.mapNotNull { draft ->
                 draft.cachePath?.let { path ->
                     ChatAttachmentItem(draft.name, path, draft.isImage)
@@ -1259,6 +1286,9 @@ class BotChatViewModel internal constructor(
                 // 记进 `seen` 了，去重会把它挡掉 —— 表现是「助手消息冷启动能立刻看到、
                 // 自己发的却要等一会儿」。`appendItem` 自带 id/seq 去重，不会写重。
                 historyCache?.appendItem(item)
+                // 自己刚发的那条回显虽然会被 `seen` 去重，但它带着**真实 seq**：
+                // 认领回本地气泡，`mergeTimeline` 才能把本轮事件插到正确位置。
+                adoptLocalSeq(entry.id, entry.seq)
                 if (!seen.add(entry.id)) return
                 // 最终消息已经进列表，立即撤掉流式临时气泡，避免同一段回复出现两遍。
                 // 但一条 bot 文字 / 一个 stream 段不等于整回合结束：DS Bot 还能继续

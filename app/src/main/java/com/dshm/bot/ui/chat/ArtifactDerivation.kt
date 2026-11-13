@@ -34,10 +34,16 @@ data class DerivedArtifact(
     val bytes: Long? = null,
 )
 
-/** 一轮的产物，卡贴在 `turn/end` 处。 */
+/**
+ * 一轮的产物，卡贴在 [seq] 处。
+ *
+ * [seq] = 轮已结束就是 `turn/end` 的 seq（收尾文字排在卡上面，对齐网页版）；
+ * 轮还在跑但本轮已经声明过交付时，先取 `present` 的 seq —— 卡片因此**不必等整轮跑完**，
+ * `turn/end` 到了再前进到轮末。
+ */
 data class TurnArtifacts(
     val turn: Int,
-    val endSeq: Long,
+    val seq: Long,
     val files: List<DerivedArtifact>,
 ) {
     val delivered: Boolean get() = files.isNotEmpty() && files.first().origin == ArtifactOrigin.DELIVERED
@@ -120,9 +126,11 @@ fun turnTraces(events: List<JSONObject>): List<TurnTrace> {
 /**
  * 一轮的产物（对齐 dsh-Go `deriveArtifacts`）。
  *
- * 只给**已完成的轮**出卡：有 `present` 声明就只用它；否则依次看
- * 本轮新建的文件（工具结果里的 `meta.path`）、最终回复里链接且被本轮提到过的文件、
- * 以及本轮时间窗内出现在输出目录里的文件。按 `turn/end` 排序。
+ * 出卡条件：**已完成的轮**，或者**本轮已经声明过交付**（`present`）的轮 —— 后者让卡片
+ * 在 `present` 一到就出现，不必等整轮跑完（模型交完文件常常还会接着写收尾文字 / 等子代理）。
+ * 有 `present` 声明就只用它；否则依次看本轮新建的文件（工具结果里的 `meta.path`）、
+ * 最终回复里链接且被本轮提到过的文件、以及本轮时间窗内出现在输出目录里的文件。
+ * 卡的位置：轮已结束 = `turn/end` 的 seq（对齐网页版，收尾文字在卡上面）；轮还在跑 = `present` 的 seq。
  */
 fun deriveArtifacts(
     events: List<JSONObject>,
@@ -130,11 +138,14 @@ fun deriveArtifacts(
     cwd: String?,
     outputs: List<OutputFile> = emptyList(),
 ): List<TurnArtifacts> {
-    val finished = LinkedHashMap<Int, TurnTrace>()
+    val delivered = presentedByTurn(events)
+    val eligible = LinkedHashMap<Int, TurnTrace>()
     for (trace in turns) {
-        if (!trace.running && trace.endSeq != null) finished[trace.turn] = trace
+        val finished = !trace.running && trace.endSeq != null
+        val declared = delivered.containsKey(trace.turn)
+        if (finished || declared) eligible[trace.turn] = trace
     }
-    if (finished.isEmpty()) return emptyList()
+    if (eligible.isEmpty()) return emptyList()
 
     val scans = HashMap<Int, TurnScan>()
     for (event in events) {
@@ -142,7 +153,7 @@ fun deriveArtifacts(
         val data = event.optJSONObject("data") ?: continue
         val seq = event.optLong("seq", -1L).takeIf { it >= 0L } ?: continue
         val turn = data.optInt("turn", -1)
-        if (!finished.containsKey(turn)) continue
+        if (!eligible.containsKey(turn)) continue
         val scan = scans.getOrPut(turn) { TurnScan() }
         when (type) {
             "tool/call" -> {
@@ -176,10 +187,9 @@ fun deriveArtifacts(
         }
     }
 
-    val delivered = presentedByTurn(events)
     val sortedOutputs = outputs.sortedBy { it.modifiedMs }
-    val out = ArrayList<TurnArtifacts>(finished.size)
-    for (trace in finished.values.sortedBy { it.endSeq }) {
+    val out = ArrayList<TurnArtifacts>(eligible.size)
+    for (trace in eligible.values.sortedBy { it.endSeq ?: Long.MAX_VALUE }) {
         val turn = trace.turn
         val files = LinkedHashMap<String, DerivedArtifact>()
         val declared = delivered[turn]
@@ -224,7 +234,10 @@ fun deriveArtifacts(
             }
         }
         if (files.isEmpty()) continue
-        out += TurnArtifacts(turn = turn, endSeq = trace.endSeq!!, files = files.values.toList())
+        // 卡的位置：轮已结束 → 贴 `turn/end`（收尾文字在卡上面，对齐网页版）；
+        // 轮还在跑（本轮已声明交付）→ 先贴 `present` 的 seq，`turn/end` 到了再前进。
+        val seq = trace.endSeq ?: declared?.firstOrNull()?.seq ?: trace.startSeq
+        out += TurnArtifacts(turn = turn, seq = seq, files = files.values.toList())
     }
     return out
 }
