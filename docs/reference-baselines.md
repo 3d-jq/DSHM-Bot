@@ -23,7 +23,9 @@
   `stop-room-work`、`browser-takeover/give-back/stop`、`learning-answer` 等，需从主分支补齐。
 
 本项目当前用的 `room-chat`、`usage-summary`、`room` 事件**只存在于 mobile-api 分支**；
-版本协商、`notices`、`avatar` 引用、`notice` 事件、`dsBot/call` 尚未接入。
+**版本协商已接入**（`DsBotCapabilities` + `HomeViewModel.setEndpoint()` 发起 `hello`，
+`room-chat` / `usage-summary` 按 `supports()` 裁决，见 `docs/roadmap.md`）；
+`notices`、`avatar` 引用、`notice` 事件、`dsBot/call` 仍未接入。
 
 已确认的 DS Bot 行为：
 

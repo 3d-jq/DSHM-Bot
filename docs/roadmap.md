@@ -68,9 +68,9 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - ☑️ 聊天：发送、SSE 流式输出、思考状态、记忆提示（`BotChatViewModel` + `feed` 的 `message` / `stream` / `room`）
 - ☑️ 模型选择、引擎参数设置（`ModelProvidersScreen` / `ProviderSettings` / `EngineSettingsForm`）
 - ☑️ 本机 PRoot 引擎：下载安装 rootfs、启动 `dsh web`、日志、guest 初始化（`data/runtime/`、`runtime/`）——原计划 M3，提前完成
-- ⬜ 停止生成、历史分页（当前一次拉全量）
+- ☑️ ~~停止生成、历史分页~~ → `BotChatViewModel.stopRunning()`；`loadEarlier()` + `ChatCursor` + `hasEarlier` 已接（2026-11-13 核实）
 - ☑️ 审批卡片原生渲染 + 应答接线（见「审批显示专项」）
-- ⬜ 提问卡片：已显示问题本身，但还不能作答（选项 UI + `userQuestions/*`）
+- ☑️ ~~提问卡片~~ → 单/多选 + `answerChatQuestion` / `answerQuestion` 走 `userQuestions/answer`，已接（2026-11-13 核实）
 - 🚫 远程主机（局域网 / SSH / Noise Relay）——**2026-11-13 用户明确：远程控制不做**，整条线不排期
 - ☑️ 契约测试：`DshClientMockWebServerTest` 覆盖正常 cookie / envelope、SSE 分发、断线重连、
   2MB 超大事件、取消后不再重连（2026-11-13）
@@ -82,9 +82,16 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - ☑️ Bot 详情、Bot 内嵌浏览器、网页模式（`InterfaceMode.WEB` + `WebHostScreen`）
 - ☑️ 账号与余额（`DshAccountRepository` / `AccountScreen`）
 - 🔄 设置体系：20 余个子页已接真实 RPC，仍在修 bug（见「当前工作重点」）
-- ⬜ 新建 Bot / 新建群聊：`DshmBotApp.kt` 的 `onCreateBot` / `onCreateGroup` 仍是空回调
-- ⬜ @ 成员 / 未读与通知 / 群详情成员管理 / 公告审批
-- ⬜ 与 DS Bot 手机接口版本协商（`hello` / `capabilities`）
+- ☑️ ~~新建 Bot / 新建群聊~~ → `NewBotScreen` / `NewGroupDialog` 已接 `create-bot` / `create-room`（2026-11-13 核实老表过期）
+- ☑️ @ 成员：输入 `@` 触发成员面板（`ChatComposer` 的 `mentionCandidates`），支持「所有人」
+- ☑️ 群详情成员管理：`RoomSettingsScreen` 设管理员 / 增删成员 / 权限
+- ☑️ 群公告编辑：`BotNoticePage`（整屏，走 `update-room {notice}`）
+- 🟡 通知：`ChatNotifier` 有 DONE / ERROR / APPROVAL / QUESTION 四类；**未读计数 / 未读点 / 公告审批**仍未做（用户曾决定未读不做，见「与 DS Bot 差距清单」）
+- ☑️ ~~与 DS Bot 手机接口版本协商~~ → 新增 `DsBotCapabilities`（进程内按端点缓存
+  `hello` 结果），`HomeViewModel.setEndpoint()` 在引擎起来时协商一次；`room-chat`
+  （群聊历史/翻页）与 `usage-summary`（Bot 详情用量）按 `supports()` 裁决，失败一律
+  关闭能力、不把旧版插件的 `bot/not-found` 显示成错误。`DsBotCapabilitiesTest` 4 例。
+  （2026-11-13 接线）
 
 ## M3：本机引擎（🔄，远程控制不做）
 
@@ -92,7 +99,7 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - ☑️ 引擎常驻前台服务（`RuntimeForegroundService`，通知渠道 `dshm-runtime`）：
   把 App 稳在 `FOREGROUND_SERVICE`，PRoot/Node 子进程不再被当幽灵进程裁掉；
   通知带「停止引擎」动作。原来的「引擎就绪」通知（`EngineNotifier`）已删除，避免重复打扰。
-- ⬜ 通知直达会话（点通知跳进对应对话）
+- ☑️ ~~通知直达会话~~ → `ChatNotifier` 的 Intent 带 `EXTRA_OPEN_BOT_ID`，`MainActivity.consumePendingOpenBot()` → `DshmBotApp` 打开对应对话（2026-11-13 核实）
 - 🚫 主机切换（本机 / SSH / Remote）——同上，远程控制不做，只保留本机引擎一条路
 
 ## M4：体验与发布（⬜）
@@ -438,8 +445,29 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - ☑️ 完成态：任务结束后显示 eta 风格底部结果卡（摘要 + 回到界面 + 关闭），不再静默结束。
 - ☑️ 通道：插件 `phone-wait` / `phone-result` 长轮询，Android `PhoneReadBridge` 回执；
   设置页有无障碍状态、手机操控 Bot 选择、开关和真实读屏测试。
-- ⬜ **待补齐（dsh-Go 完整能力）**：悬浮条插话、屏幕截图、列表 collect、
-  系统 intent 类动作、后台虚拟屏（需要 Shizuku/ADB 或 root），以及自动化回归测试。
+- ☑️ **dsh-Go 完整能力补齐（2026-11-13）**：
+  - **通用系统 intent** → 新增 `phone_intent`，`PhoneIntents` 白名单 8 类
+    （dial / sms_draft / share / settings / alarm / timer / calendar / navigate），
+    拒绝模型拼裸 action / component；`ACTION_DIAL` 只预填拨号盘不直接拨号；
+    Manifest 加 `<queries>` 解决 API 30+ 包可见性；`PhoneIntentsTest` 8 例。
+  - **屏幕截图** → `phone_screenshot`，API 30+ 走 `AccessibilityService.takeScreenshot`
+    （`canTakeScreenshot="true"` + `tools:targetApi="30"`），图片落 rootfs 工作区、
+    回路径文本；26–29 明确返回「本机 Android 低于 11，不支持」。
+  - **列表 collect** → `phone_collect`，多页滚动 + 去重 + `until` 提前停止 + 页数/字数上限；
+    `PhoneCollectTest` 4 例。**顺带把 `PhoneReadBridge.answer` 从 `Dispatchers.Main`
+    挪到 IO**（`DshmAccessibilityService.dispatch` 会阻塞，长动作放主线程会 ANR）。
+  - **悬浮条插话** → `PhoneInterjectOverlay`（独立可聚焦窗口，胶囊本身拿不到 IME 焦点），
+    点「插话」→ 预填到对应 Bot 的输入框 → 发送带 `mode:'steer'`，
+    由 `channel.js` 的 `send` 透传给 `sessionController.prompt`，**插进当前正在跑的回合**
+    （已核对 DSH 0.2.2 `prompt` 的 `mode==="steer" → agent.steer(message)`）；
+    插话**不**调 `PhoneControlSession.beginTurn()`，避免清掉用户刚按的「停止」。
+  - 插件三处清单（`PHONE_TOOL_NAMES` / `TEAM_TOOLS` / `PHONE_RULES`）与 Kotlin 的
+    dispatch / `describe` / 确认门都已同步；`PhoneControlBridge` 现在 14 个 action。
+- ⬜ **后台虚拟屏（不做）**：需要 shell UID（Shizuku / Sui / 无线 ADB / root）+ Android 14+
+  的 trusted `OWN_FOCUS` virtual display 标志；普通 App UID 拿不到 `ADD_TRUSTED_DISPLAY`，
+  也无法把别的应用 Activity 启动到副屏。`MediaProjection` 只能镜像真实屏幕，不是后台虚拟屏。
+  结论：**不是"没做"，是普通 App 做不到**，除非以后引入 Shizuku/ADB 通道（另开一轮）。
+- ⬜ 自动化回归测试（手机操控仍靠真机点）。
 
 ### Bot 完整设置页接线审计（2026-11-07）
 
@@ -1070,7 +1098,7 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 | 阶段 | 做什么 | 产出 |
 |---|---|---|
 | **0（已完成）** | 摸清 DSH 插件模型、确认可替换性 | [dsh-plugin-architecture.md](dsh-plugin-architecture.md) |
-| 1 | 逐个评估 13 个 patch：能迁成插件/profile 的迁走，剩下才继续 patch | patch 数量下降 |
+| **1（分析已完，见 [runtime-patches-audit.md](runtime-patches-audit.md)）** | 逐个评估 11 个实际存在的 runtime patch（manifest 里写 13 个是陈旧账目） | 结论：**升级 0.2.2 可直接删 2 个；`zz-direct-runtime` 疑为 proot 下的死代码可删；2 个升级时复核；2 个可迁自研 bridge；4 个必须继续 patch**。理想结果 11 → 4–6 个 |
 | 2 | 自写插件接管模型可见面：`present`（中文描述 + 图片/视频也算交付）、自定义 systemPrompt section、按 Bot 的 persona | 产物卡、行为规则可控 |
 | 3 | 提示词本地化：AGENTS.md / section / persona 三层写中文产品文案（参照 dsh-Go 的 AGENTS.md、安全简报、工具目录写法） | 中文优先的 agent 行为 |
 | 4 | DS Bot 插件同策略：`prompt.js` / `tools.js` 走扩展或替换，而不是 merge 上游 diff | 升级成本可控 |
@@ -1109,3 +1137,39 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 **真机回归（2026-11-13，通过）**：去掉客户端行内路径兜底后让它生成图片，**产物卡实时出现**
 （= 模型在这一轮调了 `present`），说明提示词第一档就够用，不必升级到 `systemPrompt.section`
 或替换 `tool-present` 描述。若以后在别的模型/场景下失效，再按这条阶梯升级。
+
+### DSH 升级 0.2.1-rc.4 → 0.2.2-rc.1：**暂缓**（2026-11-13）
+
+升级本身有好处（上游已吸收 2 个补丁，见 [runtime-patches-audit.md](runtime-patches-audit.md)），
+但用户明确「先不更新」。澄清：**完整 rootfs 构建本来就走 GitHub Actions 的
+`runtime.yml`（ubuntu-24.04 runner），不需要本机 Linux**；本机只做 A（补丁重打/pins/lock/版本变更），
+CI 做 B（打包）。不是"做不了"，是现在不做。升级清单与 pins 约束见 audit 文档末尾。
+
+### 群聊成员 dock：有意偏离官方（2026-11-13 用户拍板）
+
+现象：某个 Bot 在**自己私聊**里干活时，群聊输入框上方的成员胶囊也会冒出它的状态。
+
+**这是官方行为，不是我们引入的 bug**：
+`DS-Bot/ds-bot/src/client/member-status.js` 的 `memberWork` 写的是
+`const doing = local ? {...} : work.bots?.[id]`，注释 "Work in this group wins over the Bot's
+own chat or another group"，`dockMembers` 只藏「本群正在发言」的人，**不藏 `here=false`**。
+插件 `turns.js:291` 的 `workView()` 也确认：`work.bots[botId]` 不带 `roomId` 时就是私聊工作
+（带 `roomId` 才是「在别的群干活」；且 `work.bots` 每 Bot 只有一条，私聊优先）。
+
+数据怎么合并（这是回答「单聊和群聊同时干活怎么显示」）：
+- `work.rooms[roomId]` 按群独立，`work.bots[botId]` 按 Bot 全局一条；
+- 官方 `local ?? work.bots[id]` → **本群的活优先**；本群没活时兜底用全局那条；
+- 所以「本群也在干活」时只显示本群那份，不会显示两条；「本群没活、但它在私聊/别的群干活」
+  才兜底显示（`here=false`）。
+
+**用户判断：官方这个兜底不合理** —— Bot 在私聊里忙，跟当前这个群无关，不该让群成员 dock
+冒状态。所以**我们有意偏离官方**：
+
+- ☑️ `RoomModels.parseMemberStatus()`：`local` 优先；没有 `local` 时，`work.bots[id]`
+  **只有带 `roomId`**（在别的群里干活）才保留，**纯私聊工作丢弃**。
+  即：保留「在别的群忙」这个官方语义，只砍掉「私聊污染群聊」这一条。
+- ☑️ 代码注释写明偏离点与理由；`RoomModelsTest` 3 例锁住口径：
+  私聊工作不进群状态 / 在别的群干活仍显示（`roomId` 分支）/ 本群的活照常 `here=true`。
+- 顺带核实同链路没有别的串源：群聊 `running` 只认 `room-progress`、活动行群聊只读
+  `work.rooms[botId]`、`ourApproval` 群聊按 `roomId==botId` 判定。
+- 验证：81 测试类 / 463 用例全绿，lint 零 warning，assembleDebug 通过。
