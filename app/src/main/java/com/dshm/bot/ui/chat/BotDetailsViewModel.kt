@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.data.remote.DsBotCapabilities
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.remote.DshClients
@@ -311,14 +312,20 @@ class BotDetailsViewModel(
         }.getOrNull()
         _ui.update { it.copy(runStats = parseRunStats(stats)) }
 
-        val usage = runCatching {
-            connection.bot(
-                "usage-summary",
-                JSONObject()
-                    .put("botId", botId)
-                    .put("timeZone", java.util.TimeZone.getDefault().id),
-            )
-        }.getOrNull()?.optJSONObject("day")
+        // `usage-summary` 是 mobile-api 分支能力；旧版插件不支持时别发注定失败的请求，
+        // 用量区直接留空（不再靠 runCatching 静默吞掉）。
+        val usage = if (DsBotCapabilities.supports("usage-summary")) {
+            runCatching {
+                connection.bot(
+                    "usage-summary",
+                    JSONObject()
+                        .put("botId", botId)
+                        .put("timeZone", java.util.TimeZone.getDefault().id),
+                )
+            }.getOrNull()?.optJSONObject("day")
+        } else {
+            null
+        }
         if (usage != null) {
             val input = usage.optLong("input", 0L)
             val cacheRead = usage.optLong("cacheRead", 0L)

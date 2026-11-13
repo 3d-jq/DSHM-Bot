@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.data.remote.BotCache
 import com.dshm.bot.data.remote.BotPreviewCache
+import com.dshm.bot.data.remote.DsBotCapabilities
 import com.dshm.bot.data.remote.DsBotRepository
 import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.remote.DshClients
@@ -83,14 +84,21 @@ class HomeViewModel(
 
     /** 本机引擎端点变化时切换到真实 DS Bot 数据源；null 表示引擎未运行。 */
     fun setEndpoint(endpoint: RuntimeEndpoint?) {
-        client = endpoint?.let { DshClients.of(it) }
-        start(
-            if (endpoint == null) {
-                EmptyBotRepository()
-            } else {
-                DsBotRepository(DshClients.of(endpoint), cache, previewCache)
-            },
-        )
+        if (endpoint == null) {
+            client = null
+            DsBotCapabilities.clear()
+            start(EmptyBotRepository())
+            return
+        }
+        val dshClient = DshClients.of(endpoint)
+        client = dshClient
+        // 版本协商：拿到 api / capabilities / boot+seq 游标，供各页面按能力裁决。
+        // 失败时 DsBotCapabilities 保持 null（能力全关），不把旧版插件的
+        // `bot/not-found` 显示成主界面错误。
+        viewModelScope.launch {
+            DsBotCapabilities.refresh(endpoint, dshClient)
+        }
+        start(DsBotRepository(dshClient, cache, previewCache))
     }
 
     private fun start(source: BotRepository) {
