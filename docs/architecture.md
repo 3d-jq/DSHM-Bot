@@ -46,7 +46,7 @@ core/design/  设计令牌：颜色、间距、圆角、字体、动效、主题
 | 引擎设置 | `DshEngineSettingsRepository` + `EngineSettingsModels.kt` | `settings/describe` 拿 schema/value/base/user/secrets，`settings/mutate` 带 `expectedRevision` 提交；另有插件、权限预设、凭据、语音 |
 | 审批 / 提问 | `DshMuxHub` + `ApprovalMerge.kt` | 显示身份只认 DS Bot 的 `state.work.approvals`（`agentId` 已由插件关联成 `botId`/`roomId`）；`$events` 的 `approval/request` 只补应答要的 `eventId`。群聊走 `approval-answer`，私聊走 `$events/result`，两条路不混用 |
 | 本机引擎 | `data/runtime/` + `runtime/` | manifest 校验 → 下载/解压 rootfs → `ProotCommand` 拼 argv → `dsh web` 输出解析出 `endpoint + token` |
-| 远程连接 | ⬜ 未做 | dsh-Go `packages/dsh_remote`（Noise IK + Relay）后续按需移植 |
+| 远程连接 | 🚫 不做 | 2026-11-13 用户明确：远程控制不做；SSH / DSH Remote / Noise Relay / 主机切换均不排期，只保留本机 PRoot 引擎 |
 
 DS Bot 的颜色算法（`BotInks`）与默认形状（`BotShapeDefaults`）已按 DS-Bot / dsh-Go 移植，
 并有参考向量测试，保证同一个 Bot 在所有客户端颜色一致。
@@ -77,17 +77,23 @@ PRoot 内的 dsh web ──HTTP/SSE──> DshClient ──> DsBotRepository ─
 | 领域算法 | `BotInkTest`（参考向量）、`BotShapeDefaultsTest`、`RelativeTimeFormatterTest`（时区/边界/未来时间）、`ThemeModeTest` |
 | 设置协议 | `EngineSettingsModelsTest`、`SpeechCatalogTest`、`MarkdownParserTest`、`ComposerRulesTest` |
 | 运行时 | `ProotCommandTest`、`RuntimeManifestTest`、`TextMaskingTest`、`DsBotParserTest` |
-| 状态 | `HomeViewModelTest`（排序、搜索、空态、错误、未读） |
+| 状态 | `HomeViewModelTest`（排序、搜索、空态、错误、未读）、`EngineSettingsViewModelInjectionTest`（revision 冲突重试 / 凭据写入 / 刷新）、`BotChatViewModelWiringTest`（提问卡 / feed 消息 / 流式侧通道） |
+| HTTP / SSE | `DshClientMockWebServerTest`（正常 cookie / envelope、SSE 分发、断线重连、超大事件、取消） |
 | 审批合并 | `ApprovalMergeTest`（双卡片回归、跨 Bot 串号、群聊不抢应答、sessionId 未知时的认领、提问不静默丢弃） |
 | 设计令牌 | `DesignTokensTest`（对比度、尺寸关系、宠物挂件边距） |
 | 资源 | `AppIconResourcesTest`、`LucideIconResourcesTest`、`tools/test_generate_app_icons.py` |
 | UI | `HomeScreenTest`、`SettingsScreenTest`、`ChatComposerTest`、`DshmBotAppNavigationTest`（插桩） |
 
 约定：改动必须配套测试，覆盖正常 / 边界 / 异常 / 回归；`testDebugUnitTest` 与 `lintDebug` 全绿才提交。
-缺口：MockWebServer 契约测试（正常 / 断线 / 超大消息 / 取消）尚未建立，`data/runtime` 与 `ui/settings` 覆盖仍偏薄。
+`lintDebug` 自 2026-11-13 起 `warningsAsErrors = true`（`dshm.lintWarningsAsErrors`），
+**warning 也算 error**；故意保留的告警按文件写在 `app/lint.xml`，每条带理由。
+`data/remote` 已有 MockWebServer 契约测试（`DshClientMockWebServerTest`：正常 / 断线 / 超大消息 / 取消）；
+`data/runtime` 与 `ui/settings` 覆盖仍偏薄。
 
-`BotChatViewModel` / `EngineSettingsViewModel` 自己在构造里 `DshClients.of(endpoint)` 造依赖，
-Repository 换不掉：纯规则已抽成 `ApprovalMerge` 等函数覆盖 JVM 单测，接线部分仍需插桩测。
+`BotChatViewModel` / `EngineSettingsViewModel` 的依赖已通过 `BotChatDependencies` /
+`EngineSettingsRepositoryFactory` 注入（`data/remote/ViewModelContracts.kt`），
+生产默认值仍是 `DshClients.of(endpoint)`，测试传假实现；接线由
+`BotChatViewModelWiringTest` 与 `EngineSettingsViewModelInjectionTest` 覆盖。
 用 `build/dump-test-cp.gradle` 导 classpath 手跑单测时要先 `cd app`，
 否则 `AppIconResourcesTest` / `LucideIconResourcesTest` 会因相对路径假报缺资源。
 

@@ -202,6 +202,7 @@
 | 用 `confirmValueChange = { false }` 锁面板高度 | **列表的滑动被面板手势吃掉，轻轻一滑就关闭** | 不要锁状态，用固定高度的内容区定死；原生把手保留 |
 | `Box` 里每张卡片各自 `align(BottomCenter)` | 多条审批**完全叠在一起**，只看得见最上面一张 | 外层给一个 `Column` 定位 + `Arrangement.spacedBy`，卡片本身 `fillMaxWidth()` |
 | 悬浮输入框把留白加在内容区 `padding(bottom=)` | 输入框下面多出一条**纯白底**，消息滚到下面被裁断 | 内容区只让位给系统 inset；留白垫在输入框自己身上，列表 `contentPadding.bottom` 按输入框实测高度避开 |
+| 弹层高度用 `LocalConfiguration.current.screenHeightDp` | 折叠屏 / 分屏下是**整个显示区**的高度，不是窗口高度，弹层溢出或留白；lint 也报 `ConfigurationScreenWidthHeight` | 用 `rememberWindowHeightDp()`（`ui/components/WindowMetrics.kt`，走 `LocalWindowInfo.containerSize` + density） |
 
 ---
 

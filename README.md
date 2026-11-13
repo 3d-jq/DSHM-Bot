@@ -71,9 +71,10 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21.0.10'
   文档只引用令牌名，不重复抄数值，数值以 `core/design` 为准。
 - **versionCode**：取构建时间（`gradle.properties` 的 `dshm.versionCodeZoneOffset` 控制时区，默认 `+08:00`），
   保证每次打包都能覆盖安装并刷新启动器图标缓存。
-- **lint**：`abortOnError = true` 保证 error 阻断构建；warning 是否也算 error 由
-  `gradle.properties` 的 `dshm.lintWarningsAsErrors` 控制（默认 `false`）。存量 warning 清完后置 `true`，
-  开启前先跑一次 `:app:lintDebug` 按报告逐条修净。
+- **lint**：`abortOnError = true` 保证 error 阻断构建；`dshm.lintWarningsAsErrors` 已置 `true`，
+  **warning 也算 error**，现在是「零 warning 才构建通过」。故意保留的告警在 `app/lint.xml` 里
+  按文件定向豁免，每条都写了理由；能改的（NewApi / ObsoleteSdkInt / DefaultLocale / UseKtx /
+  未使用资源 / Compose 规范等）直接改代码，不要在 lint.xml 里图方便。
 - **targetSdk 28**：为绕开 Android 10+ 对 PRoot 执行原生二进制的限制而有意保留，
   lint 里显式豁免 `ExpiredTargetSdkVersion`。**上架 Play / 提高 targetSdk 前必须重新评估本机引擎方案**，详见架构文档。
 

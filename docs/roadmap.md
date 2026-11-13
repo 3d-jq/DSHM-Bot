@@ -40,11 +40,12 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 脚本已把主源码产物目录提到最前并排除 `kotlinx-coroutines-android`。
 上述修复后 **19 个测试类 / 97 个用例全绿**，`compileDebugKotlin` / `lintDebug` / `assembleDebug` 均通过。
 
-**仍待确认的结构改动**：`EngineSettingsViewModel.setEndpoint()` 内部直接
-`DshEngineSettingsRepository(DshClients.of(it))`，Repository 无法替换成假实现。
-本次 #2 靠「引擎未运行」的同步回调路径覆盖了，但 `applyWrite` 的 revision 冲突分支、
-凭据写入成功路径仍写不了 JVM 单测。建议加一个可注入的 repository 工厂，再补契约测试；
-这属于架构级改动，确认后再动。
+**结构改动已落地（2026-11-13）**：`EngineSettingsViewModel` 改为注入
+`EngineSettingsRepositoryFactory`（`data/remote/ViewModelContracts.kt`），
+`BotChatViewModel` 改为注入 `BotChatDependencies`（remote / transport / speech / mux）。
+`applyWrite` 的 revision 冲突分支、凭据写入成功路径、「事件流 → 卡片」接线现在都有 JVM 单测
+（`EngineSettingsViewModelInjectionTest`、`BotChatViewModelWiringTest`）。
+同轮补了 `DshClientMockWebServerTest`；验证 **74 测试类 / 428 用例全绿**（2026-11-13）。
 
 约定：修 bug 先补一条能复现的 JVM 测试（`app/src/test/.../data/remote/`、`.../ui/settings/`），再改实现；
 涉及 UI 的补插桩测试。不要只改页面文案绕过协议问题。
@@ -70,8 +71,9 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - ⬜ 停止生成、历史分页（当前一次拉全量）
 - ☑️ 审批卡片原生渲染 + 应答接线（见「审批显示专项」）
 - ⬜ 提问卡片：已显示问题本身，但还不能作答（选项 UI + `userQuestions/*`）
-- ⬜ 远程主机（局域网 / SSH / Noise Relay）
-- ⬜ 契约测试：MockWebServer 覆盖正常 / 断线 / 超大消息 / 取消
+- 🚫 远程主机（局域网 / SSH / Noise Relay）——**2026-11-13 用户明确：远程控制不做**，整条线不排期
+- ☑️ 契约测试：`DshClientMockWebServerTest` 覆盖正常 cookie / envelope、SSE 分发、断线重连、
+  2MB 超大事件、取消后不再重连（2026-11-13）
 
 ## M2：DS Bot 团队（🔄 部分落地）
 
@@ -84,14 +86,14 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 - ⬜ @ 成员 / 未读与通知 / 群详情成员管理 / 公告审批
 - ⬜ 与 DS Bot 手机接口版本协商（`hello` / `capabilities`）
 
-## M3：本机引擎与多主机（🔄）
+## M3：本机引擎（🔄，远程控制不做）
 
 - ☑️ 运行时层：PRoot + Node 运行时、dsh-go-bridge 原生桥接、dsh-media 插件、依赖锁（`runtime/`）
 - ☑️ 引擎常驻前台服务（`RuntimeForegroundService`，通知渠道 `dshm-runtime`）：
   把 App 稳在 `FOREGROUND_SERVICE`，PRoot/Node 子进程不再被当幽灵进程裁掉；
   通知带「停止引擎」动作。原来的「引擎就绪」通知（`EngineNotifier`）已删除，避免重复打扰。
 - ⬜ 通知直达会话（点通知跳进对应对话）
-- ⬜ 主机切换（本机 / SSH / Remote）
+- 🚫 主机切换（本机 / SSH / Remote）——同上，远程控制不做，只保留本机引擎一条路
 
 ## M4：体验与发布（⬜）
 
@@ -147,7 +149,8 @@ ui/settings/*Screen ──> EngineSettingsViewModel / SettingsViewModel
 | 1 | 会话协议核心：`session/*` unary RPC、消息 Part / 日志事件 / follow 帧模型、`$events` waterfall、审批与提问、流式渲染 | 🔄 进行中 |
 | 2 | 模型/凭据/设置/插件/权限/语音补全（`appAuth/*`、订阅、`pluginManager` 安装卸载、namespace 全覆盖） | ⬜ |
 | 3 | 工作区/文件/终端/Jobs/子代理/技能/目标/定时任务 | ⬜ |
-| 4 | 远程主机（SSH / DSH Remote / Noise / Relay）+ 运行时运维（安全模式、重置/卸载、诊断包、会话导出） | ⬜ |
+| 4a | 远程主机（SSH / DSH Remote / Noise / Relay） | 🚫 不做（2026-11-13 用户明确：远程控制整条线不排期） |
+| 4b | 运行时运维（安全模式、重置/卸载、诊断包、会话导出） | ⬜ |
 
 **第 1 批已完成（本轮，纯新增、未动现有页面）**：
 
@@ -484,15 +487,19 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 
 ## 已知工程债（与修 bug 并行清）
 
-- 测试覆盖：`data/runtime`、`data/remote`、`ui/settings` 相对 UI 偏薄，补 JVM 测试与契约测试
+- 测试覆盖：`data/runtime`、`ui/settings` 仍相对 UI 偏薄；`data/remote` 已补 MockWebServer 契约测试
 - 本机 NDK 目录缺 `source.properties`，导致 `.so` 无法 strip、APK 偏大；
   属 SDK 安装问题，用 SDK Manager 重装该版本 NDK 或补齐 `source.properties`，不要在构建脚本里屏蔽告警
-- `dshm.lintWarningsAsErrors` 目前为 `false`：跑一次 `:app:lintDebug`，清完存量 warning 后置 `true`
+- ☑️ `dshm.lintWarningsAsErrors` 已置 `true`（2026-11-13）：存量 1 error + 354 warning 清零，
+  修了 NewApi / ObsoleteSdkInt / DefaultLocale / UseKtx（SharedPreferences.edit、Uri.toUri、
+  Color.toColorInt…）/ 191 条未使用字符串 + 图标 / Typos / Compose 规范（ModifierParameter、
+  ConfigurationScreenWidthHeight→`rememberWindowHeightDp()`、ComposableNaming、可变集合状态、
+  offset lambda）/ 补齐过期插桩测试；故意保留的告警在 `app/lint.xml` 按文件定向豁免。
+  现在「零 warning 才构建通过」。
 - 文档与令牌数值的漂移（已改为只引用令牌名，不抄数字）
-- `BotChatViewModel` 仍然自己 `RemoteDshApi(DshClients.of(endpoint))`，依赖不能注入：
-  审批的合并规则已经抽成纯函数 `ApprovalMerge` 覆盖到了 JVM 单测，
-  但「事件流 → 缓存 → 卡片」的接线部分还是要靠插桩测；和 `EngineSettingsViewModel`
-  是同一个问题，一起做可注入工厂。
+- ☑️ `BotChatViewModel` / `EngineSettingsViewModel` 依赖已可注入（2026-11-13）：
+  `BotChatDependencies`（remote / transport / speech / mux）与 `EngineSettingsRepositoryFactory`；
+  「事件流 → 缓存 → 卡片」接线已由 `BotChatViewModelWiringTest` 覆盖，不再只靠插桩测。
 - 提问卡片已接选项与 `userQuestions/answer`；`ViewCard` / `BtwCard` 仍未接。
 - 用 `java -cp` 手跑单测时**必须先 `cd app`**：`AppIconResourcesTest` /
   `LucideIconResourcesTest` 按相对路径找 `src/main/res`，在仓库根目录跑会假报缺资源。
