@@ -69,6 +69,7 @@ export const TEAM_TOOLS = [
   'phone_screen', 'phone_tap', 'phone_type', 'phone_scroll', 'phone_key',
   'phone_tap_xy', 'phone_apps', 'phone_open', 'phone_handoff',
   'phone_notify', 'phone_clipboard',
+  'phone_intent', 'phone_screenshot', 'phone_collect',
   'list_capabilities', 'save_capability', 'delete_capability',
   'attach_capability', 'detach_capability',
 ]

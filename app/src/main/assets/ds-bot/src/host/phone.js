@@ -22,6 +22,9 @@ export const PHONE_TOOL_NAMES = [
   'phone_handoff',
   'phone_notify',
   'phone_clipboard',
+  'phone_intent',
+  'phone_screenshot',
+  'phone_collect',
 ]
 
 export function createPhoneChannel({
@@ -273,6 +276,64 @@ export function install(rt) {
       get: { type: 'boolean', description: '读取剪贴板' },
     },
     args => ({ kind: 'clipboard', set: string(args.set), get: bool(args.get) }),
+  )
+  phoneTool(
+    'phone_intent',
+    '发起一类系统请求（白名单，不能传任意 Intent）：dial 拨号盘、sms_draft 短信草稿、share 分享、settings 设置页、alarm 闹钟、timer 计时器、calendar 日历事件、navigate 地图导航。',
+    {
+      type: { type: 'string', required: true, description: 'dial|sms_draft|share|settings|alarm|timer|calendar|navigate' },
+      number: { type: 'string', description: '电话/短信收件人' },
+      text: { type: 'string', description: '分享文字 / 短信正文' },
+      app: { type: 'string', description: '分享目标包名，或 app_notifications 的应用包名' },
+      page: { type: 'string', description: 'settings 的页面：wifi|bluetooth|display|sound|location|battery|apps|date|locale|app_notifications' },
+      hour: { type: 'integer', description: 'alarm 的小时（0-23）' },
+      minute: { type: 'integer', description: 'alarm 的分钟（0-59）' },
+      message: { type: 'string', description: '闹钟/计时器备注' },
+      days: { type: 'array', description: '闹钟重复星期（1=周日…7=周六）' },
+      seconds: { type: 'integer', description: 'timer 秒数' },
+      title: { type: 'string', description: 'calendar 事件标题' },
+      begin: { type: 'integer', description: 'calendar 开始时间（毫秒时间戳）' },
+      end: { type: 'integer', description: 'calendar 结束时间（毫秒时间戳）' },
+      all_day: { type: 'boolean', description: 'calendar 是否全天' },
+      location: { type: 'string', description: 'calendar 地点' },
+      description: { type: 'string', description: 'calendar 备注' },
+      destination: { type: 'string', description: 'navigate 目的地文字' },
+      lat: { type: 'number', description: 'navigate 纬度' },
+      lng: { type: 'number', description: 'navigate 经度' },
+    },
+    args => ({
+      kind: 'intent', type: string(args.type),
+      number: string(args.number), text: string(args.text), app: string(args.app),
+      page: string(args.page), hour: integer(args.hour), minute: integer(args.minute),
+      message: string(args.message), days: Array.isArray(args.days) ? args.days : undefined,
+      seconds: integer(args.seconds), title: string(args.title),
+      begin: integer(args.begin), end: integer(args.end), all_day: bool(args.all_day),
+      location: string(args.location), description: string(args.description),
+      destination: string(args.destination),
+      lat: typeof args.lat === 'number' ? args.lat : undefined,
+      lng: typeof args.lng === 'number' ? args.lng : undefined,
+    }),
+  )
+  phoneTool(
+    'phone_screenshot',
+    '给当前手机屏幕截一张图，返回图片在工作区的路径（需要 Android 11+）。',
+    {},
+    () => ({ kind: 'screenshot' }),
+  )
+  phoneTool(
+    'phone_collect',
+    '从一个可滚动列表里连续收集条目文字（边滚边收），适合长列表/聊天记录。先 phone_screen 找到列表编号。',
+    {
+      screen: { type: 'string', required: true, description: 'phone_screen 返回的屏幕号' },
+      id: { type: 'integer', description: '列表元素编号，可省略则自动找可滚动区域' },
+      pages: { type: 'integer', description: '最多滚几页（1-30，默认 10）' },
+      until: { type: 'string', description: '遇到包含此文字的条目就停' },
+    },
+    args => ({
+      kind: 'collect', screen: string(args.screen), id: integer(args.id),
+      pages: integer(args.pages), until: string(args.until),
+      timeoutMs: 120_000,
+    }),
   )
 
   Object.assign(rt, {

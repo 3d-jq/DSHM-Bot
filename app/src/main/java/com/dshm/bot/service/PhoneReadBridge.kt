@@ -59,7 +59,11 @@ object PhoneReadBridge {
     private suspend fun answer(api: RemoteDshApi, context: Context, item: JSONObject) {
         val id = item.optString("id")
         if (id.isEmpty()) return
-        val result = withContext(Dispatchers.Main) {
+        // 动作里有耗时很长的（collect 多页滚动、截图），而
+        // DshmAccessibilityService.dispatch() 会用 CountDownLatch 阻塞当前线程；
+        // 放主线程会 ANR。PhoneOverlay / PhoneStage 内部自己 marshals 到主线程，
+        // 这里放 IO 即可。
+        val result = withContext(Dispatchers.IO) {
             PhoneControlBridge.handle(context, item)
         }
         runCatching {

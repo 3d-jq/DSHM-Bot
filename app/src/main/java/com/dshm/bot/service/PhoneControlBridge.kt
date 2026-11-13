@@ -85,6 +85,9 @@ object PhoneControlBridge {
                 "open" -> open(context, service, request)
                 "notify" -> notify(context, request)
                 "clipboard" -> clipboard(context, request)
+                "intent" -> intent(context, service, request)
+                "screenshot" -> screenshot(context, service)
+                "collect" -> collect(context, service, request)
                 else -> failure("未知的手机操作：$kind")
             }
         } catch (error: Throwable) {
@@ -102,7 +105,9 @@ object PhoneControlBridge {
         if (appRule == PhoneAppRule.DENY) {
             return failure("这个 App 在你的「不碰」名单里，手机操控 Bot 不能读也不能操作。")
         }
-        if (kind !in setOf("tap", "type", "scroll", "key", "tap_xy", "open")) return null
+        // intent 是「对第三方可见」的动作，和 open 一样要过确认门；
+        // screenshot / collect 都是读，不过门（但仍受上面的 DENY 名单约束）。
+        if (kind !in setOf("tap", "type", "scroll", "key", "tap_xy", "open", "intent")) return null
         val mode = context.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
             .getString("phone_confirm_mode", "ASK")
             ?: "ASK"
@@ -145,6 +150,9 @@ object PhoneControlBridge {
         "handoff" -> "正在把手机交给你"
         "notify" -> "正在发送通知"
         "clipboard" -> "正在操作剪贴板"
+        "intent" -> "正在发起系统请求"
+        "screenshot" -> "正在截图"
+        "collect" -> "正在收集列表"
         else -> kind
     }
 
@@ -787,6 +795,85 @@ object PhoneControlBridge {
             "密码", "验证码", "支付密码", "安全码", "付款密码", "确认密码",
             "password", "passcode", "verification code", "verification-code", "cvv", "cvc",
         ).any(text::contains)
+    }
+
+    /** 通用系统 intent：只走 [PhoneIntents] 的白名单，不接受模型拼的裸 Intent。 */
+    private suspend fun intent(
+        context: Context,
+        service: DshmAccessibilityService,
+        request: JSONObject,
+    ): JSONObject {
+        val (intent, reason) = PhoneIntents.build(request)
+        if (intent == null) return failure(reason.orEmpty())
+        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { return failure("没有能处理这个请求的 App：${it.message ?: "系统拒绝了 Intent"}") }
+        PhoneOverlay.working(service, "正在发起系统请求（${request.optString("type")}）")
+        PhoneActionLog.record(context, "系统请求：${request.optString("type")}")
+        delay(OPEN_SETTLE_MS)
+        return success(
+            "已发出 ${request.optString("type")} 请求。\n\n" +
+                (capture(service)?.let(::render) ?: "（新的屏幕读不到）"),
+        )
+    }
+
+    /** 截图：API 30+ 用无障碍 takeScreenshot，图片落 rootfs 工作区，回路径文本。 */
+    private suspend fun screenshot(context: Context, service: DshmAccessibilityService): JSONObject {
+        val unsupported = PhoneScreenshot.unsupportedReason()
+        if (unsupported != null) return failure(unsupported)
+        val result = PhoneScreenshot.capture(context, service)
+        val path = result.getOrNull()
+            ?: return failure("截图失败：${result.exceptionOrNull()?.message ?: "系统没返回截图"}")
+        PhoneActionLog.record(context, "截图已保存")
+        return success("截图已保存到：$path\n（引擎/Bot 可从工作区读取）\n\n" +
+            (capture(service)?.let(::render) ?: "（新的屏幕读不到）"))
+    }
+
+    /** 列表 collect：复用本文件的读屏与滚动能力，多页循环。 */
+    private suspend fun collect(
+        context: Context,
+        service: DshmAccessibilityService,
+        request: JSONObject,
+    ): JSONObject {
+        val screen = request.optString("screen")
+        val id = request.optInt("id", -1)
+        var target: AccessibilityNodeInfo? = null
+        var targetBounds: Rect? = null
+
+        val outcome = PhoneCollect.collect(
+            request = request,
+            findList = {
+                val element = resolve(JSONObject().put("screen", screen).put("id", id))
+                val node = element?.node?.let(::scrollableNode)
+                    ?: service.rootInActiveWindow?.let(::scrollableNode)
+                if (node == null) {
+                    null
+                } else {
+                    target = node
+                    Rect().also { node.getBoundsInScreen(it) }.also { targetBounds = it }
+                }
+            },
+            readPage = { bounds ->
+                val current = capture(service)
+                if (current == null) emptyList()
+                else current.elements
+                    .filter { it.bounds.top >= bounds.top - 4 && it.bounds.bottom <= bounds.bottom + 4 }
+                    .map { it.label }
+            },
+            nextPage = {
+                val node = target
+                if (node == null) false
+                else if (!node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) false
+                else {
+                    node.refresh()
+                    true
+                }
+            },
+        )
+        PhoneActionLog.record(context, "收集列表：${outcome.items} 项 / ${outcome.pages} 页")
+        return success(
+            outcome.text + "\n\n" +
+                (capture(service)?.let(::render) ?: "（新的屏幕读不到）"),
+        )
     }
 
     private fun success(text: String): JSONObject =

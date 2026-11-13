@@ -46,6 +46,8 @@
     <ignore path="src/main/java/com/dshm/bot/service/PhoneStage.kt"/>
     <ignore path="src/main/java/com/dshm/bot/ui/chat/BotBrowserStore.kt"/>
     <ignore path="src/main/java/com/dshm/bot/ui/chat/BotChatViewModel.kt"/>
+    <!-- 插话输入框同样是进程级悬浮窗口句柄，生命周期由 show/hide 管理。 -->
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneInterjectOverlay.kt"/>
   </issue>
 
   <issue id="UseKtx">
