@@ -407,11 +407,6 @@
     <string name="bot_prefs_accent_default">Theme accent</string>
     <string name="bot_prefs_accent_auto_short">A</string>
     <string name="bot_prefs_chat">Conversation</string>
-    <string name="bot_prefs_layout">Message layout</string>
-    <string name="bot_prefs_layout_bubble">Bubbles</string>
-    <string name="bot_prefs_layout_flat">Flat</string>
-    <string name="bot_prefs_bubble_width">Bubble width</string>
-    <string name="bot_prefs_flat_width">Text width</string>
     <string name="bot_prefs_thinking">Show thinking</string>
     <string name="bot_prefs_thinking_hint">Show the model thinking above its replies.</string>
     <string name="bot_prefs_motion">Animation</string>

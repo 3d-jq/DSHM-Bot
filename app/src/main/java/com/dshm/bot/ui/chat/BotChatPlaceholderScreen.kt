@@ -758,10 +758,11 @@ private fun ChatMessages(
     var viewingImage by remember { mutableStateOf<ChatAttachmentItem?>(null) }
     val appContextForMenu = LocalContext.current
     val streamingNow = streaming.isNotEmpty()
-    // 团队偏好（设置 → 个性化）：扁平布局 / 内容宽度 / 思考过程。
-    // 这一份是团队级的，所有设备一致 —— 改了立刻在对话区生效。
+    // 团队偏好（设置 → 个性化）：只取「显示思考过程」。
+    // 配色 / 强调色 / 动效在 `DshmTheme` 那层生效；气泡样式和排版宽度是本机
+    // 设计系统自己的事，不跟网页端的布局偏好走。
     val prefs by BotPrefsStore.prefs.collectAsStateWithLifecycle()
-    val appearance = remember(prefs) { ChatAppearance.of(prefs) }
+    val showThinking = prefs.thinking
     // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
     // 但如果这一刻有工具在跑（写入/搜索…），活动行仍然留着。
     val typing = activity != null && (!streamingNow || activity.kind != ChatActivityKind.THINKING)
@@ -883,10 +884,7 @@ private fun ChatMessages(
     // 聊天列表不再需要 MinisTextKit 那套「每个表格单元格注册一个选区分片」的机制。
     // 它会在滚动时反复写 `mutableStateMap` / `onTextLayout` 状态，表格越大越卡。
     CompositionLocalProvider(LocalMinisSelectionController provides null) {
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        // 内容宽度上限：列表内边距之外再按团队偏好（`width` / `flatWidth`）限宽，
-        // 对齐网页端 `--bt-msg-w` / `--bt-flat-w` 的百分比语义。
-        val contentMaxWidth = (maxWidth - Dshm.spacing.lg * 2) * appearance.contentFraction
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             reverseLayout = true,
@@ -964,8 +962,6 @@ private fun ChatMessages(
                             onOpenMember = onOpenMember,
                             messageId = "streaming",
                             streaming = true,
-                            flat = appearance.flat,
-                            maxContentWidth = contentMaxWidth,
                         )
                     }
                 }
@@ -1014,7 +1010,6 @@ private fun ChatMessages(
                         images = entry.images,
                         timeMs = null,
                         onOpenImage = { viewingImage = it },
-                        maxContentWidth = contentMaxWidth,
                         onLongPress = {
                             messageMenu = MessageMenuTarget(
                                 messageId = entry.id,
@@ -1039,9 +1034,7 @@ private fun ChatMessages(
                         endpoint = endpoint,
                         messageId = entry.id,
                         // 思考过程只在团队偏好打开时画（网页端 `thinking` 同一个开关）。
-                        reasoning = entry.reasoning.takeIf { appearance.showThinking },
-                        flat = appearance.flat,
-                        maxContentWidth = contentMaxWidth,
+                        reasoning = entry.reasoning.takeIf { showThinking },
                     )
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
@@ -1454,8 +1447,6 @@ private fun UserBubble(
     onLongPress: () -> Unit = {},
     /** 点图片缩略图：打开全屏查看器。 */
     onOpenImage: (ChatAttachmentItem) -> Unit = {},
-    /** 内容宽度上限（团队偏好 `width` / `flatWidth`）。 */
-    maxContentWidth: Dp? = null,
 ) {
     val hasAttachments = items.isNotEmpty() || attachments.isNotEmpty() || images > 0
     Column(
@@ -1488,7 +1479,6 @@ private fun UserBubble(
                 Column(
                     modifier = Modifier
                         .then(if (hasAttachments) Modifier.padding(top = Dshm.spacing.xs) else Modifier)
-                        .then(maxContentWidth?.let { Modifier.widthIn(max = it) } ?: Modifier)
                         .background(
                             Dshm.colors.bubbleUser,
                             RoundedCornerShape(Dshm.radius.lg),
@@ -1648,10 +1638,6 @@ private fun BotBubble(
     streaming: Boolean = false,
     /** 思考过程（团队偏好「显示思考过程」打开时才有内容）。 */
     reasoning: String? = null,
-    /** 扁平布局：气泡不画底色、圆角和内边距（网页端 `layout=flat`）。 */
-    flat: Boolean = false,
-    /** 内容宽度上限（团队偏好 `width` / `flatWidth`）。 */
-    maxContentWidth: Dp? = null,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
@@ -1662,25 +1648,13 @@ private fun BotBubble(
     val collapsible = isGroup && text.length > 600
 
     val bubble: @Composable () -> Unit = {
-        Column(
-            modifier = Modifier
-                .then(maxContentWidth?.let { Modifier.widthIn(max = it) } ?: Modifier)
-                .wrapContentWidth(Alignment.Start),
-        ) {
+        Column(modifier = Modifier.wrapContentWidth(Alignment.Start)) {
             // 思考过程：画在回答上方（网页端 `ThinkingRow` 的位置）。
             reasoning?.takeIf { it.isNotBlank() }?.let { ThinkingRow(it) }
             Column(
                 modifier = Modifier
-                    .then(
-                        if (flat) {
-                            // 扁平：没有底色、没有圆角（网页端 `layout=flat` 的 `.bt-bubble`）。
-                            Modifier
-                        } else {
-                            Modifier
-                                .clip(RoundedCornerShape(Dshm.radius.lg))
-                                .background(Dshm.colors.bubbleAssistant)
-                        },
-                    ),
+                    .clip(RoundedCornerShape(Dshm.radius.lg))
+                    .background(Dshm.colors.bubbleAssistant),
             ) {
                 Box(
                     modifier = Modifier
@@ -1691,16 +1665,7 @@ private fun BotBubble(
                                 Modifier
                             },
                         )
-                        .then(
-                            if (flat) {
-                                Modifier
-                            } else {
-                                Modifier.padding(
-                                    horizontal = Dshm.spacing.md,
-                                    vertical = Dshm.spacing.sm,
-                                )
-                            },
-                        ),
+                        .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
                 ) {
                     // 长按 = 选中文字（MinisTextKit 选区：代码块 / 表格 / 列表都能选）。
                     MarkdownText(

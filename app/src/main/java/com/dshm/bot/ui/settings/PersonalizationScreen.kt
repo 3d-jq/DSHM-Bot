@@ -7,25 +7,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
@@ -117,30 +115,6 @@ fun PersonalizationScreen(
 
                 item {
                     SettingsSection(title = stringResource(R.string.bot_prefs_chat)) {
-                        ChoiceRow(
-                            title = stringResource(R.string.bot_prefs_layout),
-                            options = BOT_LAYOUTS,
-                            selected = prefs.layout,
-                            enabled = enabled,
-                            onSelect = { viewModel.set(JSONObject().put("layout", it)) },
-                        )
-                        SettingsRowDivider()
-                        // 宽度跟着布局走：扁平布局限的是正文宽度，气泡布局限的是气泡宽度
-                        // （网页端也是两个字段分开存）。
-                        val flat = prefs.layout == "flat"
-                        WidthRow(
-                            title = stringResource(
-                                if (flat) R.string.bot_prefs_flat_width else R.string.bot_prefs_bubble_width,
-                            ),
-                            value = if (flat) prefs.flatWidth else prefs.width,
-                            enabled = enabled,
-                            onCommit = { percent ->
-                                viewModel.set(
-                                    JSONObject().put(if (flat) "flatWidth" else "width", percent),
-                                )
-                            },
-                        )
-                        SettingsRowDivider()
                         SettingsSwitchRow(
                             title = stringResource(R.string.bot_prefs_thinking),
                             subtitle = stringResource(R.string.bot_prefs_thinking_hint),
@@ -185,11 +159,6 @@ fun PersonalizationScreen(
 }
 private data class Choice(val id: String, val labelRes: Int)
 
-private val BOT_LAYOUTS = listOf(
-    Choice("bubble", R.string.bot_prefs_layout_bubble),
-    Choice("flat", R.string.bot_prefs_layout_flat),
-)
-
 private val BOT_THEMES = listOf(
     Choice("deepseek", R.string.bot_prefs_theme_deepseek),
     Choice("mono", R.string.bot_prefs_theme_mono),
@@ -210,49 +179,6 @@ private val BOT_ACCENTS = listOf(
     "tangerine" to "#E88A3C",
     "cobalt" to "#3A5FD9",
 )
-
-/**
- * 宽度滑块（50%..100%，步长 5%）。
- *
- * 拖动时只改本地草稿，松手才写引擎 —— 否则每挪一格就发一次 `set-prefs`，
- * 而且本机宽度会跟着抖。
- */
-@Composable
-private fun WidthRow(
-    title: String,
-    value: Int,
-    enabled: Boolean,
-    onCommit: (Int) -> Unit,
-) {
-    var draft by remember { mutableFloatStateOf(value.toFloat()) }
-    // 引擎回报的新值（写失败回滚、别的设备改了）同步进草稿。
-    LaunchedEffect(value) {
-        if (value.toFloat() != draft) draft = value.toFloat()
-    }
-    Column(Modifier.padding(Dshm.spacing.lg)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = title,
-                style = Dshm.typography.settingsRowTitle,
-                color = Dshm.colors.textPrimary,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "${draft.toInt()}%",
-                style = Dshm.typography.rowTime,
-                color = Dshm.colors.textSecondary,
-            )
-        }
-        Slider(
-            value = draft,
-            onValueChange = { draft = it },
-            onValueChangeFinished = { onCommit(draft.toInt()) },
-            valueRange = 50f..100f,
-            steps = 9,
-            enabled = enabled,
-        )
-    }
-}
 
 @Composable
 private fun ChoiceRow(
@@ -306,21 +232,40 @@ private fun AccentSwatch(
     onClick: () -> Unit,
 ) {
     val fill = color?.let { runCatching { Color(it.toColorInt()) }.getOrNull() }
-        ?: Dshm.colors.accent
     Box(
         modifier = Modifier
-            .size(28.dp)
+            // 圆盘大小**恒定**：网页端 `.bt-swatch` 就是固定 22px + 固定 2px 边框，
+            // 选中只换边框颜色。边框宽度以前写成「选中 2dp / 未选中 1dp」，
+            // 选中的那个可见色块就少一圈，看着比别的圆小一号。
+            .size(ACCENT_SWATCH_SIZE)
             .clip(CircleShape)
-            .background(if (color == null) Dshm.colors.surfaceMuted else fill)
+            .then(
+                if (fill != null) {
+                    Modifier.background(fill)
+                } else {
+                    // 「跟随主题」那一个：斜切一半（网页端 `.bt-swatch-default` 同款）。
+                    Modifier.background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Dshm.colors.surface,
+                                Dshm.colors.divider,
+                                Dshm.colors.surface,
+                            ),
+                        ),
+                    )
+                },
+            )
             .border(
-                width = if (selected) 2.dp else 1.dp,
-                color = if (selected) Dshm.colors.accent else Dshm.colors.divider,
+                width = 2.dp,
+                // 选中 = 高对比墨色（网页端用 `--bt-ink`）；未选中 = 淡分隔线。
+                color = if (selected) Dshm.colors.textPrimary else Dshm.colors.divider,
                 shape = CircleShape,
             )
-            .clickable(enabled = enabled) { onClick() },
+            .clickable(enabled = enabled) { onClick() }
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        if (color == null) {
+        if (fill == null) {
             Text(
                 text = stringResource(R.string.bot_prefs_accent_auto_short),
                 style = Dshm.typography.rowTime,
@@ -329,3 +274,6 @@ private fun AccentSwatch(
         }
     }
 }
+
+/** 强调色圆点的直径；几个圆点必须一样大。 */
+private val ACCENT_SWATCH_SIZE = 28.dp

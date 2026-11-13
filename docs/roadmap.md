@@ -1214,10 +1214,13 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
 |---|---|---|
 | `theme` | 4 套配色 CSS 变量 | `AppPalette` + `DshmColors.withPalette()`：背景/页面底色/卡片/气泡/正文/用户气泡/强调色整套换掉 |
 | `accent` | 覆盖主题 accent + `accentInk` 选墨色 | 全局强调色（按钮/链接/用户气泡），墨色按亮度自动选深墨或白 |
-| `layout` | `flat` 时 `.bt-bubble` 去底色/圆角/内边距 | 助手气泡同样去底色、圆角、内边距 |
-| `width` / `flatWidth` | `--bt-msg-w` / `--bt-flat-w` 百分比限宽 | 对话内容最大宽度（气泡按 `width`，扁平按 `flatWidth`） |
 | `motion` | `quiet` 关动画 / `lively` 加强 | `MotionProfile`：转场时长 + 6 处循环动画（思考脉冲、活动扫光、浏览器忙碌、引擎环、首屏骨架、对话骨架） |
 | `thinking` | 回复上方画 `ThinkingRow` | 对话里画「思考过程」行 |
+
+**故意不接的两个**：`layout`（气泡/扁平）和 `width` / `flatWidth`（气泡宽度）——
+用户明确说过不要这两项（「不要气泡和扁平还有气泡宽度」）。本机有自己的气泡样式和
+排版规则，属于设计系统的事，不跟网页端的布局偏好走。网页端团队改了这两个，
+本机也不跟着变。
 
 **实现要点**
 
@@ -1230,16 +1233,18 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
   `rememberLoopValue()`（`quiet` 时循环动画停在起始值）。
 - ☑️ `core/design/DshmTheme.kt`：读 store → 配色 / 强调色 / 动效档位注入令牌。
   明暗仍由本机「设置 → 外观」决定（设备属性），其余跟团队走。
-- ☑️ `ui/chat/ChatAppearance.kt`：`prefs` → 扁平布局 / 内容宽度比例 / 思考行开关。
-- ☑️ `ui/chat/BotChatPlaceholderScreen.kt`：`ChatMessages` 读 store，`BoxWithConstraints`
-  算内容宽度上限，透传给两种气泡；新增 `ThinkingRow`。
+- ☑️ `ui/chat/BotChatPlaceholderScreen.kt`：`ChatMessages` 读 store 里的 `thinking`，
+  新增 `ThinkingRow`；气泡的底色/圆角/内边距和宽度**一律不动**（本机自己的样式）。
 - ☑️ `ui/chat/BotChatViewModel.kt`：`ChatEntry` 加 `reasoning`，`parseItem` 读 `reasoning`。
 - ☑️ **插件改动** `app/src/main/assets/ds-bot/src/host/parts.js`：`assistant/message`
   的 reasoning 块以前被丢掉（只留 `type === 'text'`），现在挂在第一个气泡的
   `reasoning` 字段上（网页端忽略未知字段，不受影响）。插件随 APK 更新自动重装
   （`DsBotPluginInstaller` 用 `lastUpdateTime` 做指纹）。
-- ☑️ `ui/settings/PersonalizationScreen.kt`：补「消息布局」和宽度滑块（拖动只改草稿、
-  松手才写引擎）；文案改成「保存在引擎里……本机也照着走」。
+- ☑️ `ui/settings/PersonalizationScreen.kt`：文案改成「保存在引擎里……本机也照着走」。
+- ☑️ **强调色圆点**：照网页端 `.bt-swatch` 改成**固定尺寸 + 固定 2dp 边框**，
+  选中只换边框颜色（以前「选中 2dp / 未选中 1dp」，选中的那个可见色块少一圈，
+  看着比别的圆小一号；切主题时环色再变一次，大小观感跟着抖）。「跟随主题」
+  那个改成网页端同款的斜切。
 - ☑️ `ui/home/HomeViewModel.kt`：引擎起来时拉一次 `state` → 写 store；引擎断开时 `clear()`。
 
 **原生样式保留情况**（用户追问「我自己那套样式颜色留了没有」）
@@ -1258,6 +1263,7 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
 
 - 群聊里没有思考行：群聊的 item 来自 `group_relay` 的结果（`mobile.js` 的 `roomItems`），
   里面没有 reasoning；要做到得改群聊那一层的产出，本轮先没动。
+- 气泡样式和内容宽度不跟团队走（见上面的「故意不接的两个」）。
 - 强调色在深色主题下沿用同一个色值：网页端对已知色板有一张深色变体表，本机不引那张表，
   免得半吊子的近似。
 - `lively` 在本机体现为「转场稍慢」，网页端那套空闲小动作（Bot 眨眼/扭动）本机没有对应物。

@@ -407,11 +407,6 @@
     <string name="bot_prefs_accent_default">跟随主题</string>
     <string name="bot_prefs_accent_auto_short">自</string>
     <string name="bot_prefs_chat">对话</string>
-    <string name="bot_prefs_layout">消息布局</string>
-    <string name="bot_prefs_layout_bubble">气泡</string>
-    <string name="bot_prefs_layout_flat">扁平</string>
-    <string name="bot_prefs_bubble_width">气泡宽度</string>
-    <string name="bot_prefs_flat_width">文字宽度</string>
     <string name="bot_prefs_thinking">显示思考过程</string>
     <string name="bot_prefs_thinking_hint">在回答上方显示模型的思考过程。</string>
     <string name="bot_prefs_motion">动效</string>
