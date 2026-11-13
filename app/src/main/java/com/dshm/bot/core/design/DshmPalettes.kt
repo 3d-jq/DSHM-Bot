@@ -5,7 +5,7 @@ import com.dshm.bot.domain.model.AppPalette
 import kotlin.math.pow
 
 /**
- * 配色方案的色值表（DS Bot 网页端 `src/client/themes.js` 同款色值）。
+ * 配色方案的色值表。
  *
  * 网页端把一套配色写成 8 个语义色（bg / sidebar / bubble / card / text /
  * user / userText / accent），本机令牌更多，这里按语义对齐：
@@ -16,15 +16,19 @@ import kotlin.math.pow
  * | `sidebar` | `pageBackground` |
  * | `bubble` | `bubbleAssistant` / `surfaceMuted` |
  * | `card` | `surface` / `floatingSurface` |
- * | `text` | `textPrimary`（次级/三级按网页端 alpha 派生） |
+ * | `text` | `textPrimary`（次级/三级/分隔线按网页端的 ink-2 / ink-3 / line 派生） |
  * | `user` | `bubbleUser` |
  * | `userText` | `onBubbleUser` |
  * | `accent` | `accent`（可被团队偏好的强调色覆盖） |
  *
+ * **`deepseek` 就是本机原生令牌那套**（`DshmColors.Light` / `DshmColors.Dark`
+ * 的原值，一个色都不差）—— 团队没动过主题时，界面和现在完全一样。
+ * 另外三套是网页端 `themes.js` 的原值，团队切过去时整 App 跟着换色。
+ *
  * 配色方案本身（id）见 `domain/model/AppPalette`。
  */
 
-/** 一套配色的 8 个语义色。 */
+/** 一套配色的语义色。 */
 data class PaletteColors(
     val bg: Color,
     val sidebar: Color,
@@ -34,6 +38,18 @@ data class PaletteColors(
     val user: Color,
     val userText: Color,
     val accent: Color,
+    /** 压在强调色上的文字色；默认按亮度算（网页端 `accentInk`）。 */
+    val onAccent: Color = inkOn(accent),
+    /** 次级文字（网页端 `ink-2`）。 */
+    val textSecondary: Color = text.copy(alpha = 0.62f),
+    /** 三级文字（网页端 `ink-3`）。 */
+    val textTertiary: Color = text.copy(alpha = 0.38f),
+    /** 分隔线（网页端 `line`）。 */
+    val divider: Color = text.copy(alpha = 0.10f),
+    /** 悬浮圆钮底色：深色下要比卡片亮一档，否则只剩一个图标。 */
+    val floatingSurface: Color = card,
+    /** 弱化底色（分段控件、设置分区的底）。 */
+    val surfaceMuted: Color = bubble,
 )
 
 object AppPalettes {
@@ -54,6 +70,12 @@ object AppPalettes {
         user = Color(0xFF2F6BFF),
         userText = Color(0xFFFFFFFF),
         accent = Color(0xFF1F4FD8),
+        onAccent = Color(0xFFFFFFFF),
+        textSecondary = Color(0xFF8A8F98),
+        textTertiary = Color(0xFFB3B8C0),
+        divider = Color(0xFFECEEF1),
+        floatingSurface = Color(0xFFFFFFFF),
+        surfaceMuted = Color(0xFFF1F2F4),
     )
 
     val DEEPSEEK_DARK = PaletteColors(
@@ -65,6 +87,12 @@ object AppPalettes {
         user = Color(0xFF2B4FD6),
         userText = Color(0xFFFFFFFF),
         accent = Color(0xFF6A84FF),
+        onAccent = Color(0xFF0B0D12),
+        textSecondary = Color(0xFF9AA0AA),
+        textTertiary = Color(0xFF6C727C),
+        divider = Color(0xFF24282F),
+        floatingSurface = Color(0xFF262A33),
+        surfaceMuted = Color(0xFF1C1F25),
     )
 
     val MONO_LIGHT = PaletteColors(
@@ -87,6 +115,7 @@ object AppPalettes {
         user = Color(0xFFF4F4F4),
         userText = Color(0xFF0F0F0F),
         accent = Color(0xFFF4F4F4),
+        floatingSurface = Color(0xFF2A2A2A),
     )
 
     val PAPER_LIGHT = PaletteColors(
@@ -109,6 +138,7 @@ object AppPalettes {
         user = Color(0xFFF3F0E8),
         userText = Color(0xFF1F1E1B),
         accent = Color(0xFFE08A6D),
+        floatingSurface = Color(0xFF3A3833),
     )
 
     val MOONLIGHT_LIGHT = PaletteColors(
@@ -131,6 +161,7 @@ object AppPalettes {
         user = Color(0xFF3B6FD8),
         userText = Color(0xFFFFFFFF),
         accent = Color(0xFF4F9DFF),
+        floatingSurface = Color(0xFF232C47),
     )
 
     /** 某套配色在明 / 暗下的色值。 */
@@ -170,9 +201,10 @@ private fun Color.luminance(): Double {
  * 把配色套到本机令牌上。
  *
  * 团队偏好的强调色（`prefs.accent`）覆盖配色自带的 accent —— 网页端也是
- * 这个优先级（`themeCss(theme, accent)`）。强调色给的是网页端的浅色版，
- * 深色下直接沿用同一个色值（网页端对已知色板有一张深色变体表，本机不
- * 引入那张表，避免半吊子的近似）。
+ * 这个优先级（`themeCss(theme, accent)`）。
+ *
+ * **不动**的令牌：图标色和三档阴影。它们是「遮蔽」不是「墨色」，跟着文字色
+ * 派生的话深色主题下会变成发亮的雾（原来都是黑的）。
  */
 fun DshmColors.withPalette(palette: AppPalette, accent: Color? = null): DshmColors {
     val set = AppPalettes.of(palette, isDark)
@@ -181,32 +213,21 @@ fun DshmColors.withPalette(palette: AppPalette, accent: Color? = null): DshmColo
         background = set.bg,
         pageBackground = set.sidebar,
         surface = set.card,
-        surfaceMuted = set.bubble,
-        // 悬浮圆钮要比页面底色亮一档，否则深色主题下只剩一个图标看不出按钮形状
-        // （见 `DshmColors.floatingSurface` 的注释）。浅色下就是卡片色。
-        floatingSurface = if (isDark) set.card.blendTowards(Color.White, 0.10f) else set.card,
+        surfaceMuted = set.surfaceMuted,
+        floatingSurface = set.floatingSurface,
         textPrimary = set.text,
-        textSecondary = set.text.copy(alpha = 0.62f),
-        textTertiary = set.text.copy(alpha = 0.38f),
-        divider = set.text.copy(alpha = 0.10f),
+        textSecondary = set.textSecondary,
+        textTertiary = set.textTertiary,
+        divider = set.divider,
         bubbleAssistant = set.bubble,
         bubbleUser = set.user,
         onBubbleUser = set.userText,
         accent = accentColor,
-        onAccent = inkOn(accentColor),
-        iconTint = set.text,
-        shadowSoft = set.text.copy(alpha = 0.08f),
-        shadowCard = set.text.copy(alpha = 0.25f),
+        // 团队指定了强调色才重算墨色；没指定就用配色自带的（原生那套的深墨
+        // 是 #0B0D12，不是按亮度算出来的 #141414）。
+        onAccent = if (accent == null) set.onAccent else inkOn(accentColor),
     )
 }
-
-/** 往目标色混一点（`ratio` 是目标色的占比）。 */
-private fun Color.blendTowards(target: Color, ratio: Float): Color = Color(
-    red = red + (target.red - red) * ratio,
-    green = green + (target.green - green) * ratio,
-    blue = blue + (target.blue - blue) * ratio,
-    alpha = alpha,
-)
 
 /** 强调色字符串（`#rrggbb`）→ 颜色；不合法时返回 null。 */
 fun parseAccent(raw: String?): Color? {

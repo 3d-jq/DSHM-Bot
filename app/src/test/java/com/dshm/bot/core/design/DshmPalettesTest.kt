@@ -16,6 +16,28 @@ import org.junit.Test
  */
 class DshmPalettesTest {
 
+    /**
+     * **回归锁**：`deepseek` 这套配色就是本机原生令牌，一个色都不许差。
+     *
+     * 团队没动过主题时，界面必须和接线之前**完全一样** —— 少一个色都不行。
+     */
+    @Test
+    fun deepseekPaletteIsExactlyTheNativeTokens() {
+        assertEquals(DshmColors.Light, DshmColors.Light.withPalette(AppPalette.DEEPSEEK))
+        assertEquals(DshmColors.Dark, DshmColors.Dark.withPalette(AppPalette.DEEPSEEK))
+    }
+
+    /** 换成别的配色时，阴影和图标色**不能**跟着文字色变（深色下会变成发亮的雾）。 */
+    @Test
+    fun shadowsAndIconTintStayNative() {
+        val base = DshmColors.Dark
+        val moonlight = base.withPalette(AppPalette.MOONLIGHT)
+        assertEquals(base.shadowSoft, moonlight.shadowSoft)
+        assertEquals(base.shadowCard, moonlight.shadowCard)
+        assertEquals(base.shadow, moonlight.shadow)
+        assertEquals(base.iconTint, moonlight.iconTint)
+    }
+
     @Test
     fun paletteIdFallsBackToDeepseek() {
         assertEquals(AppPalette.DEEPSEEK, AppPalette.fromId(null))

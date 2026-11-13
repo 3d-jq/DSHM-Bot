@@ -1242,6 +1242,18 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
   松手才写引擎）；文案改成「保存在引擎里……本机也照着走」。
 - ☑️ `ui/home/HomeViewModel.kt`：引擎起来时拉一次 `state` → 写 store；引擎断开时 `clear()`。
 
+**原生样式保留情况**（用户追问「我自己那套样式颜色留了没有」）
+
+- ☑️ **`deepseek` 配色 = 本机原生令牌，一个色不差**：`DshmColors.Light` /
+  `DshmColors.Dark` 的原值整套搬进配色表（背景、页面底色、卡片、弱化底、气泡、
+  正文、次级/三级文字、分隔线、用户气泡、强调色、墨色、悬浮圆钮底色）。
+  `DshmPalettesTest.deepseekPaletteIsExactlyTheNativeTokens` 锁死这一点：
+  `DshmColors.Light.withPalette(DEEPSEEK) == DshmColors.Light`（明暗各一条）。
+- ☑️ **图标色和三档阴影不跟着配色变**：它们是「遮蔽」不是「墨色」，跟着文字色
+  派生的话深色主题下会变成发亮的雾（原来都是黑的）。`shadowsAndIconTintStayNative` 锁死。
+- ☑️ **明暗仍归本机**：「设置 → 外观」的跟随系统 / 浅色 / 深色不受团队偏好影响，
+  团队偏好只管配色方案、强调色、布局、宽度、动效、思考过程。
+
 **这一轮没做的**
 
 - 群聊里没有思考行：群聊的 item 来自 `group_relay` 的结果（`mobile.js` 的 `roomItems`），
