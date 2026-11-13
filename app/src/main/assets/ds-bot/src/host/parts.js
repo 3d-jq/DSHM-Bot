@@ -1244,8 +1244,20 @@ export function install(rt) {
         if (hidden.has(event.data?.turn)) continue
         // One entry per text block: the chat shows each block in a bubble of its own.
         const content = Array.isArray(event.data?.message?.content) ? event.data.message.content : []
+        // The model's reasoning rides along with the message. The web draws it as a
+        // ThinkingRow above the reply when the team's `thinking` pref is on; a
+        // native client reads the same field, so carry it on the first bubble.
+        const reasoning = content
+          .filter(block => block?.type === 'reasoning' && typeof block.text === 'string')
+          .map(block => block.text)
+          .join('\n')
+          .trim()
+        let first = true
         for (const block of content) {
-          if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') stamp(event, { kind: 'bot', text: block.text, time: event.time })
+          if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
+            stamp(event, { kind: 'bot', text: block.text, time: event.time, ...(first && reasoning !== '' ? { reasoning } : {}) })
+            first = false
+          }
         }
         continue
       }

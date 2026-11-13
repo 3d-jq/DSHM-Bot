@@ -186,6 +186,8 @@ data class ChatEntry(
     val images: Int = 0,
     /** 长文消息（`whole`）：正文折起，完整内容在附件里。 */
     val whole: ChatWholePost? = null,
+    /** 思考过程（模型这一轮的 reasoning）；团队偏好打开「显示思考过程」时才画。 */
+    val reasoning: String? = null,
 )
 
 /** 待发送的本地附件。 */
@@ -2105,6 +2107,8 @@ class BotChatViewModel internal constructor(
                         durationMs = duration,
                         seq = seqValue,
                         whole = wholePost(item),
+                        // 思考过程：插件在 `assistant/message` 里带上（默认没有）。
+                        reasoning = item.optString("reasoning").takeIf { it.isNotBlank() },
                     )
                 }
 

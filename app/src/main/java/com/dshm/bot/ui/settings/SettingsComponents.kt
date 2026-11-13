@@ -711,7 +711,8 @@ fun SettingsSegmentedPill(
         val offset by animateDpAsState(
             targetValue = inset + segment * index,
             animationSpec = tween(
-                durationMillis = if (reduceMotion) 0 else DshmMotion.quickMs,
+                // 动效档位（团队偏好 `prefs.motion`）：`quiet` 不播这段动画。
+                durationMillis = if (reduceMotion) 0 else Dshm.motion.quickMs,
                 easing = DshmMotion.standard,
             ),
             label = "segmented-thumb",

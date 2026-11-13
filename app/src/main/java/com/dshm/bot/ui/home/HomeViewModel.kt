@@ -14,6 +14,7 @@ import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.EmptyBotRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import com.dshm.bot.data.settings.BotPrefsStore
 import com.dshm.bot.domain.model.BotInks
 import com.dshm.bot.domain.model.BotSummary
 import com.dshm.bot.domain.repository.BotRepository
@@ -87,6 +88,7 @@ class HomeViewModel(
         if (endpoint == null) {
             client = null
             DsBotCapabilities.clear()
+            BotPrefsStore.clear()
             start(EmptyBotRepository())
             return
         }
@@ -98,7 +100,20 @@ class HomeViewModel(
         viewModelScope.launch {
             DsBotCapabilities.refresh(endpoint, dshClient)
         }
+        // 团队偏好（配色 / 强调色 / 布局 / 宽度 / 动效 / 思考过程）：
+        // 引擎起来时拉一次，全 App 按它渲染。
+        viewModelScope.launch {
+            refreshPrefs(dshClient)
+        }
         start(DsBotRepository(dshClient, cache, previewCache))
+    }
+
+    /** 拉一次引擎里的团队偏好，写进 [BotPrefsStore]。失败就保持默认，不挡主界面。 */
+    private suspend fun refreshPrefs(connection: DshClient) {
+        runCatching { connection.bot("state") }
+            .onSuccess { state ->
+                BotPrefsStore.set(BotPrefsStore.parse(state.optJSONObject("prefs")))
+            }
     }
 
     private fun start(source: BotRepository) {

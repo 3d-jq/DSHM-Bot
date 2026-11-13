@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.rememberLoopValue
 import com.dshm.bot.data.runtime.RuntimeState
 import com.dshm.bot.data.runtime.shortRuntimeVersion
 import com.dshm.bot.ui.components.FloatingIconButton
@@ -456,23 +457,21 @@ private fun EngineStatusRing(
     val busy = state is RuntimeState.Starting || state is RuntimeState.Installing
     val running = state is RuntimeState.Running
     val strokeWidth = Dshm.spacing.ringStroke
-    val transition = rememberInfiniteTransition(label = "engine-ring")
-    val spin by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_100, easing = LinearEasing),
-        ),
+    val spin = rememberLoopValue(
+        profile = Dshm.motion,
         label = "engine-ring-spin",
+        from = 0f,
+        to = 360f,
+        durationMs = 1_100,
+        repeatMode = RepeatMode.Restart,
+        easing = LinearEasing,
     )
-    val breath by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.55f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_200),
-            repeatMode = RepeatMode.Reverse,
-        ),
+    val breath = rememberLoopValue(
+        profile = Dshm.motion,
         label = "engine-ring-breath",
+        from = 1f,
+        to = 0.55f,
+        durationMs = 1_200,
     )
     Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {

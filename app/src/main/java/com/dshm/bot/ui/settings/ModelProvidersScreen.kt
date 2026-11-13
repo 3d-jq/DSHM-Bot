@@ -113,12 +113,16 @@ fun ModelProvidersScreen(
         )
     }
     val stateHolder = rememberSaveableStateHolder()
+    // 动效档位（团队偏好 `prefs.motion`）：转场时长从这里取。
+    // transitionSpec 不是 composable 上下文，所以要在外面取好。
+    val motionProfile = Dshm.motion
 
     AnimatedContent(
         targetState = page,
         transitionSpec = {
-            val duration = if (reduceMotion) 0 else DshmMotion.screenTransitionMs
-            val fade = if (reduceMotion) 0 else DshmMotion.fadeMs
+            // 动效档位（团队偏好 `prefs.motion`）：`quiet` 直接不转场。
+            val duration = if (reduceMotion) 0 else motionProfile.screenTransitionMs
+            val fade = if (reduceMotion) 0 else motionProfile.fadeMs
             if (targetState != null) {
                 (
                     slideInHorizontally(tween(duration, easing = DshmMotion.standard)) { it } +

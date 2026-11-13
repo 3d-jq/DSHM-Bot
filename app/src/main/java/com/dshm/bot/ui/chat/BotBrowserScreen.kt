@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.rememberLoopValue
 import com.dshm.bot.ui.components.FloatingIconButton
 import androidx.core.net.toUri
 
@@ -665,12 +666,12 @@ private fun BrowserHint(text: String) {
  */
 @Composable
 private fun AgentBrowsingOverlay(botName: String, onTakeover: () -> Unit) {
-    val transition = rememberInfiniteTransition(label = "agent-busy")
-    val alpha by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(durationMillis = 1200), RepeatMode.Reverse),
-        label = "agent-busy-alpha",
+    val alpha = rememberLoopValue(
+        profile = Dshm.motion,
+        label = "agent-busy",
+        from = 0.35f,
+        to = 1f,
+        durationMs = 1200,
     )
     Box(
         modifier = Modifier

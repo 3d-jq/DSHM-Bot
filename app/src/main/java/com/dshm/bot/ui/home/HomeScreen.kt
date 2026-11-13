@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.rememberLoopValue
 import com.dshm.bot.ui.home.components.BotRow
 import com.dshm.bot.ui.home.components.HomeTopBar
 
@@ -333,15 +334,12 @@ private fun StateMessage(title: String, hint: String) {
  */
 @Composable
 private fun HomeSkeleton() {
-    val transition = rememberInfiniteTransition(label = "home-skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = 0.32f,
-        targetValue = 0.62f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "home-skeleton-alpha",
+    val alpha = rememberLoopValue(
+        profile = Dshm.motion,
+        label = "home-skeleton",
+        from = 0.32f,
+        to = 0.62f,
+        durationMs = 900,
     )
     Column(
         modifier = Modifier

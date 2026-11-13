@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.rememberLoopValue
 
 /**
  * 对话首屏骨架：几条左右交替的「气泡」，带缓慢呼吸的透明度。
@@ -44,15 +45,12 @@ fun ChatSkeleton(
      */
     topPadding: Dp = 0.dp,
 ) {
-    val transition = rememberInfiniteTransition(label = "chat-skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = 0.30f,
-        targetValue = 0.62f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "chat-skeleton-alpha",
+    val alpha = rememberLoopValue(
+        profile = Dshm.motion,
+        label = "chat-skeleton",
+        from = 0.30f,
+        to = 0.62f,
+        durationMs = 900,
     )
     val ink = Dshm.colors.textPrimary
     val bubble = ink.copy(alpha = alpha * 0.16f)

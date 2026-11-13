@@ -1173,3 +1173,82 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
 - 顺带核实同链路没有别的串源：群聊 `running` 只认 `room-progress`、活动行群聊只读
   `work.rooms[botId]`、`ourApproval` 群聊按 `roomId==botId` 判定。
 - 验证：81 测试类 / 463 用例全绿，lint 零 warning，assembleDebug 通过。
+
+### 个性化页：接了线但 App 不消费 + 修「点一下闪一下」（2026-11-13）
+
+**「个性化里所有东西都没接线」的准确说法**：协议上是接了的 —— `BotPrefsViewModel`
+走 `state` 读 `state.prefs`、`set-prefs` 写（引擎 `channel.js:185` 有 `case 'set-prefs'`），
+值由引擎持久化、网页端与其它设备共用。但**这些 prefs 是网页端 UI 的偏好**
+（DS-Bot `client/index.js` 用它们切主题/强调色/动效）；原生 App 用自己的
+`Dshm` 设计令牌 + `ThemeMode`，全仓库只有 `SettingsScreen.kt:92` 读 `prefs.theme`
+来显示「个性化」行右侧的副标题，其余（theme / accent / motion / thinking / width / layout）
+**都没有作用到 App 界面或聊天渲染**。所以用户体感「点了没效果」是对的：
+写进引擎了、别的网页端会变、本机纹丝不动。
+
+> 产品口径这轮已定：**直接接线**（见下一节「个性化真接线」），不再标「本机不生效」。
+> 本轮**只修闪烁**，不动接线那层。
+
+**闪烁根因**：`BotPrefsViewModel.set()` 把 `saving=true` 写进 uiState →
+`PersonalizationScreen` 的 `enabled = !saving` 让整页所有行先禁用再启用，
+还额外插一行「保存中」→ 整页重组，Switch 和文字肉眼闪一下。
+
+- ☑️ 修法：改成**乐观更新** —— `applyPatch()` 只改 patch 里那一个字段，
+  不发 `saving`；成功用 `set-prefs` 回执覆写一次（引擎是唯一真值），失败回滚并给错误。
+  删掉 `PrefsUiState.saving` 字段和「保存中」行。
+- ☑️ 顺手修回执解析：`set-prefs` 回的是 `{"ok":true,"value":{...prefs...}}`，
+  旧代码读 `optJSONObject("prefs")` 读不到、靠 fallback 整个对象蒙对；
+  新增 `prefsFromResponse()` 同时认 `value` / `prefs` / 裸对象三种形状。
+- ☑️ `BotPrefsTest` +3 例（共 6 例）：乐观更新只改一项 / null 重置为默认 /
+  回执三种形状。
+- 验证：81 测试类 / 467 用例全绿，lint 零 warning，assembleDebug 通过，真机确认不闪。
+
+### 个性化真接线：prefs → 本机界面（2026-11-13）
+
+上一节留的产品口径这轮定了：**不标「本机不生效」，直接接线**。用户原话是
+「本机界面纹丝不动。那跟没接线有什么区别呀」—— 团队偏好只写到引擎里、本机不消费，
+和没接线没有区别。
+
+**映射表**（网页端语义 → 本机效果，色值全部取网页端 `client.js` 的 `themes.js`）：
+
+| prefs | 网页端 | 本机落地 |
+|---|---|---|
+| `theme` | 4 套配色 CSS 变量 | `AppPalette` + `DshmColors.withPalette()`：背景/页面底色/卡片/气泡/正文/用户气泡/强调色整套换掉 |
+| `accent` | 覆盖主题 accent + `accentInk` 选墨色 | 全局强调色（按钮/链接/用户气泡），墨色按亮度自动选深墨或白 |
+| `layout` | `flat` 时 `.bt-bubble` 去底色/圆角/内边距 | 助手气泡同样去底色、圆角、内边距 |
+| `width` / `flatWidth` | `--bt-msg-w` / `--bt-flat-w` 百分比限宽 | 对话内容最大宽度（气泡按 `width`，扁平按 `flatWidth`） |
+| `motion` | `quiet` 关动画 / `lively` 加强 | `MotionProfile`：转场时长 + 6 处循环动画（思考脉冲、活动扫光、浏览器忙碌、引擎环、首屏骨架、对话骨架） |
+| `thinking` | 回复上方画 `ThinkingRow` | 对话里画「思考过程」行 |
+
+**实现要点**
+
+- ☑️ `domain/model/BotPrefs.kt`（模型搬家）+ `domain/model/AppPalette.kt`（配色 id）；
+  `data/settings/BotPrefsStore.kt` 是**进程内唯一真值**（`StateFlow<BotPrefs>`）。
+- ☑️ `core/design/DshmPalettes.kt`：4 套配色色值 + `withPalette()` + `inkOn()`（移植
+  网页端 `accentInk`）+ `parseAccent()`。`deepseek` 用**本机原生令牌**那套
+  （团队没动过主题时界面和现在一模一样），另外三套是网页端原值。
+- ☑️ `core/design/DshmMotionProfile.kt`：`MotionProfile` + `LocalMotionProfile` +
+  `rememberLoopValue()`（`quiet` 时循环动画停在起始值）。
+- ☑️ `core/design/DshmTheme.kt`：读 store → 配色 / 强调色 / 动效档位注入令牌。
+  明暗仍由本机「设置 → 外观」决定（设备属性），其余跟团队走。
+- ☑️ `ui/chat/ChatAppearance.kt`：`prefs` → 扁平布局 / 内容宽度比例 / 思考行开关。
+- ☑️ `ui/chat/BotChatPlaceholderScreen.kt`：`ChatMessages` 读 store，`BoxWithConstraints`
+  算内容宽度上限，透传给两种气泡；新增 `ThinkingRow`。
+- ☑️ `ui/chat/BotChatViewModel.kt`：`ChatEntry` 加 `reasoning`，`parseItem` 读 `reasoning`。
+- ☑️ **插件改动** `app/src/main/assets/ds-bot/src/host/parts.js`：`assistant/message`
+  的 reasoning 块以前被丢掉（只留 `type === 'text'`），现在挂在第一个气泡的
+  `reasoning` 字段上（网页端忽略未知字段，不受影响）。插件随 APK 更新自动重装
+  （`DsBotPluginInstaller` 用 `lastUpdateTime` 做指纹）。
+- ☑️ `ui/settings/PersonalizationScreen.kt`：补「消息布局」和宽度滑块（拖动只改草稿、
+  松手才写引擎）；文案改成「保存在引擎里……本机也照着走」。
+- ☑️ `ui/home/HomeViewModel.kt`：引擎起来时拉一次 `state` → 写 store；引擎断开时 `clear()`。
+
+**这一轮没做的**
+
+- 群聊里没有思考行：群聊的 item 来自 `group_relay` 的结果（`mobile.js` 的 `roomItems`），
+  里面没有 reasoning；要做到得改群聊那一层的产出，本轮先没动。
+- 强调色在深色主题下沿用同一个色值：网页端对已知色板有一张深色变体表，本机不引那张表，
+  免得半吊子的近似。
+- `lively` 在本机体现为「转场稍慢」，网页端那套空闲小动作（Bot 眨眼/扭动）本机没有对应物。
+
+**验证**：84 测试类 / 483 用例全绿（新增 16：`DshmPalettesTest` 7、`ChatAppearanceTest` 5、
+`BotPrefsStoreTest` 4），lint 零 warning，assembleDebug 通过。

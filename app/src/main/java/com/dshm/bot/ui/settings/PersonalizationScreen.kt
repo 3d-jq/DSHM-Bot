@@ -7,15 +7,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +37,9 @@ import androidx.core.graphics.toColorInt
  * 个性化：DS Bot 团队级 `set-prefs` 面板（主题 / 强调色 / 布局 / 宽度 / 思考行 / 动效）
  * + Agent 预设入口。
  *
+ * 这些是**团队**偏好：存在引擎里，网页端和其它设备共用，**本机也照着渲染**
+ * （配色、强调色、气泡布局、内容宽度、动效、思考过程）。改了立刻在界面上生效。
+ *
  * 不再编辑本机 `AGENTS.md`（那是引擎级指令，不属于 DS Bot 个性化），也没有
  * 「可视化回复」——它只是往 AGENTS.md 里塞一段 dsh-ui 提示词，而我们用的是 DS Bot 视图卡。
  */
@@ -43,7 +51,9 @@ fun PersonalizationScreen(
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val prefs = state.prefs
-    val enabled = !state.loading && state.error == null && !state.saving
+    // 保存走乐观更新（BotPrefsViewModel.set），不整页禁用、也不插「保存中」行，
+    // 否则每点一次 Switch 都会先禁用再启用、文字和 toggle 肉眼闪一下。
+    val enabled = !state.loading && state.error == null
 
     SettingsPage(
         title = stringResource(R.string.settings_personalization),
@@ -107,6 +117,30 @@ fun PersonalizationScreen(
 
                 item {
                     SettingsSection(title = stringResource(R.string.bot_prefs_chat)) {
+                        ChoiceRow(
+                            title = stringResource(R.string.bot_prefs_layout),
+                            options = BOT_LAYOUTS,
+                            selected = prefs.layout,
+                            enabled = enabled,
+                            onSelect = { viewModel.set(JSONObject().put("layout", it)) },
+                        )
+                        SettingsRowDivider()
+                        // 宽度跟着布局走：扁平布局限的是正文宽度，气泡布局限的是气泡宽度
+                        // （网页端也是两个字段分开存）。
+                        val flat = prefs.layout == "flat"
+                        WidthRow(
+                            title = stringResource(
+                                if (flat) R.string.bot_prefs_flat_width else R.string.bot_prefs_bubble_width,
+                            ),
+                            value = if (flat) prefs.flatWidth else prefs.width,
+                            enabled = enabled,
+                            onCommit = { percent ->
+                                viewModel.set(
+                                    JSONObject().put(if (flat) "flatWidth" else "width", percent),
+                                )
+                            },
+                        )
+                        SettingsRowDivider()
                         SettingsSwitchRow(
                             title = stringResource(R.string.bot_prefs_thinking),
                             subtitle = stringResource(R.string.bot_prefs_thinking_hint),
@@ -147,12 +181,14 @@ fun PersonalizationScreen(
                 )
             }
         }
-        if (state.saving) {
-            item { SettingsRow(title = stringResource(R.string.bot_settings_saving), enabled = false) }
-        }
     }
 }
 private data class Choice(val id: String, val labelRes: Int)
+
+private val BOT_LAYOUTS = listOf(
+    Choice("bubble", R.string.bot_prefs_layout_bubble),
+    Choice("flat", R.string.bot_prefs_layout_flat),
+)
 
 private val BOT_THEMES = listOf(
     Choice("deepseek", R.string.bot_prefs_theme_deepseek),
@@ -174,6 +210,49 @@ private val BOT_ACCENTS = listOf(
     "tangerine" to "#E88A3C",
     "cobalt" to "#3A5FD9",
 )
+
+/**
+ * 宽度滑块（50%..100%，步长 5%）。
+ *
+ * 拖动时只改本地草稿，松手才写引擎 —— 否则每挪一格就发一次 `set-prefs`，
+ * 而且本机宽度会跟着抖。
+ */
+@Composable
+private fun WidthRow(
+    title: String,
+    value: Int,
+    enabled: Boolean,
+    onCommit: (Int) -> Unit,
+) {
+    var draft by remember { mutableFloatStateOf(value.toFloat()) }
+    // 引擎回报的新值（写失败回滚、别的设备改了）同步进草稿。
+    LaunchedEffect(value) {
+        if (value.toFloat() != draft) draft = value.toFloat()
+    }
+    Column(Modifier.padding(Dshm.spacing.lg)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                style = Dshm.typography.settingsRowTitle,
+                color = Dshm.colors.textPrimary,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "${draft.toInt()}%",
+                style = Dshm.typography.rowTime,
+                color = Dshm.colors.textSecondary,
+            )
+        }
+        Slider(
+            value = draft,
+            onValueChange = { draft = it },
+            onValueChangeFinished = { onCommit(draft.toInt()) },
+            valueRange = 50f..100f,
+            steps = 9,
+            enabled = enabled,
+        )
+    }
+}
 
 @Composable
 private fun ChoiceRow(

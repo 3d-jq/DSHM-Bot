@@ -118,8 +118,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.FileProvider
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.rememberLoopValue
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import com.dshm.bot.data.settings.BotPrefsStore
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.VoiceMode
 import com.dshm.bot.ui.components.BotAvatar
@@ -756,6 +758,10 @@ private fun ChatMessages(
     var viewingImage by remember { mutableStateOf<ChatAttachmentItem?>(null) }
     val appContextForMenu = LocalContext.current
     val streamingNow = streaming.isNotEmpty()
+    // 团队偏好（设置 → 个性化）：扁平布局 / 内容宽度 / 思考过程。
+    // 这一份是团队级的，所有设备一致 —— 改了立刻在对话区生效。
+    val prefs by BotPrefsStore.prefs.collectAsStateWithLifecycle()
+    val appearance = remember(prefs) { ChatAppearance.of(prefs) }
     // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
     // 但如果这一刻有工具在跑（写入/搜索…），活动行仍然留着。
     val typing = activity != null && (!streamingNow || activity.kind != ChatActivityKind.THINKING)
@@ -877,7 +883,10 @@ private fun ChatMessages(
     // 聊天列表不再需要 MinisTextKit 那套「每个表格单元格注册一个选区分片」的机制。
     // 它会在滚动时反复写 `mutableStateMap` / `onTextLayout` 状态，表格越大越卡。
     CompositionLocalProvider(LocalMinisSelectionController provides null) {
-    Box(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // 内容宽度上限：列表内边距之外再按团队偏好（`width` / `flatWidth`）限宽，
+        // 对齐网页端 `--bt-msg-w` / `--bt-flat-w` 的百分比语义。
+        val contentMaxWidth = (maxWidth - Dshm.spacing.lg * 2) * appearance.contentFraction
         LazyColumn(
             state = listState,
             reverseLayout = true,
@@ -955,6 +964,8 @@ private fun ChatMessages(
                             onOpenMember = onOpenMember,
                             messageId = "streaming",
                             streaming = true,
+                            flat = appearance.flat,
+                            maxContentWidth = contentMaxWidth,
                         )
                     }
                 }
@@ -1003,6 +1014,7 @@ private fun ChatMessages(
                         images = entry.images,
                         timeMs = null,
                         onOpenImage = { viewingImage = it },
+                        maxContentWidth = contentMaxWidth,
                         onLongPress = {
                             messageMenu = MessageMenuTarget(
                                 messageId = entry.id,
@@ -1026,6 +1038,10 @@ private fun ChatMessages(
                         whole = entry.whole,
                         endpoint = endpoint,
                         messageId = entry.id,
+                        // 思考过程只在团队偏好打开时画（网页端 `thinking` 同一个开关）。
+                        reasoning = entry.reasoning.takeIf { appearance.showThinking },
+                        flat = appearance.flat,
+                        maxContentWidth = contentMaxWidth,
                     )
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
@@ -1246,15 +1262,12 @@ private fun ChatActivityRow(
     } else {
         null
     }
-    val transition = rememberInfiniteTransition(label = "thinking")
-    val scale by transition.animateFloat(
-        initialValue = if (shown.kind == ChatActivityKind.ALERT) 1f else 0.94f,
-        targetValue = if (shown.kind == ChatActivityKind.ALERT) 1f else 1.06f,
-        animationSpec = infiniteRepeatable(
-            tween(if (shown.kind == ChatActivityKind.ALERT) 1_200 else 620),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "thinking-scale",
+    val scale = rememberLoopValue(
+        profile = Dshm.motion,
+        label = "thinking",
+        from = if (shown.kind == ChatActivityKind.ALERT) 1f else 0.94f,
+        to = if (shown.kind == ChatActivityKind.ALERT) 1f else 1.06f,
+        durationMs = if (shown.kind == ChatActivityKind.ALERT) 1_200 else 620,
     )
     Row(
         modifier = Modifier.padding(horizontal = Dshm.spacing.xxs),
@@ -1322,15 +1335,14 @@ private fun ChatActivityRow(
 private fun activityShimmerBrush(widthPx: Float): Brush {
     val base = Dshm.colors.textSecondary.copy(alpha = 0.32f)
     val highlight = Dshm.colors.textSecondary
-    val transition = rememberInfiniteTransition(label = "activity-shimmer")
-    val progress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(CHAT_ACTIVITY_SHIMMER_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "activity-shimmer-progress",
+    val progress = rememberLoopValue(
+        profile = Dshm.motion,
+        label = "activity-shimmer",
+        from = 0f,
+        to = 1f,
+        durationMs = CHAT_ACTIVITY_SHIMMER_MS,
+        repeatMode = RepeatMode.Restart,
+        easing = LinearEasing,
     )
     // 高光窗口大概一段文字宽；整轮里它从左边外面一路扫到右边外面，
     // 中间没有空档（之前窗口太窄，扫过去以后要等大半轮才再来一次）。
@@ -1398,6 +1410,35 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
     }
 }
 
+/**
+ * 思考过程：模型这一轮的 reasoning。
+ *
+ * 网页端画成回复上方的一条 `ThinkingRow`（`client.js` 的 `ThinkingRow`），
+ * 本机是同一件事：标题 + 正文。团队偏好「显示思考过程」关掉时根本不会有
+ * 这一行（引擎那边也不带 reasoning）。
+ */
+@Composable
+private fun ThinkingRow(text: String) {
+    Column(
+        modifier = Modifier
+            // 不撑满：贴着正文宽度（网页端的思考行也是贴着内容）。
+            .wrapContentWidth()
+            .padding(bottom = Dshm.spacing.xs),
+    ) {
+        Text(
+            text = stringResource(R.string.chat_thinking),
+            style = Dshm.typography.rowTime,
+            color = Dshm.colors.textTertiary,
+        )
+        Text(
+            text = text,
+            style = Dshm.typography.composerText.copy(fontSize = 13.sp),
+            color = Dshm.colors.textSecondary,
+            modifier = Modifier.padding(top = Dshm.spacing.xxs),
+        )
+    }
+}
+
 /** 用户消息气泡，右对齐。 */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -1413,6 +1454,8 @@ private fun UserBubble(
     onLongPress: () -> Unit = {},
     /** 点图片缩略图：打开全屏查看器。 */
     onOpenImage: (ChatAttachmentItem) -> Unit = {},
+    /** 内容宽度上限（团队偏好 `width` / `flatWidth`）。 */
+    maxContentWidth: Dp? = null,
 ) {
     val hasAttachments = items.isNotEmpty() || attachments.isNotEmpty() || images > 0
     Column(
@@ -1445,6 +1488,7 @@ private fun UserBubble(
                 Column(
                     modifier = Modifier
                         .then(if (hasAttachments) Modifier.padding(top = Dshm.spacing.xs) else Modifier)
+                        .then(maxContentWidth?.let { Modifier.widthIn(max = it) } ?: Modifier)
                         .background(
                             Dshm.colors.bubbleUser,
                             RoundedCornerShape(Dshm.radius.lg),
@@ -1602,6 +1646,12 @@ private fun BotBubble(
     messageId: String = "",
     /** 流式输出中的临时气泡：行内 markdown 先不扫（对齐 dsh-Go）。 */
     streaming: Boolean = false,
+    /** 思考过程（团队偏好「显示思考过程」打开时才有内容）。 */
+    reasoning: String? = null,
+    /** 扁平布局：气泡不画底色、圆角和内边距（网页端 `layout=flat`）。 */
+    flat: Boolean = false,
+    /** 内容宽度上限（团队偏好 `width` / `flatWidth`）。 */
+    maxContentWidth: Dp? = null,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
@@ -1612,11 +1662,25 @@ private fun BotBubble(
     val collapsible = isGroup && text.length > 600
 
     val bubble: @Composable () -> Unit = {
-        Column(modifier = Modifier.wrapContentWidth(Alignment.Start)) {
+        Column(
+            modifier = Modifier
+                .then(maxContentWidth?.let { Modifier.widthIn(max = it) } ?: Modifier)
+                .wrapContentWidth(Alignment.Start),
+        ) {
+            // 思考过程：画在回答上方（网页端 `ThinkingRow` 的位置）。
+            reasoning?.takeIf { it.isNotBlank() }?.let { ThinkingRow(it) }
             Column(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(Dshm.radius.lg))
-                    .background(Dshm.colors.bubbleAssistant),
+                    .then(
+                        if (flat) {
+                            // 扁平：没有底色、没有圆角（网页端 `layout=flat` 的 `.bt-bubble`）。
+                            Modifier
+                        } else {
+                            Modifier
+                                .clip(RoundedCornerShape(Dshm.radius.lg))
+                                .background(Dshm.colors.bubbleAssistant)
+                        },
+                    ),
             ) {
                 Box(
                     modifier = Modifier
@@ -1627,7 +1691,16 @@ private fun BotBubble(
                                 Modifier
                             },
                         )
-                        .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+                        .then(
+                            if (flat) {
+                                Modifier
+                            } else {
+                                Modifier.padding(
+                                    horizontal = Dshm.spacing.md,
+                                    vertical = Dshm.spacing.sm,
+                                )
+                            },
+                        ),
                 ) {
                     // 长按 = 选中文字（MinisTextKit 选区：代码块 / 表格 / 列表都能选）。
                     MarkdownText(

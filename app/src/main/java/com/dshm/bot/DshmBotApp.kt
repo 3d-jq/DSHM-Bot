@@ -390,6 +390,9 @@ fun DshmBotApp(
     }
 
     val screenStateHolder = rememberSaveableStateHolder()
+    // 动效档位（团队偏好 `prefs.motion`）：转场时长从这里取。
+    // transitionSpec 不是 composable 上下文，所以要在外面取好。
+    val motionProfile = Dshm.motion
     Box(Modifier.fillMaxSize()) {
     AnimatedContent(
         targetState = screenKey,
@@ -398,8 +401,10 @@ fun DshmBotApp(
             .background(Dshm.colors.pageBackground),
         transitionSpec = {
             val opening = navForward
-            val duration = if (reduceMotion) 0 else DshmMotion.screenTransitionMs
-            val fadeDuration = if (reduceMotion) 0 else DshmMotion.fadeMs
+            // 动效档位（团队偏好 `prefs.motion`）：`quiet` 直接不转场。
+            // transitionSpec 不是 composable 上下文，所以档位在外面取。
+            val duration = if (reduceMotion) 0 else motionProfile.screenTransitionMs
+            val fadeDuration = if (reduceMotion) 0 else motionProfile.fadeMs
             val parallax: (Int) -> Int = if (reduceMotion) {
                 { 0 }
             } else {
