@@ -398,8 +398,8 @@
     <string name="bot_prefs_appearance">团队外观</string>
     <string name="bot_prefs_team_hint">保存在引擎里，其它设备的 DS Bot 会同步；本机也照着走。</string>
     <string name="bot_prefs_theme">主题</string>
-    <string name="bot_prefs_theme_deepseek">DeepSeek</string>
-    <string name="bot_prefs_theme_mono">极简黑白</string>
+    <string name="bot_prefs_theme_deepseek">默认</string>
+    <string name="bot_prefs_theme_mono">黑白</string>
     <string name="bot_prefs_theme_paper">纸张</string>
     <string name="bot_prefs_theme_moonlight">月光</string>
     <string name="bot_prefs_accent">强调色</string>

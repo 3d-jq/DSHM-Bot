@@ -132,6 +132,25 @@ class EngineViewModel(
         // 引擎是长驻的：热启动也要把前台服务挂上，否则进程掉回 cached，
         // 系统裁幽灵进程时就可能把引擎带走。
         RuntimeForegroundService.start(appContext, appContext.getString(R.string.engine_notification_running))
+        restartForNewPlugin()
+    }
+
+    /**
+     * APK 换过之后，引擎里跑的还是**旧插件代码**（引擎是长驻进程，APK 更新
+     * 不会重启它）—— 磁盘上那份插件也要等下次启动才会被覆盖。
+     *
+     * 所以：指纹对不上就重启一次引擎，让新的插件 JS 立刻生效。否则改了插件
+     * 却「一点反应都没有」。
+     */
+    private fun restartForNewPlugin() {
+        val expected = runCatching { DsBotPluginInstaller.fingerprint(appContext) }.getOrNull()
+        if (expected.isNullOrEmpty()) return
+        val installed = runCatching {
+            DsBotPluginInstaller.installedFingerprint(installer.rootfsDir)
+        }.getOrNull()
+        if (installed == expected) return
+        EngineLog.log("startup: plugin changed ($installed -> $expected), restarting engine")
+        restart()
     }
 
     /**

@@ -40,16 +40,36 @@ data class PaletteColors(
     val accent: Color,
     /** 压在强调色上的文字色；默认按亮度算（网页端 `accentInk`）。 */
     val onAccent: Color = inkOn(accent),
-    /** 次级文字（网页端 `ink-2`）。 */
-    val textSecondary: Color = text.copy(alpha = 0.62f),
-    /** 三级文字（网页端 `ink-3`）。 */
-    val textTertiary: Color = text.copy(alpha = 0.38f),
-    /** 分隔线（网页端 `line`）。 */
-    val divider: Color = text.copy(alpha = 0.10f),
+    /**
+     * 次级文字（网页端 `ink-2`）。
+     *
+     * **一律是不透明的实色**（deepseek 那套的写法）：网页端写的是
+     * `rgba(ink, .6)`，压在颜色上面会透出底色 —— 同一个令牌两套写法会让
+     * 同一个控件在不同主题下画得不一样（强调色圆块外面会多一圈白边）。
+     * 这里统一烤成实色（见 [inkOver]）。
+     */
+    val textSecondary: Color = inkOver(card, text, 0.62f),
+    /** 三级文字（网页端 `ink-3`）；同样是不透明实色。 */
+    val textTertiary: Color = inkOver(card, text, 0.38f),
+    /** 分隔线（网页端 `line`）；同样是不透明实色。 */
+    val divider: Color = inkOver(card, text, 0.10f),
     /** 悬浮圆钮底色：深色下要比卡片亮一档，否则只剩一个图标。 */
     val floatingSurface: Color = card,
     /** 弱化底色（分段控件、设置分区的底）。 */
     val surfaceMuted: Color = bubble,
+)
+
+/**
+ * 把 ink 按比例混到底色上，烤成一个**不透明**的实色。
+ *
+ * 网页端用 `rgba(ink, a)`（半透明），本机统一烤实：半透明令牌压在别的颜色上
+ * 会透出底色，同一个控件在不同主题 / 不同底色上画出来不一样。
+ */
+private fun inkOver(base: Color, ink: Color, ratio: Float): Color = Color(
+    red = base.red + (ink.red - base.red) * ratio,
+    green = base.green + (ink.green - base.green) * ratio,
+    blue = base.blue + (ink.blue - base.blue) * ratio,
+    alpha = 1f,
 )
 
 object AppPalettes {

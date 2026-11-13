@@ -28,10 +28,7 @@ object DsBotPluginInstaller {
         val marker = File(target, MARKER)
         // 版本号只在跟随上游时才变，而这份包被我们改过（browser 动作等）。
         // 用「插件版本 + 这次安装的时间」做指纹：APK 一更新就重新覆盖，改动的 JS 才进得去。
-        val stamp = runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
-        }.getOrDefault(0L)
-        val fingerprint = "$version@$stamp"
+        val fingerprint = fingerprint(context)
         if (!marker.isFile || marker.readText().trim() != fingerprint) {
             target.deleteRecursively()
             if (!target.mkdirs()) return false
@@ -40,6 +37,29 @@ object DsBotPluginInstaller {
         }
         ensurePatch(rootfs)
         return true
+    }
+
+    /**
+     * 当前 APK 里这份插件的指纹（插件版本 + APK 更新时间）。
+     *
+     * APK 一换，指纹就变 —— 引擎里跑的还是旧代码，得重启一次才会加载新的。
+     */
+    fun fingerprint(context: Context): String {
+        val version = runCatching {
+            context.assets.open("$ASSET_ROOT/package.json").bufferedReader().use { it.readText() }
+                .let { org.json.JSONObject(it).optString("version") }
+        }.getOrNull() ?: return ""
+        val stamp = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        }.getOrDefault(0L)
+        return "$version@$stamp"
+    }
+
+    /** 磁盘上那份插件的指纹；没装过是 null。 */
+    fun installedFingerprint(rootfs: File): String? {
+        val marker = File(File(rootfs, TARGET), MARKER)
+        if (!marker.isFile) return null
+        return marker.readText().trim().takeIf { it.isNotEmpty() }
     }
 
     private fun copyTree(assets: android.content.res.AssetManager, path: String, target: File): Boolean {

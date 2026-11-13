@@ -1270,3 +1270,62 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
 
 **验证**：84 测试类 / 483 用例全绿（新增 16：`DshmPalettesTest` 7、`ChatAppearanceTest` 5、
 `BotPrefsStoreTest` 4），lint 零 warning，assembleDebug 通过。
+
+### 个性化：统一令牌写法 + 思考过程真接上 + 主题改名（2026-11-13）
+
+上一节接线之后真机跑出来三个问题，这一轮收掉。
+
+**1）强调色圆环切主题会变大小 —— 根因是同一个令牌两套写法**
+
+真机像素证据（个性化页那行，y=1056）：
+
+```
+色块2 (#4D6BFE 蓝): x=254..264 (236,238,241) ← 白环 | x=264..310 (77,107,254) ← 颜色 | x=310..320 (236,238,241) ← 白环
+色块1 (自, 选中):  x=128..138 (11,11,15)      ← 黑环（textPrimary）
+```
+
+`(236,238,241) = #ECEEF1` —— **deepseek 那一套的 `divider`，不透明的近白色**，压在
+颜色上面，每个色块外面套一圈白边。mono / paper / moonlight 的 `divider` 是
+`text.copy(alpha = .10)`（网页端 ink/line 的派生规则），压到颜色上是一圈**暗边**，
+白边没了 → 切主题时圆环的观感大小就跳。
+
+**同一个令牌两套写法**：deepseek 的次级/三级文字、分隔线是我按原生令牌写死的
+**不透明 hex**；另外三套是按网页端规则用 **alpha 派生**的。
+
+- ☑️ 统一成 **deepseek 的写法**：所有配色的墨色令牌（次级文字 / 三级文字 / 分隔线）
+  都是**不透明实色**（`inkOver()` 把 ink 按比例烤到底色上）。
+  强调色圆块在四套主题下画法逐像素一致。
+- ☑️ 回归锁 `everyPaletteBakesItsInkAsOpaque`：所有配色 × 明暗的三个墨色令牌
+  `alpha == 1`。
+- ☑️ 你原生令牌仍然一个色不差（`deepseekPaletteIsExactlyTheNativeTokens` 继续锁着）。
+
+**2）思考过程：之前那条插件补丁是错的**
+
+真机事件里的真实形状：
+
+```json
+{"type":"assistant/message","data":{"turn":39,"step":18,"message":{"content":[
+   {"type":"reasoning","text":"…"},{"type":"tool-call",…}]}}}      ← 只有思考 + 工具，没有 text 块
+{"type":"assistant/message","data":{"turn":39,"step":20,"message":{"content":[
+   {"type":"reasoning","text":"…"},{"type":"text","text":"搜不了（接口余额用尽）…"}]}}}
+```
+
+旧补丁只在「这条消息有 text 块」时挂 reasoning → **只思考不说话的步骤，思考全被丢掉**；
+一轮里分几步想，也只留最后一步。
+
+- ☑️ 插件 `parts.js` 改成**按轮累计**：一轮里的思考先攒着，挂在该轮的文本气泡上
+  （网页端就是「思考行在回答上方」）；新的一轮开始就清空。用真机那 489 条事件
+  跑过一遍：29 个气泡里 20 个带上了思考。
+- ☑️ 原生 `ThinkingRow` 改成**可折叠**（网页端是 `<details>`，默认收起），
+  标题行可点，展开才看正文 —— 一段思考能有几百字，摊开会把对话淹了。
+- ☑️ **引擎自动重启**：APK 换过之后引擎里跑的还是旧插件代码（引擎是长驻进程，
+  APK 更新不会重启它），磁盘上那份也要等下次启动才被覆盖 → 指纹对不上就自动
+  重启一次引擎（`DsBotPluginInstaller.fingerprint` + `EngineViewModel.restartForNewPlugin`）。
+  否则改了插件却「一点反应都没有」。
+
+**3）主题改名**
+
+- ☑️ `DeepSeek` → **默认**（`Black & white` / `黑白` 是 mono）。
+  主题 id 不变（引擎那边是 `deepseek` / `mono`），只改显示名。
+
+**验证**：81 测试类 / 481 用例全绿，lint 零 warning，assembleDebug 通过。

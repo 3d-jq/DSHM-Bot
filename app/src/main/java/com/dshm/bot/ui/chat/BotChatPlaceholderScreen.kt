@@ -1406,29 +1406,49 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
 /**
  * 思考过程：模型这一轮的 reasoning。
  *
- * 网页端画成回复上方的一条 `ThinkingRow`（`client.js` 的 `ThinkingRow`），
- * 本机是同一件事：标题 + 正文。团队偏好「显示思考过程」关掉时根本不会有
- * 这一行（引擎那边也不带 reasoning）。
+ * 网页端画成回复上方的一条 `ThinkingRow`（`client.js` 的 `ThinkingRow`，
+ * 是个 `<details>`：默认收起，点开才看正文），本机是同一件事：
+ * 一行可点的标题 + 展开后的正文。
+ *
+ * 团队偏好「显示思考过程」关掉时根本不会有这一行（引擎那边也不带 reasoning）。
  */
 @Composable
 private fun ThinkingRow(text: String) {
+    var open by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             // 不撑满：贴着正文宽度（网页端的思考行也是贴着内容）。
             .wrapContentWidth()
             .padding(bottom = Dshm.spacing.xs),
     ) {
-        Text(
-            text = stringResource(R.string.chat_thinking),
-            style = Dshm.typography.rowTime,
-            color = Dshm.colors.textTertiary,
-        )
-        Text(
-            text = text,
-            style = Dshm.typography.composerText.copy(fontSize = 13.sp),
-            color = Dshm.colors.textSecondary,
-            modifier = Modifier.padding(top = Dshm.spacing.xxs),
-        )
+        Row(
+            modifier = Modifier.clickable { open = !open },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.chat_thinking),
+                style = Dshm.typography.rowTime,
+                color = Dshm.colors.textTertiary,
+            )
+            Icon(
+                painter = painterResource(
+                    if (open) R.drawable.ic_lucide_chevron_down else R.drawable.ic_lucide_chevron_right,
+                ),
+                contentDescription = null,
+                tint = Dshm.colors.textTertiary,
+                modifier = Modifier
+                    .padding(start = Dshm.spacing.xxs)
+                    .size(14.dp),
+            )
+        }
+        if (open) {
+            Text(
+                text = text,
+                style = Dshm.typography.composerText.copy(fontSize = 13.sp),
+                color = Dshm.colors.textSecondary,
+                modifier = Modifier.padding(top = Dshm.spacing.xxs),
+            )
+        }
     }
 }
 

@@ -38,6 +38,26 @@ class DshmPalettesTest {
         assertEquals(base.iconTint, moonlight.iconTint)
     }
 
+    /**
+     * **回归锁**：所有配色的墨色令牌（次级文字 / 三级文字 / 分隔线）都必须是
+     * **不透明实色**。
+     *
+     * 网页端写的是 `rgba(ink, a)`（半透明），本机统一烤实（deepseek 那套的写法）：
+     * 半透明令牌压在别的颜色上会透出底色 —— 同一个控件（强调色圆块的外圈）在
+     * 不同主题下就会画出白边 / 暗边，切主题时圆环大小观感跟着跳。
+     */
+    @Test
+    fun everyPaletteBakesItsInkAsOpaque() {
+        for (palette in AppPalette.entries) {
+            for (dark in listOf(false, true)) {
+                val set = AppPalettes.of(palette, dark)
+                assertEquals("$palette dark=$dark textSecondary", 1f, set.textSecondary.alpha, 0.001f)
+                assertEquals("$palette dark=$dark textTertiary", 1f, set.textTertiary.alpha, 0.001f)
+                assertEquals("$palette dark=$dark divider", 1f, set.divider.alpha, 0.001f)
+            }
+        }
+    }
+
     @Test
     fun paletteIdFallsBackToDeepseek() {
         assertEquals(AppPalette.DEEPSEEK, AppPalette.fromId(null))
