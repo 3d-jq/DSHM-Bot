@@ -38,8 +38,8 @@ import com.dshm.bot.core.design.Dshm
 @Composable
 fun BrowserShotCard(
     shot: ChatBrowserShot?,
-    onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
 ) {
     if (shot == null) return
     val bitmap = remember(shot.path) {

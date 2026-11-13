@@ -25,11 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /**
  * dsh-Go 的模型选择面板（`ModelPickerSheet`）：
@@ -61,7 +61,7 @@ fun ModelPickerSheet(
     // 跳过半屏那一档：弹起来就是完整高度（带原生把手）。
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // 内容区固定占屏高的 70%，候选再多也只是列表内部滚动。
-    val panelHeight = LocalConfiguration.current.screenHeightDp.dp * PANEL_HEIGHT_FRACTION
+    val panelHeight = rememberWindowHeightDp() * PANEL_HEIGHT_FRACTION
 
     val visible = remember(candidates, query) {
         if (query.isBlank()) {

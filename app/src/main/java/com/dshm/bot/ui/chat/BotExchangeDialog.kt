@@ -36,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +55,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.util.Date
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /** 两条 Bot 消息之间超过这个间隔就插一行日期（DS Bot `ExchangeDialog` 同款）。 */
 private const val DAY_GAP_MS = 30 * 60 * 1000L
@@ -85,7 +85,7 @@ fun BotExchangeDialog(
     var error by remember(selfId, otherId) { mutableStateOf<String?>(null) }
     var expanded by remember(selfId, otherId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.8f
+    val sheetHeight = rememberWindowHeightDp() * 0.8f
 
     LaunchedEffect(selfId, otherId, client) {
         if (client == null) {

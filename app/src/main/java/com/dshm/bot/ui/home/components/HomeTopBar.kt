@@ -44,9 +44,9 @@ fun HomeTopBar(
     onSearch: () -> Unit,
     onCreateBot: () -> Unit,
     onCreateGroup: () -> Unit,
+    modifier: Modifier = Modifier,
     engineLabel: String? = null,
     onEngineClick: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 

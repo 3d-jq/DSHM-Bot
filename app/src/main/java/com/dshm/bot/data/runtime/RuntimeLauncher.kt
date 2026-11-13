@@ -2,6 +2,7 @@ package com.dshm.bot.data.runtime
 
 import android.content.Context
 import android.os.SystemClock
+import androidx.core.content.edit
 import android.os.Process as AndroidProcess
 import android.system.Os
 import android.system.OsConstants
@@ -89,12 +90,12 @@ class RuntimeLauncher(
         val started = builder.start()
         process = started
         val spawned = SystemClock.elapsedRealtime()
-        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putLong(KEY_APK_STAMP, appStamp())
-            .putString(KEY_RUNTIME_VERSION, manifest.runtimeVersion)
-            .putBoolean(KEY_PHONE_CONTROL, phoneControlEnabled())
-            .putString(KEY_PHONE_OWNER, phoneControlOwner())
-            .apply()
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putLong(KEY_APK_STAMP, appStamp())
+            putString(KEY_RUNTIME_VERSION, manifest.runtimeVersion)
+            putBoolean(KEY_PHONE_CONTROL, phoneControlEnabled())
+            putString(KEY_PHONE_OWNER, phoneControlOwner())
+        }
 
         val queue = java.util.concurrent.LinkedBlockingQueue<String>()
         val tail = ArrayDeque<String>()
@@ -281,17 +282,17 @@ class RuntimeLauncher(
     }
 
     private fun rememberEndpoint(endpoint: RuntimeEndpoint) {
-        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_ENDPOINT_URL, endpoint.baseUrl)
-            .putString(KEY_ENDPOINT_TOKEN, endpoint.token)
-            .apply()
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString(KEY_ENDPOINT_URL, endpoint.baseUrl)
+            putString(KEY_ENDPOINT_TOKEN, endpoint.token)
+        }
     }
 
     private fun forgetEndpoint() {
-        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .remove(KEY_ENDPOINT_URL)
-            .remove(KEY_ENDPOINT_TOKEN)
-            .apply()
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            remove(KEY_ENDPOINT_URL)
+            remove(KEY_ENDPOINT_TOKEN)
+        }
     }
 
     private fun listening(baseUrl: String): Boolean = runCatching {

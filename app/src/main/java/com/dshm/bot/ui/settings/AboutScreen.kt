@@ -22,6 +22,7 @@ import androidx.compose.ui.res.stringResource
 import com.dshm.bot.BuildConfig
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import androidx.core.net.toUri
 
 private const val PROJECT_URL = "https://github.com/3d-jq/DSHM-Bot"
 private const val RELEASES_URL = "https://github.com/3d-jq/DSHM-Bot/releases/latest"
@@ -32,7 +33,7 @@ private const val PROOT_URL = "https://proot-me.github.io/"
 
 private fun openUrl(context: Context, url: String) {
     runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
     }
 }
 

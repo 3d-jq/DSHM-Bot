@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.net.toUri
 
 /**
  * 后台保活跳转（对齐 dsh-Go `VendorSettings` + `RuntimePlugin.openVendorSettings`）。
@@ -67,7 +68,7 @@ object BackgroundLauncher {
 
     /** 系统电池优化（对齐 dsh-Go `requestBatteryExempt`）：对话框 → 列表 → 应用详情。 */
     fun openSystemBattery(context: Context) {
-        val packageUri = Uri.parse("package:${context.packageName}")
+        val packageUri = "package:${context.packageName}".toUri()
         val targets = listOf(
             Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri),
             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
@@ -84,7 +85,7 @@ object BackgroundLauncher {
             context,
             Intent(
                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${context.packageName}"),
+                "package:${context.packageName}".toUri(),
             ),
         )
     }

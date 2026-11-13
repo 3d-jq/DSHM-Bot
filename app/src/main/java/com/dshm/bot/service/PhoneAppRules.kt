@@ -2,6 +2,7 @@ package com.dshm.bot.service
 
 import android.content.Context
 import org.json.JSONObject
+import androidx.core.content.edit
 
 enum class PhoneAppRule {
     NORMAL,
@@ -33,6 +34,6 @@ object PhoneAppRules {
         val json = runCatching { JSONObject(prefs.getString(KEY, null).orEmpty()) }
             .getOrDefault(JSONObject())
         if (rule == PhoneAppRule.NORMAL) json.remove(packageName) else json.put(packageName, rule.name)
-        prefs.edit().putString(KEY, json.toString()).apply()
+        prefs.edit { putString(KEY, json.toString()) }
     }
 }

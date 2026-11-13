@@ -19,6 +19,7 @@ import android.view.View
 import android.view.WindowManager
 import kotlin.math.cos
 import kotlin.math.min
+import androidx.core.view.isVisible
 
 /**
  * 手机操控时铺在屏幕上的舞台：
@@ -263,7 +264,7 @@ object PhoneStage {
                 getLocationOnScreen(loc)
                 drawPointer(canvas, cursorX - loc[0], cursorY - loc[1], now)
             }
-            if (visibility == VISIBLE) postInvalidateDelayed(FRAME_MS)
+            if (isVisible) postInvalidateDelayed(FRAME_MS)
         }
 
         private fun drawGlow(canvas: Canvas, now: Long) {

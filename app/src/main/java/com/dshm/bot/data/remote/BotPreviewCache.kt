@@ -2,6 +2,7 @@ package com.dshm.bot.data.remote
 
 import android.content.Context
 import org.json.JSONObject
+import androidx.core.content.edit
 
 /**
  * 单 Bot 的最新回复预览。
@@ -33,7 +34,7 @@ class BotPreviewCache(context: Context) {
             previews.forEach { (id, text) ->
                 if (id.isNotBlank() && text.isNotBlank()) json.put(id, BotPreview.oneLine(text))
             }
-            prefs.edit().putString(KEY_PREVIEWS, json.toString()).apply()
+            prefs.edit { putString(KEY_PREVIEWS, json.toString()) }
         }
     }
 

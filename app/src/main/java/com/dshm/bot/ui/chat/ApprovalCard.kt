@@ -44,8 +44,8 @@ fun ApprovalCard(
     approval: ChatApproval,
     busy: Boolean,
     onAnswer: (allow: Boolean) -> Unit,
-    onAnswerQuestion: (List<String>) -> Unit = {},
     modifier: Modifier = Modifier,
+    onAnswerQuestion: (List<String>) -> Unit = {},
 ) {
     val shape = RoundedCornerShape(Dshm.radius.md)
     var selected by remember(approval.key) { mutableStateOf(emptyList<String>()) }

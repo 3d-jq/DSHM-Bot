@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.util.ArrayDeque
 import java.util.IdentityHashMap
+import androidx.core.net.toUri
 
 /**
  * 用户指定的手机操控 Bot 的执行器。它把无障碍树压成带编号的“屏幕”，
@@ -321,7 +322,12 @@ object PhoneControlBridge {
         val current = runCatching { clipboard.primaryClip?.description?.label?.toString() }.getOrNull()
         if (current == label) {
             runCatching {
-                if (original == null) clipboard.clearPrimaryClip() else clipboard.setPrimaryClip(original)
+                when {
+                    original != null -> clipboard.setPrimaryClip(original)
+                    // clearPrimaryClip 是 API 28；26/27 用一个空剪贴替代，效果一致。
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> clipboard.clearPrimaryClip()
+                    else -> clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
             }
         }
         if (!pasted) return false
@@ -332,7 +338,7 @@ object PhoneControlBridge {
 
     private fun readEditableText(target: AccessibilityNodeInfo): String? {
         target.refresh()
-        if (Build.VERSION.SDK_INT >= 26 && target.isShowingHintText) return ""
+        if (target.isShowingHintText) return ""
         return target.text?.toString()
     }
 
@@ -509,7 +515,7 @@ object PhoneControlBridge {
         val app = request.optString("app").trim()
         if (url.isEmpty() && app.isEmpty()) return failure("请给出 app 或 url。")
         val intent = if (url.isNotEmpty()) {
-            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            Intent(Intent.ACTION_VIEW, url.toUri())
         } else {
             val pm = context.packageManager
             val target = pm.getLaunchIntentForPackage(app) ?: run {
@@ -549,9 +555,7 @@ object PhoneControlBridge {
         }
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = "phone_control_message"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager.getNotificationChannel(channel) == null
-        ) {
+        if (manager.getNotificationChannel(channel) == null) {
             manager.createNotificationChannel(
                 NotificationChannel(channel, "手机操控消息", NotificationManager.IMPORTANCE_DEFAULT),
             )

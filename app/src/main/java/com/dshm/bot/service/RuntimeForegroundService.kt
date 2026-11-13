@@ -118,7 +118,6 @@ class RuntimeForegroundService : Service() {
         }
 
         private fun ensureChannel(context: Context) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val manager = context.getSystemService(NotificationManager::class.java) ?: return
             if (manager.getNotificationChannel(CHANNEL_ID) != null) return
             val channel = NotificationChannel(

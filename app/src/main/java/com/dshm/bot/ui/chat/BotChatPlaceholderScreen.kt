@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
@@ -143,12 +144,12 @@ fun BotChatScreen(
     bot: ChatRowUi,
     endpoint: RuntimeEndpoint?,
     onBack: () -> Unit,
+    modifier: Modifier = Modifier,
     onDetails: () -> Unit = {},
     onOpenBrowser: (String?) -> Unit = {},
     onOpenMember: (String) -> Unit = {},
     fontScale: Float = 1f,
     voiceMode: VoiceMode = VoiceMode.AUTO,
-    modifier: Modifier = Modifier,
     viewModel: BotChatViewModel = viewModel(
         key = "bot-chat:${bot.id}:${endpoint?.baseUrl.orEmpty()}:${endpoint?.token.orEmpty()}",
         factory = BotChatViewModel.factory(bot.id, bot.name, bot.isGroup, endpoint, LocalContext.current.applicationContext),
@@ -1891,8 +1892,8 @@ private fun eventLineLabel(kind: String?, name: String?, fallback: String, code:
 
 private fun clockLabel(timeMs: Long): String {
     val c = java.util.Calendar.getInstance().apply { timeInMillis = timeMs }
-    val hh = String.format("%02d", c.get(java.util.Calendar.HOUR_OF_DAY))
-    val mm = String.format("%02d", c.get(java.util.Calendar.MINUTE))
+    val hh = String.format(Locale.ROOT, "%02d", c.get(java.util.Calendar.HOUR_OF_DAY))
+    val mm = String.format(Locale.ROOT, "%02d", c.get(java.util.Calendar.MINUTE))
     return "$hh:$mm"
 }
 
@@ -1907,9 +1908,9 @@ private fun copyMessage(context: Context, text: String) {
 @Composable
 private fun BotTitleCapsule(
     name: String,
-    notice: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    notice: Boolean = false,
 ) {
     val shape = RoundedCornerShape(Dshm.radius.pill)
     Row(

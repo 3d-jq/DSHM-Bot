@@ -357,7 +357,7 @@ fun SettingsHint(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun SettingsError(text: String, onRetry: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+fun SettingsError(text: String, modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
     Column(modifier.padding(horizontal = Dshm.spacing.sm)) {
         Text(text, style = Dshm.typography.rowPreview, color = Dshm.colors.danger)
         if (onRetry != null) {
@@ -696,7 +696,7 @@ fun SettingsSegmentedPill(
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .offset(x = offset)
+                .offset { IntOffset(offset.roundToPx(), 0) }
                 .width(segment)
                 .height(Dshm.spacing.segmentedHeight - inset * 2)
                 .clip(RoundedCornerShape(Dshm.radius.pill))

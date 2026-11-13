@@ -1,6 +1,7 @@
 package com.dshm.bot.data.settings
 
 import android.content.Context
+import androidx.core.content.edit
 import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ChatFontSize
 import com.dshm.bot.domain.model.DshGoPreferences
@@ -31,70 +32,70 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
     override fun observeThemeMode(): Flow<ThemeMode> = themeMode
 
     override fun setThemeMode(mode: ThemeMode) {
-        prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
+        prefs.edit { putString(KEY_THEME_MODE, mode.name) }
         themeMode.value = mode
     }
 
     override fun observeChatFontSize(): Flow<ChatFontSize> = chatFontSize
 
     override fun setChatFontSize(size: ChatFontSize) {
-        prefs.edit().putString(KEY_CHAT_FONT, size.name).apply()
+        prefs.edit { putString(KEY_CHAT_FONT, size.name) }
         chatFontSize.value = size
     }
 
     override fun observeLanguage(): Flow<AppLanguage> = language
 
     override fun setLanguage(language: AppLanguage) {
-        prefs.edit().putString(KEY_LANGUAGE, language.name).apply()
+        prefs.edit { putString(KEY_LANGUAGE, language.name) }
         this.language.value = language
     }
 
     override fun observeInterfaceMode(): Flow<InterfaceMode> = interfaceMode
 
     override fun setInterfaceMode(mode: InterfaceMode) {
-        prefs.edit().putString(KEY_INTERFACE, mode.name).apply()
+        prefs.edit { putString(KEY_INTERFACE, mode.name) }
         interfaceMode.value = mode
     }
 
     override fun observeNotificationsEnabled(): Flow<Boolean> = notifications
 
     override fun setNotificationsEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_NOTIFICATIONS, enabled).apply()
+        prefs.edit { putBoolean(KEY_NOTIFICATIONS, enabled) }
         notifications.value = enabled
     }
 
     override fun observeVoiceMode(): Flow<VoiceMode> = voiceMode
 
     override fun setVoiceMode(mode: VoiceMode) {
-        prefs.edit().putString(KEY_VOICE, mode.name).apply()
+        prefs.edit { putString(KEY_VOICE, mode.name) }
         voiceMode.value = mode
     }
 
     override fun observePhoneControlEnabled(): Flow<Boolean> = phoneControlEnabled
 
     override fun setPhoneControlEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_PHONE_ENABLED, enabled).apply()
+        prefs.edit { putBoolean(KEY_PHONE_ENABLED, enabled) }
         phoneControlEnabled.value = enabled
     }
 
     override fun observePhoneConfirmMode(): Flow<PhoneConfirmMode> = phoneConfirmMode
 
     override fun setPhoneConfirmMode(mode: PhoneConfirmMode) {
-        prefs.edit().putString(KEY_PHONE_CONFIRM, mode.name).apply()
+        prefs.edit { putString(KEY_PHONE_CONFIRM, mode.name) }
         phoneConfirmMode.value = mode
     }
 
     override fun observePhoneControlBotId(): Flow<String?> = phoneControlBotId
 
     override fun setPhoneControlBotId(botId: String?) {
-        prefs.edit().putString(KEY_PHONE_BOT_ID, botId).apply()
+        prefs.edit { putString(KEY_PHONE_BOT_ID, botId) }
         phoneControlBotId.value = botId
     }
 
     override fun observePhoneStorageEnabled(): Flow<Boolean> = phoneStorageEnabled
 
     override fun setPhoneStorageEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_PHONE_STORAGE, enabled).apply()
+        prefs.edit { putBoolean(KEY_PHONE_STORAGE, enabled) }
         phoneStorageEnabled.value = enabled
     }
 
@@ -103,7 +104,7 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
     override fun setDshGoPreference(key: String, value: Boolean) {
         // setFlag 会校验 key，未知 key 直接失败，不静默写入。
         val next = dshGoPreferences.value.setFlag(key, value)
-        prefs.edit().putBoolean(key, value).apply()
+        prefs.edit { putBoolean(key, value) }
         dshGoPreferences.value = next
     }
 

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">DSHM Bot</string>
 
     <string name="action_choose">选择</string>
@@ -52,10 +52,8 @@
     <string name="new_bot_brief">开场消息</string>
     <string name="new_bot_creating">创建中…</string>
     <string name="bot_settings_color">颜色</string>
-    <string name="home_coming_soon">即将上线</string>
     <string name="chat_placeholder_title">与 %1$s 的对话</string>
     <string name="chat_placeholder_hint">对话由本机 DSH 引擎驱动。</string>
-    <string name="chat_loading">正在加载对话…</string>
     <string name="chat_load_failed">对话加载失败</string>
     <string name="chat_retry">重试</string>
     <string name="chat_send_failed">消息发送失败：%1$s</string>
@@ -64,12 +62,10 @@
     <string name="approval_allow_once">允许一次</string>
     <string name="approval_in_dsh">这个请求要去 DSH 里回应</string>
     <string name="question_waiting">等你回答</string>
-    <string name="chat_load_earlier">加载更早的消息</string>
     <string name="chat_engine_off_title">本机引擎未运行</string>
     <string name="chat_engine_off_hint">请先在 设置 → 本机引擎 中启动，再回来对话。</string>
     <string name="web_load_failed">DSH Web 加载失败</string>
     <string name="chat_details">查看 Bot 详情</string>
-    <string name="bot_settings_title">Bot 设置</string>
     <string name="bot_settings_page_title">设置</string>
     <string name="bot_settings_main_badge">主 Bot</string>
     <string name="bot_settings_main">主 Bot</string>
@@ -91,25 +87,12 @@
     <string name="bot_settings_context">上下文信息</string>
     <string name="bot_settings_memory_empty">还没有保存内容</string>
     <string name="bot_settings_memory_count">%1$d 条</string>
-    <string name="bot_details_memory_add_hint">写一条要记住的内容…</string>
-    <string name="bot_details_memory_topic_hint">分组（可选）</string>
-    <string name="bot_details_memory_add">加进记忆</string>
-    <string name="bot_details_memory_edit">修改</string>
-    <string name="bot_details_memory_edit_title">修改这条记忆</string>
-    <string name="bot_details_memory_summary">摘要</string>
-    <string name="bot_details_memory_summary_stale">摘要可能已过时</string>
-    <string name="bot_details_memory_summary_writing">正在写摘要…</string>
     <string name="bot_details_memory_by_you">你加的</string>
-    <string name="bot_details_memory_scope_own">%1$s 的记忆</string>
-    <string name="bot_details_memory_scope_team">团队记忆</string>
-    <string name="bot_details_memory_scope_group">群记忆</string>
-    <string name="bot_details_memory_chars">%1$d 字</string>
     <string name="memory_title_summary">记忆摘要</string>
     <string name="memory_title_entries">全部条目</string>
     <string name="memory_menu">记忆选项</string>
     <string name="memory_regenerate">重新生成摘要</string>
     <string name="memory_back">返回摘要</string>
-    <string name="memory_close">关闭</string>
     <string name="memory_writing">正在写摘要…</string>
     <string name="memory_updating">更新中…</string>
     <string name="memory_updated_ago">更新于 %1$s</string>
@@ -128,7 +111,6 @@
     <string name="memory_section_group_hint">只有成员能读</string>
     <string name="memory_size">已用 %1$s / %2$s 字符</string>
     <string name="memory_remove">从记忆中移除</string>
-    <string name="memory_remove_again">再点一次移除</string>
     <string name="memory_remove_confirm">移除</string>
     <string name="memory_ago_minutes">%1$d 分钟前</string>
     <string name="memory_ago_hours">%1$d 小时前</string>
@@ -214,18 +196,15 @@
     <string name="chat_member_dock_waiting_two">%1$s、%2$s 等你批准</string>
     <string name="chat_member_dock_waiting_more">%1$s、%2$s 等 %3$d 人等你批准</string>
     <string name="chat_member_dock_doing">%1$s · %2$s…</string>
-    <string name="chat_copy_transcript">复制整段对话</string>
     <string name="chat_selection_copy">复制</string>
     <string name="chat_selection_add_to_input">加入输入框</string>
     <string name="chat_selection_copy_markdown">复制全文</string>
-    <string name="chat_longpress_copy">复制</string>
     <string name="chat_menu_copy">复制</string>
     <string name="chat_menu_select_text">选择文字</string>
     <string name="chat_copy_all">复制全部</string>
     <string name="chat_menu_share">分享</string>
     <string name="chat_menu_edit_resend">编辑后重发</string>
     <string name="chat_menu_edit_resend_hint">改完再发一次</string>
-    <string name="chat_longpress_edit">编辑</string>
     <string name="home_pin">置顶</string>
     <string name="home_unpin">取消置顶</string>
     <string name="home_delete">删除</string>
@@ -239,8 +218,6 @@
     <string name="bot_settings_schedule_delete">删除</string>
     <string name="bot_settings_schedule_title">任务名称</string>
     <string name="bot_settings_schedule_prompt">让它做什么？</string>
-    <string name="bot_settings_schedule_time">时间（HH:mm，每天）</string>
-    <string name="bot_settings_manage_section">管理</string>
     <string name="bot_settings_duplicate">复制一份</string>
     <string name="bot_settings_duplicate_hint">复制分工和模型，记忆从零开始</string>
     <string name="bot_settings_no_role">未设置角色</string>
@@ -271,9 +248,7 @@
     <string name="composer_add_image">添加图片</string>
     <string name="composer_take_photo">拍照</string>
     <string name="composer_attach_remove">移除附件</string>
-    <string name="composer_mention">@ 成员</string>
     <string name="composer_mention_everyone">所有人</string>
-    <string name="chat_expand">展开全文</string>
     <string name="chat_collapse">收起</string>
     <string name="chat_artifacts_delivered">交付了 %1$d 个文件</string>
     <string name="chat_artifacts_generated">生成了 %1$d 个文件</string>
@@ -336,7 +311,6 @@
     <string name="search_hint">输入关键词搜索 Bot 与群聊</string>
 
     <string name="settings_title">设置</string>
-    <string name="settings_overview_host">本机 · 未连接 · DSH 未接入</string>
     <string name="settings_group_ai">AI</string>
     <string name="settings_team_secrets">密钥</string>
     <string name="settings_team_connectors">连接器</string>
@@ -353,7 +327,6 @@
     <string name="team_secrets_purpose">用途（可选）</string>
     <string name="team_secrets_who">谁能用</string>
     <string name="team_secrets_scope_all">所有 Bot</string>
-    <string name="team_secrets_scope_some">指定 Bot</string>
     <string name="team_secrets_scope_some_of">仅 %1$s</string>
     <string name="team_secrets_scope_none">没有 Bot 能用</string>
     <string name="team_secrets_delete">删除</string>
@@ -363,7 +336,6 @@
     <string name="team_connectors_empty">没有可用的连接器</string>
     <string name="team_connectors_connected">已连接</string>
     <string name="team_connectors_connected_as">已连接：%1$s</string>
-    <string name="team_connectors_not_connected">未连接</string>
     <string name="team_connectors_connect">连接</string>
     <string name="team_connectors_connect_title">连接 %1$s</string>
     <string name="team_connectors_disconnect">断开</string>
@@ -434,11 +406,6 @@
     <string name="bot_prefs_accent_default">跟随主题</string>
     <string name="bot_prefs_accent_auto_short">自</string>
     <string name="bot_prefs_chat">对话</string>
-    <string name="bot_prefs_layout">消息布局</string>
-    <string name="bot_prefs_layout_bubble">气泡</string>
-    <string name="bot_prefs_layout_flat">平铺</string>
-    <string name="bot_prefs_width">气泡宽度</string>
-    <string name="bot_prefs_flat_width">文字宽度</string>
     <string name="bot_prefs_thinking">显示思考过程</string>
     <string name="bot_prefs_thinking_hint">在回答上方显示模型的思考过程。</string>
     <string name="bot_prefs_motion">动效</string>
@@ -452,47 +419,30 @@
     <string name="settings_plugins">插件</string>
     <string name="settings_theme">主题</string>
     <string name="settings_chat_font">对话字号</string>
-    <string name="settings_interface">界面</string>
     <string name="settings_language">语言</string>
     <string name="settings_notifications">通知</string>
     <string name="settings_voice">语音输入</string>
     <string name="settings_local_engine">本机引擎</string>
     <string name="settings_engine_params">引擎参数</string>
     <string name="settings_background_running">后台运行</string>
-    <string name="settings_remote_host">远程主机</string>
     <string name="settings_version">版本</string>
     <string name="settings_dsh_version">DSH 版本</string>
     <string name="settings_licenses">开源许可</string>
     <string name="settings_value_not_set">未设置</string>
     <string name="settings_value_default">默认</string>
     <string name="settings_value_off">未开启</string>
-    <string name="settings_value_not_configured">未配置</string>
-    <string name="settings_value_plugins_count">%1$d 个</string>
     <string name="settings_value_on">已开启</string>
     <string name="settings_value_auto">自动</string>
     <string name="settings_value_standard">标准</string>
-    <string name="settings_value_native">原生</string>
     <string name="settings_value_follow_system">跟随系统</string>
-    <string name="settings_value_not_running">未运行</string>
-    <string name="settings_value_not_connected">未连接</string>
-    <string name="settings_value_needs_setup">需设置</string>
     <string name="settings_value_not_linked">未接入</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
-    <string name="settings_theme_dialog_title">选择主题</string>
-    <string name="settings_coming_soon">即将上线</string>
     <string name="engine_title">本机引擎</string>
-    <string name="engine_intro">在本机运行 Bot 需要一套运行环境（Ubuntu + Node + DSH），只需下载一次，之后离线可用。</string>
-    <string name="engine_intro_hint">下载约 150 MB，请保持 App 打开直到完成。</string>
-    <string name="engine_not_installed">运行环境尚未安装</string>
-    <string name="engine_installed">运行环境 %1$s 已安装</string>
     <string name="engine_install_action">下载并安装</string>
     <string name="engine_starting">正在启动引擎…</string>
-    <string name="engine_running">运行中：%1$s</string>
-    <string name="engine_stopped">引擎已停止</string>
     <string name="engine_start_action">启动引擎</string>
-    <string name="engine_stop_action">停止引擎</string>
     <string name="engine_continue">进入 DSHM Bot</string>
     <string name="engine_value_running">运行中</string>
     <string name="engine_value_installed">已安装</string>
@@ -501,7 +451,6 @@
     <string name="engine_value_failed">安装失败</string>
     <string name="engine_value_stopped">已停止</string>
     <string name="engine_value_not_installed">未安装</string>
-    <string name="engine_restart_action">重启引擎</string>
     <string name="engine_local_title">本机引擎</string>
     <string name="engine_notification_channel">本地引擎</string>
     <string name="engine_notification_channel_desc">让本机 DSH 引擎在后台保持运行，Bot 才能继续干活。</string>
@@ -519,7 +468,6 @@
     <string name="engine_runtime_info">运行环境</string>
     <string name="engine_version">版本</string>
     <string name="engine_arch">架构</string>
-    <string name="engine_method">启动方式</string>
     <string name="engine_reset_title">重置运行环境？</string>
     <string name="engine_reset_body">将删除已下载并解压的 rootfs，下次需要重新下载安装。</string>
     <string name="engine_reset_hint">仅在引擎异常时使用。</string>
@@ -570,37 +518,25 @@
     <string name="language_chinese">中文</string>
     <string name="language_english">English</string>
     <string name="settings_account">账号</string>
-    <string name="account_logged_out">未登录</string>
-    <string name="account_login_hint">登录 DSH 账号后同步 Bot 与用量。</string>
-    <string name="account_login">登录 DSH</string>
     <string name="account_engine_required">请先启动本机引擎，再登录账号。</string>
     <string name="account_signed_in">已登录</string>
-    <string name="account_signing_in">登录中…</string>
     <string name="account_sign_out">退出登录</string>
     <string name="account_balance">余额 %1$s</string>
     <string name="account_top_up">充值</string>
     <string name="account_usage">用量</string>
-    <string name="api_key_title">DeepSeek API Key</string>
     <string name="api_key_not_set">未设置</string>
-    <string name="api_key_set">设置</string>
-    <string name="api_key_replace">更换</string>
     <string name="api_key_clear">清除</string>
     <string name="api_key_save">保存</string>
     <string name="api_key_hint">粘贴 DeepSeek API Key。它加密保存在本机，并在启动本机引擎时注入。</string>
-    <string name="interface_web">网页</string>
     <string name="voice_system">系统</string>
     <string name="voice_engine">语音模型</string>
     <string name="info_engine_required">连接本机引擎后可配置。</string>
-    <string name="info_privacy">对话与凭证都保存在本机，除非你在 DSH 里主动开启，否则不会上传。</string>
-    <string name="info_pets">宠物功能将按 dsh-Go 后续移植。</string>
-    <string name="info_licenses">DSHM Bot 以 AGPL-3.0 开源。运行时构建配方来自 dsh-Go（AGPL-3.0），Bot 团队语义参考 DS-Bot（Apache-2.0），图标来自 Lucide（ISC）。</string>
     <string name="settings_privacy">隐私与分享</string>
     <string name="notify_channel_chat">对话</string>
     <string name="notify_channel_attention">待处理</string>
     <string name="notify_done_title">%1$s 回复好了</string>
     <string name="notify_done_body">点开查看回复</string>
     <string name="notify_error_title">%1$s 出错了</string>
-    <string name="notify_stopped_body">这一轮已经被停止。</string>
     <string name="notify_approval_title">%1$s 等你批准</string>
     <string name="notify_question_title">%1$s 有问题</string>
     <string name="voice_hint_auto">有语音模型时用它，否则用系统识别</string>
@@ -623,17 +559,12 @@
     <string name="voice_state_cancelled">已取消</string>
     <string name="voice_state_failed">准备失败</string>
     <string name="voice_state_unprepared">未下载</string>
-    <string name="voice_model_hint">SenseVoice 模型运行在本机引擎里，接入 dsh-Go 的语音模型下载后再启用。</string>
-    <string name="personalization_hint">你的个人 AGENTS.md，引擎会在内置文件之后加载。写清楚 Bot 应该如何配合你。</string>
-    <string name="personalization_save">保存</string>
-    <string name="personalization_saved">已保存</string>
     <string name="composer_voice">语音输入</string>
     <string name="composer_voice_cancel">取消听写</string>
     <string name="composer_voice_stop">停止听写</string>
     <string name="composer_stop">停止回复</string>
     <string name="composer_voice_listening">正在听…</string>
     <string name="composer_voice_transcribing">正在转写…</string>
-    <string name="chat_thinking">理一下思路…</string>
     <string name="chat_memory_updated">更新记忆</string>
     <string name="chat_jump_bottom">回到最新</string>
     <string name="image_viewer_close">关闭</string>
@@ -645,10 +576,6 @@
     <string name="image_share_failed">分享失败</string>
     <string name="image_saved">已保存到相册</string>
     <string name="image_save_failed">保存失败</string>
-    <string name="providers_count">%1$d 个渠道</string>
-    <string name="providers_group_official">官方</string>
-    <string name="providers_group_subscription">订阅</string>
-    <string name="providers_group_custom">自定义</string>
 
     <string name="action_cancel">取消</string>
     <string name="action_save">保存</string>
@@ -656,7 +583,6 @@
     <string name="action_delete">删除</string>
     <string name="action_retry">重试</string>
     <string name="action_refresh">刷新</string>
-    <string name="action_reload">重新载入</string>
     <string name="action_continue">继续</string>
     <string name="action_loading">加载中…</string>
     <string name="action_done">完成</string>
@@ -666,8 +592,6 @@
     <!-- 子代理页 -->
     <string name="settings_subagent_title">子代理</string>
     <string name="settings_subagent_limits">运行限制</string>
-    <string name="settings_subagent_max_depth">最大递归深度</string>
-    <string name="settings_subagent_max_active">同时运行上限</string>
     <string name="settings_subagent_model_selection">模型选择</string>
     <string name="settings_subagent_allow_choice">允许 AI 给子代理选模型</string>
     <string name="settings_subagent_pick_first">选一个模型后生效</string>
@@ -679,7 +603,6 @@
     <!-- 插件清单页 -->
     <string name="plugins_inventory_title">插件清单</string>
     <string name="plugins_inventory_empty">引擎里还没有组件。</string>
-    <string name="plugins_inventory_failed_group">出错</string>
     <string name="plugins_inventory_system_group">系统组件</string>
     <string name="plugins_inventory_running">已启用</string>
     <string name="plugins_inventory_off">未启用</string>
@@ -699,7 +622,6 @@
     <string name="presets_broken">加载失败</string>
     <string name="presets_view_config">查看配置</string>
     <string name="presets_no_config">这个预设没有配置文件。</string>
-    <string name="presets_create_unavailable">新建与编辑需要创造模式（尚未接入）</string>
     <string name="presets_copy_id">复制预设 ID</string>
     <string name="presets_copy_config">复制预设 YAML</string>
     <string name="presets_copied">已复制</string>
@@ -711,19 +633,15 @@
     <string name="schedules_title">定时任务</string>
     <string name="schedules_empty">还没有定时任务。</string>
     <string name="schedules_untitled">未命名任务</string>
-    <string name="schedules_active">进行中</string>
-    <string name="schedules_inactive">已停用</string>
     <string name="schedules_unavailable">DSH 的自动化任务没开</string>
     <string name="schedules_unavailable_hint">在 DSH 里打开 Automation tasks 插件后才能用。</string>
-    <string name="schedules_delete_title">删除“%1$s”？</string>
-    <string name="schedules_delete_hint">这个任务不会再运行，已开始的对话不受影响。</string>
     <string name="schedules_send_to">发送给</string>
     <string name="schedules_when">什么时候跑</string>
     <string name="schedules_kind_at">一次</string>
     <string name="schedules_kind_daily">每天</string>
     <string name="schedules_kind_weekly">每周</string>
     <string name="schedules_kind_every">重复</string>
-    <string name="schedules_at_hint">2026-11-09 09:00</string>
+    <string name="schedules_at_hint" tools:ignore="TypographyDashes">2026-11-09 09:00</string>
     <string name="schedules_time_hint">09:00</string>
     <string name="schedules_every_hint">间隔（1 分钟到 7 天）</string>
     <string name="schedules_unit_minutes">分钟</string>
@@ -731,13 +649,10 @@
     <string name="schedules_unit_days">天</string>
     <string name="schedules_create">创建任务</string>
     <string name="schedules_creating">创建中…</string>
-    <string name="schedules_next">下次：%1$s</string>
-    <string name="schedules_finished">已完成</string>
     <string name="schedules_in_room">在 %1$s</string>
     <string name="schedules_delete_again">再点一次删除</string>
     <string name="schedules_unknown_target">未关联</string>
     <string name="schedules_room_suffix">群聊</string>
-    <string name="schedules_weekdays">周几</string>
     <string name="schedules_need_fields">名字和内容都要填</string>
     <string name="schedules_pick_time">选择时间</string>
     <string name="schedules_pick_date">选择日期</string>
@@ -745,14 +660,12 @@
     <string name="settings_search_title">搜索设置</string>
     <string name="settings_search_hint">搜索设置项</string>
     <string name="settings_search_empty">没有匹配的设置</string>
-    <string name="settings_value_set">已设置</string>
     <string name="settings_this_phone">本机</string>
     <string name="settings_overview_engine">本机 · %1$s</string>
     <string name="settings_no_fields">这一组没有可编辑字段。</string>
     <string name="settings_modified">已修改</string>
     <string name="settings_reset_default">恢复默认</string>
     <string name="settings_engine_read_only">该设置由引擎配置文件固定，无法在 App 内修改。</string>
-    <string name="settings_engine_revision">引擎提供 %1$d 个可配置分组</string>
     <string name="settings_engine_revision_one">修订 %1$d · 由本机引擎提供</string>
     <string name="settings_secret_set">已设置</string>
     <string name="settings_secret_unset">未设置</string>
@@ -785,26 +698,16 @@
     <string name="plugins_detail_meta_error">插件信息读取失败：%1$s</string>
     <string name="settings_plugin_count">%1$d 个插件</string>
     <string name="settings_plugins_read_only">当前引擎版本只在这里提供插件清单。</string>
-    <string name="settings_plugins_managed_hint">插件设置跟随引擎清单。</string>
     <string name="settings_plugin_configs">插件设置</string>
-    <string name="settings_plugin_disabled">已禁用</string>
-    <string name="settings_plugin_active">运行中</string>
-    <string name="settings_plugin_failed">失败</string>
-    <string name="settings_plugin_loading">加载中</string>
-    <string name="settings_plugin_enabled">已启用</string>
 
     <string name="settings_model_channels">%1$d 个渠道</string>
-    <string name="settings_model_summary">%1$d 个渠道 · %2$d 个可用</string>
     <string name="settings_model_official">官方</string>
     <string name="settings_model_subscription">订阅</string>
-    <string name="settings_model_account_line">账号 · %1$s</string>
-    <string name="settings_model_not_signed_in">未登录</string>
     <string name="settings_model_signed_in">已登录</string>
     <string name="settings_model_custom_subtitle">%1$s 兼容 · %2$d 个模型</string>
     <string name="settings_model_basic">基本信息</string>
     <string name="settings_model_name">名称</string>
     <string name="settings_model_name_hint">比如：我的网关</string>
-    <string name="settings_model_route_hint">渠道 ID：%1$s</string>
     <string name="settings_model_protocol">兼容协议</string>
     <string name="settings_model_connection">连接</string>
     <string name="settings_model_base_url">Base URL</string>
@@ -816,36 +719,21 @@
     <string name="settings_model_fetch_models">获取模型</string>
     <string name="settings_model_fetched">已获取 %1$d 个模型</string>
     <string name="settings_model_fetch_hint">向端点请求模型列表</string>
-    <string name="settings_model_list">模型列表</string>
     <string name="settings_model_show_key">显示 Key</string>
     <string name="settings_model_hide_key">隐藏 Key</string>
-    <string name="settings_model_registered">已注册渠道</string>
-    <string name="settings_model_registered_hint">官方与订阅渠道由引擎提供。</string>
-    <string name="settings_model_deepseek">DeepSeek</string>
-    <string name="settings_model_deepseek_hint">登录账号，或使用 App 管理的 API Key</string>
     <string name="settings_model_custom">自定义渠道</string>
     <string name="settings_model_custom_hint">引擎里的 OpenAI / Anthropic 兼容路由。</string>
     <string name="settings_model_add">添加渠道</string>
-    <string name="settings_model_add_hint">渠道 ID、服务地址、协议和模型</string>
-    <string name="settings_model_count">%1$d 个模型</string>
     <string name="settings_model_empty">还没有自定义渠道。</string>
     <string name="settings_model_edit">编辑渠道</string>
     <string name="settings_model_delete">删除渠道</string>
     <string name="settings_model_delete_confirm">移除“%1$s”？它的 API Key 会保留在凭据库。</string>
 
-    <string name="settings_web_search_service">搜索服务</string>
     <string name="settings_web_search_new_api">新版搜索 API</string>
     <string name="settings_web_search_deepseek">DeepSeek 搜索</string>
     <string name="settings_web_search_switch_hint">引擎会同时写入搜索和抓取服务。</string>
-    <string name="settings_web_search_api">使用 DeepSeek Search / Fetch API</string>
-    <string name="settings_web_search_api_on">搜索和抓取使用 API 服务。</string>
-    <string name="settings_web_search_api_off">搜索和抓取使用 Messages 默认服务。</string>
-    <string name="settings_web_search_api_config">Search API</string>
-    <string name="settings_web_search_messages_config">Messages 搜索</string>
-    <string name="settings_web_search_current">搜索：%1$s · 抓取：%2$s</string>
     <string name="settings_web_search_api_short">Search API</string>
 
-    <string name="settings_permission_default">新会话默认权限</string>
     <string name="settings_permission_hint">从这里开始的新对话会使用该权限预设。</string>
     <string name="settings_permission_reset_hint">回到引擎默认值（%1$s）。</string>
     <string name="settings_permission_confirm_title">使用该权限？</string>
@@ -860,27 +748,19 @@
     <string name="settings_notify_approval_hint">等待你批准或确认</string>
     <string name="settings_notify_question_hint">有问题等你回答</string>
     <string name="settings_notifications_system_footer">锁屏隐私由 Android 控制；通知内容可能显示在锁屏上。</string>
-    <string name="settings_notifications_engine_ready">引擎就绪</string>
-    <string name="settings_notifications_engine_ready_hint">本机引擎启动完成时通知。</string>
     <string name="settings_notifications_system">系统</string>
     <string name="settings_notifications_system_status">系统通知</string>
     <string name="settings_notifications_allowed">已允许</string>
     <string name="settings_notifications_blocked">已阻止</string>
     <string name="settings_notifications_denied">未授权</string>
-    <string name="settings_notifications_open_system">打开系统通知设置</string>
     <string name="settings_notifications_open_system_hint">在 Android 设置里允许 DSHM Bot 的通知。</string>
     <string name="settings_notifications_permission_denied">通知权限被拒绝，请在系统设置里开启。</string>
 
 
-    <string name="settings_background_status">状态</string>
     <string name="settings_background_hint">没有加入电池优化白名单时，Android 可能在后台停掉引擎。</string>
     <string name="settings_background_battery">电池优化</string>
     <string name="settings_background_allowed">已允许</string>
     <string name="settings_background_needs_setup">需设置</string>
-    <string name="settings_background_open">允许后台运行</string>
-    <string name="settings_background_open_hint">打开 DSHM Bot 的电池设置。</string>
-    <string name="settings_background_vendor">手机厂商</string>
-    <string name="settings_background_vendor_hint">部分系统还有“自启动”或“高耗电”开关。允许 DSHM Bot 后引擎才能持续运行。</string>
     <string name="settings_background_system">系统</string>
     <string name="settings_background_exempt">已关闭</string>
     <string name="settings_background_not_exempt">未关闭</string>
@@ -910,40 +790,17 @@
     <string name="settings_background_vendor_samsung_key">后台使用限制</string>
     <string name="settings_background_vendor_samsung_path">设置 → 电池 → 后台使用限制 → 不移除 DSHM Bot</string>
 
-    <string name="settings_privacy_local">本机</string>
     <string name="settings_privacy_log">向 DeepSeek 上传对话日志</string>
     <string name="settings_privacy_log_hint">开启后，引擎会把对话日志上传到 DeepSeek。</string>
     <string name="settings_privacy_log_unavailable">当前引擎版本没有提供对话日志设置。</string>
 
-    <string name="settings_interface_home">起始界面</string>
-    <string name="settings_interface_hint">网页模式会把 DSH Web 作为首页。</string>
-    <string name="settings_interface_web_hint">用 DSH Web 作为首页。</string>
-    <string name="settings_interface_web_unavailable">启动本机引擎后才能编辑网页设置。</string>
 
-    <string name="settings_about_app">应用</string>
-    <string name="settings_licenses_components">组件</string>
-    <string name="settings_licenses_project">本项目</string>
 
-    <string name="personalization_title_hint">引擎会在内置 AGENTS.md 之后加载它。</string>
-    <string name="personalization_section">你的 AGENTS.md</string>
-    <string name="personalization_placeholder">写清楚 Bot 应该如何配合你…</string>
-    <string name="personalization_saved_hint">已保存，新会话会自动读取。</string>
-    <string name="personalization_save_failed">写入失败，请确认运行时已安装。</string>
 
-    <string name="voice_engine_unavailable">当前版本没有内置引擎语音模型，请使用系统识别。</string>
     <string name="voice_engine_unavailable_short">未内置</string>
-    <string name="voice_model_note">SenseVoice 模型需要引擎语音运行时；当前版本使用 Android 系统语音识别。</string>
-    <string name="voice_model_not_installed">未内置</string>
 
-    <string name="pets_display">显示</string>
-    <string name="pets_hint">宠物会浮在 App 内容上方；系统级悬浮窗还需要 dsh-Go 的原生桥接。</string>
-    <string name="pets_enable">显示宠物</string>
-    <string name="pets_enable_hint">把宠物画在 App 内容上方。</string>
-    <string name="pets_style">宠物</string>
-    <string name="pets_size">大小</string>
 
     <string name="phone_control_service_description">允许 DSHM Bot 在你要求时执行点按、滑动和导航等手机操控动作。</string>
-    <string name="phone_control_service">无障碍服务</string>
     <string name="phone_control_service_hint">Android 要求先在系统设置里启用无障碍服务，App 才能控制手机。</string>
     <string name="phone_control_accessibility">无障碍服务</string>
     <string name="phone_control_service_enabled">已启用</string>
@@ -951,12 +808,10 @@
     <string name="phone_control_open_settings">打开无障碍设置</string>
     <string name="phone_control_open_settings_hint">设置 → 无障碍 → DSHM Bot</string>
     <string name="phone_control_enable">允许手机操控</string>
-    <string name="phone_control_enable_hint">你要求时，指定的手机操控 Bot 可以操控这台手机。</string>
     <string name="phone_control_enable_main_bot_hint">只允许你指定的手机操控 Bot 在自己的对话里操控这台手机；其他 Bot 和群聊不能使用。</string>
     <string name="phone_control_enable_blocked">请先启用无障碍服务。</string>
     <string name="phone_control_confirm">确认方式</string>
     <string name="phone_control_confirm_hint">确认通知由手机操控 Bot 发给你；密码、验证码和支付输入框始终不代填。</string>
-    <string name="phone_control_bridge_note">手机操控的引擎桥接尚未接入；当前版本只保存服务状态和确认偏好。</string>
     <string name="phone_approval_channel">手机操控确认</string>
     <string name="phone_approval_channel_hint">手机操控 Bot 操作前需要你确认时使用</string>
     <string name="phone_approval_title">允许这次手机操作？</string>
@@ -971,7 +826,6 @@
     <string name="phone_handoff_stop">停止</string>
     <string name="phone_handoff_done">用户已完成操作，可以继续。</string>
     <string name="phone_handoff_stopped">用户停止了手机操控。</string>
-    <string name="phone_sensitive_blocked">这是密码 / 验证码 / 支付类输入框，手机操控 Bot 不能代填。请使用 phone_handoff 让用户自己完成。</string>
     <string name="settings_phone_recent_actions">最近操作</string>
     <string name="settings_phone_no_actions">还没有手机操作</string>
     <string name="settings_phone_no_actions_hint">手机操控 Bot 读屏、点按、输入和打开 App 会记在这里。</string>
@@ -980,16 +834,10 @@
     <string name="settings_notify_error">出错或被停下</string>
     <string name="settings_notify_approval">等你确认</string>
     <string name="settings_notify_question">向你提问</string>
-    <string name="settings_notify_hint">声音、横幅和锁屏显示在系统设置里调整。</string>
     <!-- dsh-Go 设置 IA：外观 -->
-    <string name="settings_fold_process">完成后收起过程</string>
-    <string name="settings_fold_process_hint">把思考和工具调用折叠成一行。</string>
     <!-- 尚未接入能力的统一说明 -->
-    <string name="settings_unavailable">当前版本不可用</string>
-    <string name="settings_unavailable_hint">需要尚未接入的能力，暂不提供开关。</string>
     <string name="settings_engine_required">需要本机引擎处于运行状态。</string>
     <!-- 权限 -->
-    <string name="settings_permission_current">当前对话</string>
     <string name="settings_permission_new_default">新对话默认</string>
     <string name="settings_permission_phone_files">访问手机文件</string>
     <string name="settings_permission_phone_confirm">手机操控确认</string>
@@ -1001,24 +849,13 @@
     <string name="settings_permission_phone_files_grant">请先在系统设置里允许「所有文件访问」，返回后再打开此开关。</string>
     <string name="settings_permission_phone_confirm_hint">设置手机操控在什么时候需要确认。</string>
     <!-- 个性化 -->
-    <string name="settings_personal_preference">个人偏好</string>
-    <string name="settings_visual_replies">可视化回复</string>
     <string name="settings_agent_presets">Agent 预设</string>
     <!-- 隐私与关于 -->
-    <string name="settings_privacy_share_links">我的分享链接</string>
-    <string name="settings_privacy_share_config">分享配置</string>
-    <string name="settings_privacy_usage">发送匿名使用统计</string>
-    <string name="settings_privacy_upload_logs">上传对话日志</string>
-    <string name="settings_about_help">使用帮助</string>
-    <string name="settings_about_community">社区</string>
-    <string name="settings_about_diagnostics">诊断</string>
     <string name="settings_about_check_update">检查更新</string>
-    <string name="settings_about_auto_update">自动检查更新</string>
     <string name="settings_project_url">项目地址</string>
     <string name="settings_harness_url">DeepSeek Harness 地址</string>
     <string name="info_open_source_thanks">感谢 dsh-Go、DS-Bot、DeepSeek Harness、proot 等开源项目：点击项目名称可打开对应源码地址。</string>
     <string name="settings_model_test_connection">测试连接</string>
-    <string name="settings_model_settings">模型设置</string>
     <string name="settings_model_credential_locked">该凭据由启动环境提供，无法在这里修改</string>
     <string name="settings_model_enter_name">请填写名称</string>
     <string name="settings_model_enter_base_url">请填写服务地址</string>
@@ -1031,10 +868,6 @@
     <string name="plugins_uninstall_hint">这个包会被移除，引擎可能需要重启。</string>
     <string name="settings_plugins_update">更新插件</string>
     <string name="settings_plugins_uninstall">卸载插件</string>
-    <string name="settings_web_search_current_label">当前服务</string>
-    <string name="settings_web_search_budget_section">预算与进阶</string>
-    <string name="settings_web_search_budget">搜索预算</string>
-    <string name="settings_phone_before_start">开启说明</string>
     <string name="settings_phone_setup">开启与准备</string>
     <string name="settings_phone_owner">手机操控 Bot</string>
     <string name="settings_phone_owner_hint">手机只有一台，只挂给你选中的一个 Bot；其他 Bot 和群聊不会看到手机工具。</string>
@@ -1059,8 +892,6 @@
     <string name="settings_phone_supports_row">读屏、点按、输入、滑动、系统键、打开 App</string>
     <string name="settings_phone_supports_hint">手机操控已接入引擎；确认弹窗、悬浮条、应用名单和操作记录后续补齐。</string>
     <string name="settings_phone_read_screen">读一下当前屏幕</string>
-    <string name="settings_phone_restore_a11y">自动恢复无障碍</string>
-    <string name="settings_phone_floating_bar">悬浮条</string>
     <string name="settings_phone_app_rules">应用名单</string>
     <string name="settings_phone_rules">规则</string>
     <string name="settings_phone_app_rules_hint">给单个 App 设置「照常 / 每步确认 / 不碰」。</string>
@@ -1071,28 +902,12 @@
     <string name="settings_phone_app_rule_normal_hint">按全局确认方式处理</string>
     <string name="settings_phone_app_rule_confirm_hint">每次操作都先问你</string>
     <string name="settings_phone_app_rule_deny_hint">不读也不操作</string>
-    <string name="settings_phone_unlock">解除限制</string>
-    <string name="settings_phone_dnd">不打扰模式</string>
-    <string name="settings_phone_operation_log">操作记录</string>
-    <string name="settings_phone_advanced">进阶</string>
     <string name="phone_confirm_ask">每次询问</string>
     <string name="phone_confirm_task">每个任务询问</string>
     <string name="phone_confirm_always">不再询问</string>
     <string name="phone_confirm_ask_hint">每个动作前确认</string>
     <string name="phone_confirm_task_hint">每个任务开始时确认一次</string>
     <string name="phone_confirm_always_hint">完全信任，动作直接执行</string>
-    <string name="settings_web_option_code_view">显示代码工作视图</string>
-    <string name="settings_web_option_steps">工作步骤的展示和收起时机</string>
-    <string name="settings_web_option_performance">性能与用量</string>
-    <string name="settings_web_option_send_busy">AI 工作时怎么发送</string>
-    <string name="settings_web_option_links">链接怎么打开</string>
-    <string name="settings_web_option_phone_layout">手机布局</string>
-    <string name="settings_web_option_open_once">只打开一次网页版</string>
-    <string name="settings_voice_offline_model">离线语音模型</string>
-    <string name="settings_voice_custom_words">自定义识别词库</string>
-    <string name="settings_web_section_display">网页版显示与发送</string>
-    <string name="settings_web_section_mode">网页模式</string>
-    <string name="settings_voice_other_capabilities">其他语音能力</string>
     <string name="settings_phone_service_hint">需要在系统设置 → 无障碍里启用 DSHM Bot。启用后只有你选中的手机操控 Bot 自己的对话能调用手机工具。</string>
     <!-- 账号页：按 dsh-Go 信息架构重做 -->
     <string name="account_deepseek_title">DeepSeek 账号</string>
@@ -1111,9 +926,7 @@
     <string name="account_sign_out_confirm_title">退出登录？</string>
     <string name="account_sign_out_confirm_body">退出后需要重新登录才能使用账号额度。</string>
     <string name="account_sign_out_confirm_busy">有任务正在使用账号，退出可能中断它们。</string>
-    <string name="account_signed_in_notice">登录成功</string>
     <string name="account_sign_in_failed">登录未完成，请重试</string>
-    <string name="account_engine_unsupported">当前引擎不支持账号登录</string>
     <string name="account_error_offline">网络连不上，检查网络后再试。</string>
     <string name="account_error_service">登录服务不可用，请稍后重试。</string>
     <string name="account_error_protocol">授权未完成，请重试。</string>
@@ -1139,9 +952,6 @@
     <string name="settings_model_health_ready">可用</string>
     <string name="settings_model_detail_enter_key">填写 API Key</string>
     <string name="settings_model_detail_no_models">暂无模型</string>
-    <string name="settings_model_detail_context">上下文 %1$d</string>
-    <string name="settings_model_detail_max_output">最大输出 %1$d</string>
-    <string name="settings_model_detail_input_types">输入 %1$s</string>
     <string name="settings_model_picker_title">选择模型</string>
     <string name="settings_model_picker_add">添加 %1$d 个模型</string>
     <string name="settings_model_picker_empty">端点没有返回任何模型</string>
@@ -1156,7 +966,6 @@
     <string name="settings_model_add_manual_duplicate">这个模型已经添加过了</string>
     <string name="settings_model_fetching">正在获取模型…</string>
     <!-- 模型设置页（对齐 dsh-Go provider_model_page） -->
-    <string name="settings_model_item_settings">模型设置</string>
     <string name="settings_model_item_basic">基本信息</string>
     <string name="settings_model_item_name">名称</string>
     <string name="settings_model_item_limits">Token 上限</string>

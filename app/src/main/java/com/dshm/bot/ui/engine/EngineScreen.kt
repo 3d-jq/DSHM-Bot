@@ -50,7 +50,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -69,6 +68,7 @@ import com.dshm.bot.ui.settings.SettingsSection
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSwitchRow
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /** 默认下载地址：我们自己的 Release 运行时包。 */
 const val DEFAULT_RUNTIME_URL =
@@ -85,6 +85,7 @@ const val DEFAULT_RUNTIME_URL =
 @Composable
 fun EngineScreen(
     state: RuntimeState,
+    modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     onInstall: (String) -> Unit = {},
     onStart: () -> Unit = {},
@@ -102,7 +103,6 @@ fun EngineScreen(
     autoStart: Boolean = true,
     onAutoStartChange: (Boolean) -> Unit = {},
     logText: () -> String = { "" },
-    modifier: Modifier = Modifier,
 ) {
     var showStopDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
@@ -681,7 +681,7 @@ private fun EngineLogCard(logs: String) {
         }
     }
     // 高度跟着屏幕走：约 42%，但不低于 260、不高于 520（对齐 dsh-Go 的 logHeight）。
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val screenHeight = rememberWindowHeightDp()
     val wellHeight = (screenHeight * LOG_HEIGHT_FRACTION)
         .coerceIn(Dshm.spacing.logWellMin, Dshm.spacing.logWellMax)
     val shape = RoundedCornerShape(Dshm.radius.settingsCard)

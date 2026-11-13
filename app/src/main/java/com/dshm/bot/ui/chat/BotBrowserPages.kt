@@ -38,6 +38,7 @@ import com.dshm.bot.ui.settings.SettingsSegmentedPill
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.net.toUri
 
 /**
  * 浏览历史页：按 Bot 记录最近访问的页面，点一条就在当前标签里打开。
@@ -408,7 +409,7 @@ private fun timeLabel(timeMs: Long): String {
 }
 
 internal fun browserHostOf(url: String): String? =
-    runCatching { android.net.Uri.parse(url).host }.getOrNull()?.takeIf { it.isNotBlank() }
+    runCatching { url.toUri().host }.getOrNull()?.takeIf { it.isNotBlank() }
 
 private const val UA_MOBILE =
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) " +

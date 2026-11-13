@@ -129,9 +129,7 @@ object PhoneApprovalGate {
     }
 
     private fun ensureChannel(context: Context, manager: NotificationManager) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager.getNotificationChannel(CHANNEL) == null
-        ) {
+        if (manager.getNotificationChannel(CHANNEL) == null) {
             manager.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL,

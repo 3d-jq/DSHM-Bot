@@ -31,6 +31,8 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
+import androidx.core.content.edit
+import androidx.core.net.toUri
 
 /** 一个浏览器标签（标题 / 地址随 WebView 回调更新）。 */
 data class BotBrowserTab(
@@ -346,9 +348,9 @@ class BotBrowserSession internal constructor(
     fun setUserAgent(value: String?) {
         val clean = value?.trim()?.takeIf { it.isNotEmpty() }
         userAgentOverride = clean
-        prefs.edit().apply {
+        prefs.edit {
             if (clean == null) remove(KEY_UA) else putString(KEY_UA, clean)
-        }.apply()
+        }
         views.values.forEach { view ->
             view.settings.userAgentString = clean
         }
@@ -363,9 +365,9 @@ class BotBrowserSession internal constructor(
     fun setViewportWidth(width: Int) {
         val clean = width.takeIf { it in 200..2400 }
         viewportWidth = clean
-        prefs.edit().apply {
+        prefs.edit {
             if (clean == null) remove(KEY_VIEWPORT) else putInt(KEY_VIEWPORT, clean)
-        }.apply()
+        }
         val view = activeWebView() ?: return
         applyViewport(view)
         view.reload()
@@ -374,7 +376,7 @@ class BotBrowserSession internal constructor(
     /** 恢复「跟随设备」视口。 */
     fun resetViewport() {
         viewportWidth = null
-        prefs.edit().remove(KEY_VIEWPORT).apply()
+        prefs.edit { remove(KEY_VIEWPORT) }
         val view = activeWebView() ?: return
         view.setInitialScale(0)
         view.settings.useWideViewPort = true
@@ -415,7 +417,7 @@ class BotBrowserSession internal constructor(
 
     fun clearHistory() {
         history.clear()
-        prefs.edit().remove(KEY_HISTORY).apply()
+        prefs.edit { remove(KEY_HISTORY) }
     }
 
     private fun saveHistory() {
@@ -428,7 +430,7 @@ class BotBrowserSession internal constructor(
                     .put("time", entry.visitedAt),
             )
         }
-        prefs.edit().putString(KEY_HISTORY, array.toString()).apply()
+        prefs.edit { putString(KEY_HISTORY, array.toString()) }
     }
 
     private fun loadHistory() {
@@ -456,7 +458,7 @@ class BotBrowserSession internal constructor(
             .plus(history.map { it.url })
             .forEach { link ->
                 if (!link.startsWith("http://") && !link.startsWith("https://")) return@forEach
-                val host = runCatching { Uri.parse(link).host }.getOrNull()
+                val host = runCatching { link.toUri().host }.getOrNull()
                 if (!host.isNullOrBlank() && host !in this) add(host)
             }
     }.take(MAX_COOKIE_DOMAINS)
@@ -664,7 +666,7 @@ class BotBrowserSession internal constructor(
                     downloadRootfsFile(url, contentDisposition, mimeType)
                 } else {
                     val name = downloadName(url)
-                    val request = DownloadManager.Request(Uri.parse(url))
+                    val request = DownloadManager.Request(url.toUri())
                         .setMimeType(mimeType)
                         .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                         .setTitle(name)
@@ -714,7 +716,7 @@ class BotBrowserSession internal constructor(
     }
 
     private fun downloadRootfsFile(url: String, contentDisposition: String?, mimeType: String?) {
-        val source = RootfsWeb.fileFor(context, Uri.parse(url)) ?: return
+        val source = RootfsWeb.fileFor(context, url.toUri()) ?: return
         val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
             .ifBlank { downloadName(url) }
         val id = -System.nanoTime()
@@ -763,7 +765,7 @@ class BotBrowserSession internal constructor(
             url.startsWith("${RootfsWeb.SCHEME}://")
 
     private fun downloadName(url: String): String =
-        Uri.parse(url).lastPathSegment?.takeIf { it.isNotEmpty() } ?: "download"
+        url.toUri().lastPathSegment?.takeIf { it.isNotEmpty() } ?: "download"
 
     companion object {
         /** 每个 Bot 最多同时开几张标签（DOM/内存的折中）。 */

@@ -58,6 +58,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.ui.components.FloatingIconButton
+import androidx.core.net.toUri
 
 /**
  * Bot 的浏览器：全屏页。面板里的「浏览器」分类直接内嵌 [BotBrowserPanel]，这一页是它的
@@ -67,10 +68,10 @@ import com.dshm.bot.ui.components.FloatingIconButton
 fun BotBrowserScreen(
     botId: String?,
     botName: String?,
-    initialUrl: String? = null,
-    onInitialUrlConsumed: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    initialUrl: String? = null,
+    onInitialUrlConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val store = remember { BotBrowserStore.of(context) }
@@ -251,7 +252,7 @@ internal fun BotBrowserPanel(
                 if (!url.isNullOrEmpty()) {
                     runCatching {
                         context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            Intent(Intent.ACTION_VIEW, url.toUri())
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                         )
                     }
@@ -859,4 +860,4 @@ private fun BrowserWebArea(webView: WebView, modifier: Modifier = Modifier) {
 }
 
 private fun hostOf(url: String): String? =
-    runCatching { Uri.parse(url).host }.getOrNull()?.takeIf { !it.isNullOrEmpty() }
+    runCatching { url.toUri().host }.getOrNull()?.takeIf { !it.isNullOrEmpty() }

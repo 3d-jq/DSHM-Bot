@@ -35,11 +35,13 @@ class SettingsScreenTest {
         onOpenPage: (SettingsPageId) -> Unit = {},
     ) {
         val engineSettings = EngineSettingsViewModel()
+        val botPrefs = BotPrefsViewModel(endpoint = null)
         composeRule.setContent {
             DshmTheme(darkTheme = false) {
                 SettingsScreen(
                     uiState = SettingsUiState(themeMode = themeMode),
                     engineSettings = engineSettings,
+                    botPrefs = botPrefs,
                     onBack = {},
                     onOpenEngine = {},
                     onThemeChange = onThemeChange,

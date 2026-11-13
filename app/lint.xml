@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DSHM Bot lint 豁免清单。
+
+  原则：能用代码修的都修代码（本轮修了 NewApi / ObsoleteSdkInt / DefaultLocale /
+  SharedPreferences.edit / Uri.toUri / Color.toColorInt / 未使用资源 / 拼写 / 日期破折号）；
+  只有「改代码会让行为变坏」或「属于既定工程决策」的告警才在这里禁用，并写明理由。
+  能用 <ignore path> 精确定位的就不全局关，避免以后别处真的踩坑时被一起静默。
+
+  · PluralsCandidate：界面向中文优先（values 只是英文回退），`%d 名词` 现在渲染正确；
+    转 <plurals> 要动 21×2 条字符串 + 大量 getQuantityString 调用点，收益近零 → 只豁免两个 strings.xml。
+  · StaticFieldLeak：手机悬浮条 / 结果卡 / 浏览器池是刻意设计的单例
+    （PhoneOverlay / PhoneResultOverlay / PhoneStage / BotBrowserStore / BotChatViewModel），
+    持 Context 是设计取舍；改成非单例是重构，另开一轮 → 只豁免这几个文件。
+  · UseKtx：剩下的是 Bitmap.createBitmap/createScaledBitmap/getPixel、Canvas
+    save/clipPath/rotate/scale、setBackgroundDrawable —— KTX 改写会改变嵌套语义，
+    属风格偏好而非缺陷 → 只豁免这几个文件。
+  · InternalInsetResource / DiscouragedApi：悬浮条要拿真实的状态栏/导航栏像素高度定位，
+    走资源反射（status_bar_height / navigation_bar_height），不是 Compose inset。
+  · ScopedStorage：引擎（PRoot + Node）需要 MANAGE_EXTERNAL_STORAGE 访问 rootfs，见 docs/architecture.md；
+    targetSdk 28 也是为此。
+  · SdCardPath：引擎 rootfs 的 /sdcard 路径由 PRoot 固定，属于运行时契约。
+  · AppBundleLocaleChanges：运行时切语言由 App 自己管（AppLanguage），不走 Play 动态语言。
+  · BatteryLife：引擎常驻前台服务请求忽略电池优化，属于既定取舍。
+  · ChromeOsAbiSupport：只打 arm64（PRoot 原生二进制），不支援 ChromeOS x86。
+  · SetJavaScriptEnabled：Bot 专属浏览器必须开 JS 才能跑（DeepSearch 同款）。
+  · SetWorldReadable：PRoot guest 初始化需要 world-readable 权限，属于运行时契约。
+  · DrawAllocation：自定义打面 View 里一次性分配 paint；ViewConstructor：PhoneBotFace 只在代码里用；
+    SetTextI18n：悬浮条文案是运行时动态文本（bot 名/动作）。
+  · IconXmlAndPng：启动图标是刻意做的「legacy PNG + adaptive XML」两套（README 的图标一节，
+    AppIconResourcesTest 守护），launcher 缓存刷新要靠它，属于既定产物结构。
+  · UnusedResources（仅 Lucide 生成图标）：这套图标由 tools/fetch_lucide_icons.py 从钉死版本
+    本地生成、LucideIconResourcesTest 守护，是「按清单生成」而非「按引用生成」；
+    个别图标暂时没被界面引用也不单独删（删了会让生成清单与产物不一致），下次要用时直接可用。
+    其它真正没人用的字符串/资源本轮已经删干净。
+-->
+<lint>
+  <issue id="PluralsCandidate">
+    <ignore path="src/main/res/values/strings.xml"/>
+    <ignore path="src/main/res/values-zh/strings.xml"/>
+  </issue>
+
+  <issue id="StaticFieldLeak">
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneOverlay.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneResultOverlay.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneStage.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/ui/chat/BotBrowserStore.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/ui/chat/BotChatViewModel.kt"/>
+  </issue>
+
+  <issue id="UseKtx">
+    <ignore path="src/main/java/com/dshm/bot/ui/chat/BotBrowserStore.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/ui/chat/BrowserReadBridge.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/MainActivity.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneBotFace.kt"/>
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneStage.kt"/>
+  </issue>
+
+  <!-- 工程决策类：全局豁免，理由见文件头。 -->
+  <issue id="InternalInsetResource" severity="ignore"/>
+  <issue id="DiscouragedApi" severity="ignore"/>
+  <issue id="ScopedStorage" severity="ignore"/>
+  <issue id="SdCardPath" severity="ignore"/>
+  <issue id="AppBundleLocaleChanges" severity="ignore"/>
+  <issue id="BatteryLife" severity="ignore"/>
+  <issue id="ChromeOsAbiSupport" severity="ignore"/>
+  <issue id="SetJavaScriptEnabled" severity="ignore"/>
+  <issue id="SetWorldReadable" severity="ignore"/>
+  <issue id="DrawAllocation">
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneBotFace.kt"/>
+  </issue>
+  <issue id="ViewConstructor">
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneBotFace.kt"/>
+  </issue>
+  <issue id="SetTextI18n">
+    <ignore path="src/main/java/com/dshm/bot/service/PhoneOverlay.kt"/>
+  </issue>
+  <issue id="IconXmlAndPng" severity="ignore"/>
+  <issue id="UnusedResources">
+    <ignore path="src/main/res/drawable/ic_lucide_at_sign.xml"/>
+    <ignore path="src/main/res/drawable/ic_lucide_chart_column.xml"/>
+    <ignore path="src/main/res/drawable/ic_lucide_folder.xml"/>
+    <ignore path="src/main/res/drawable/ic_lucide_paw_print.xml"/>
+    <ignore path="src/main/res/drawable/ic_lucide_shopping_bag.xml"/>
+    <ignore path="src/main/res/drawable/ic_lucide_store.xml"/>
+    <ignore path="src/main/res/drawable/ic_lucide_timer.xml"/>
+  </issue>
+</lint>

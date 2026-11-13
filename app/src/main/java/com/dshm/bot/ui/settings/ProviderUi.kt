@@ -137,7 +137,7 @@ fun ProviderField(
  * 对齐 dsh-Go 的 `modelSummary`；没有可说的事时返回空串。
  */
 @Composable
-fun ProviderModelSummary(model: ProviderModelSpec, defaults: ModelDefaults): String {
+fun providerModelSummary(model: ProviderModelSpec, defaults: ModelDefaults): String {
     val parts = mutableListOf<String>()
     if (model.label != model.id) parts += model.id
     model.contextWindow?.let {

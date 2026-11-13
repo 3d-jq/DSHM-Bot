@@ -38,6 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /**
  * 长按一条消息时弹出的操作面板（对齐 dsh-Go 的 `showMessageMenu`）：
@@ -169,7 +170,7 @@ internal fun SelectTextSheet(
     onCopyAll: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val screenHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp
+    val screenHeight = rememberWindowHeightDp()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,

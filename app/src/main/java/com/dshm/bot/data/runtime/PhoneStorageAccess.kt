@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.core.net.toUri
 
 /**
  * 「访问手机文件」的系统权限与偏好（对齐 dsh-Go `RuntimeBridge.requestStorage` /
@@ -43,7 +44,7 @@ object PhoneStorageAccess {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val intent = Intent(
                 Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                Uri.parse("package:${context.packageName}"),
+                "package:${context.packageName}".toUri(),
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (runCatching { context.startActivity(intent) }.isFailure) {
                 runCatching {

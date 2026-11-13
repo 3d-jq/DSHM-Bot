@@ -3,6 +3,7 @@ package com.dshm.bot.data.remote
 import com.dshm.bot.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.TimeZone
 
 /**
@@ -159,7 +160,7 @@ class DshAccountRepository(
             val wallet = wallets?.optJSONObject(0) ?: return null
             val raw = wallet.optString("balance")
             if (raw.isEmpty()) return null
-            val display = raw.toDoubleOrNull()?.let { String.format("%.2f", it) } ?: raw
+            val display = raw.toDoubleOrNull()?.let { String.format(Locale.ROOT, "%.2f", it) } ?: raw
             val currency = wallet.optString("currency").ifEmpty { "CNY" }
             return if (currency == "CNY") "¥$display" else "$display $currency"
         }

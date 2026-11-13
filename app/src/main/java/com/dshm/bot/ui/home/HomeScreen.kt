@@ -39,7 +39,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -63,6 +62,7 @@ fun HomeScreen(
     onCreateGroup: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
     /** 长按面板：置顶 / 取消置顶。 */
     onTogglePin: (ChatRowUi) -> Unit = {},
     /** 长按面板：删除（上层再调 `delete-bot` / `delete-room`）。 */
@@ -73,7 +73,6 @@ fun HomeScreen(
     /** 引擎正在启动（还没连上）：首屏先出骨架，别显示「还没有内容」。 */
     engineBooting: Boolean = false,
     onEngineClick: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     var pendingDelete by remember { mutableStateOf<ChatRowUi?>(null) }
     var rowMenu by remember { mutableStateOf<Pair<ChatRowUi, androidx.compose.ui.geometry.Rect>?>(null) }
@@ -162,11 +161,11 @@ fun HomeScreen(
 private fun HomeContent(
     uiState: HomeUiState,
     onOpenBot: (String) -> Unit,
+    modifier: Modifier = Modifier,
     onTogglePin: (ChatRowUi) -> Unit = {},
     onDelete: (ChatRowUi) -> Unit = {},
     onLongPress: (ChatRowUi, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
     engineBooting: Boolean = false,
-    modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxWidth()) {
         when {

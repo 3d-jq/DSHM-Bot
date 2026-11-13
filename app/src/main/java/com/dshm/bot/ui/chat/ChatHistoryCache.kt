@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.core.content.edit
 
 /**
  * 对话首屏缓存：引擎的 `chat` / `room-chat` 返回里能回放的 items。
@@ -30,9 +31,9 @@ internal class ChatHistoryCache(context: Context, botId: String) {
         runCatching {
             val incoming = response.optJSONArray("items") ?: JSONArray()
             replaceAll(incoming)
-            prefs.edit()
-                .putString(KEY_SESSION, response.optString("sessionId"))
-                .apply()
+            prefs.edit {
+                putString(KEY_SESSION, response.optString("sessionId"))
+            }
         }
     }
 
@@ -65,7 +66,7 @@ internal class ChatHistoryCache(context: Context, botId: String) {
         // 替换内存副本。
         while (items.length() > 0) items.remove(0)
         for (index in 0 until kept.length()) items.put(kept.get(index))
-        prefs.edit().putString(KEY_ITEMS, kept.toString()).apply()
+        prefs.edit { putString(KEY_ITEMS, kept.toString()) }
     }
 
     private fun readItems(): JSONArray = runCatching {

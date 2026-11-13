@@ -46,9 +46,9 @@ import com.dshm.bot.ui.home.ChatRowUi
 fun BotRow(
     row: ChatRowUi,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     /** 长按：把这一行在窗口里的位置交出去，菜单由页面统一画（弹窗的点击落点不可靠）。 */
     onLongPress: (androidx.compose.ui.geometry.Rect) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     var bounds by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     Row(

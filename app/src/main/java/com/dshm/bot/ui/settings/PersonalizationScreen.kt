@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import org.json.JSONObject
+import androidx.core.graphics.toColorInt
 
 /**
  * 个性化：DS Bot 团队级 `set-prefs` 面板（主题 / 强调色 / 布局 / 宽度 / 思考行 / 动效）
@@ -225,7 +226,7 @@ private fun AccentSwatch(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val fill = color?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+    val fill = color?.let { runCatching { Color(it.toColorInt()) }.getOrNull() }
         ?: Dshm.colors.accent
     Box(
         modifier = Modifier

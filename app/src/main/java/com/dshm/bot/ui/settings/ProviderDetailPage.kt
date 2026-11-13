@@ -208,7 +208,7 @@ fun ProviderDetailPage(
                         SettingsRow(
                             title = model.label,
                             icon = R.drawable.ic_lucide_bot,
-                            subtitle = ProviderModelSummary(
+                            subtitle = providerModelSummary(
                                 model,
                                 ModelDefaults.of(profile),
                             ).takeIf { it.isNotEmpty() },

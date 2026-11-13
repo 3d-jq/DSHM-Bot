@@ -85,7 +85,6 @@ object ChatNotifier {
         (botId + ":" + kind.name).hashCode() and 0x7fffffff
 
     private fun ensureChannels(context: Context, manager: NotificationManager) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         if (manager.getNotificationChannel(CHANNEL_CHAT) == null) {
             manager.createNotificationChannel(
                 NotificationChannel(

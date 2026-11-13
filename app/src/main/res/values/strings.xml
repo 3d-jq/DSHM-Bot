@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">DSHM Bot</string>
 
     <string name="action_choose">Choose</string>
@@ -52,10 +52,8 @@
     <string name="new_bot_brief">First message</string>
     <string name="new_bot_creating">Creating…</string>
     <string name="bot_settings_color">Color</string>
-    <string name="home_coming_soon">Coming soon</string>
     <string name="chat_placeholder_title">Chat with %1$s</string>
     <string name="chat_placeholder_hint">Messages run on your local DSH engine.</string>
-    <string name="chat_loading">Loading conversation…</string>
     <string name="chat_load_failed">Couldn’t load this conversation</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_send_failed">Message not sent: %1$s</string>
@@ -64,12 +62,10 @@
     <string name="approval_allow_once">Allow once</string>
     <string name="approval_in_dsh">Answer this request in DSH</string>
     <string name="question_waiting">Waiting for your answer</string>
-    <string name="chat_load_earlier">Load earlier messages</string>
     <string name="chat_engine_off_title">Local engine is off</string>
     <string name="chat_engine_off_hint">Start it in Settings → Local engine, then come back.</string>
     <string name="web_load_failed">DSH Web couldn’t load</string>
     <string name="chat_details">Open bot details</string>
-    <string name="bot_settings_title">Bot settings</string>
     <string name="bot_settings_page_title">Settings</string>
     <string name="bot_settings_main_badge">Main Bot</string>
     <string name="bot_settings_main">Main Bot</string>
@@ -91,25 +87,12 @@
     <string name="bot_settings_context">Context</string>
     <string name="bot_settings_memory_empty">Nothing saved yet</string>
     <string name="bot_settings_memory_count">%1$d entries</string>
-    <string name="bot_details_memory_add_hint">Write something to remember…</string>
-    <string name="bot_details_memory_topic_hint">Group (optional)</string>
-    <string name="bot_details_memory_add">Add to memory</string>
-    <string name="bot_details_memory_edit">Edit</string>
-    <string name="bot_details_memory_edit_title">Edit this entry</string>
-    <string name="bot_details_memory_summary">Summary</string>
-    <string name="bot_details_memory_summary_stale">The summary may be out of date</string>
-    <string name="bot_details_memory_summary_writing">Writing the summary…</string>
     <string name="bot_details_memory_by_you">by you</string>
-    <string name="bot_details_memory_scope_own">Memory of %1$s</string>
-    <string name="bot_details_memory_scope_team">Team memory</string>
-    <string name="bot_details_memory_scope_group">Group memory</string>
-    <string name="bot_details_memory_chars">%1$d chars</string>
     <string name="memory_title_summary">Memory summary</string>
     <string name="memory_title_entries">All entries</string>
     <string name="memory_menu">Memory options</string>
     <string name="memory_regenerate">Regenerate summary</string>
     <string name="memory_back">Back to the summary</string>
-    <string name="memory_close">Close memory</string>
     <string name="memory_writing">Writing the summary…</string>
     <string name="memory_updating">Updating…</string>
     <string name="memory_updated_ago">Updated %1$s</string>
@@ -128,7 +111,6 @@
     <string name="memory_section_group_hint">Only its members read it</string>
     <string name="memory_size">%1$s of %2$s characters</string>
     <string name="memory_remove">Remove from memory</string>
-    <string name="memory_remove_again">Click again to remove</string>
     <string name="memory_remove_confirm">Remove</string>
     <string name="memory_ago_minutes">%1$d min ago</string>
     <string name="memory_ago_hours">%1$d h ago</string>
@@ -214,18 +196,15 @@
     <string name="chat_member_dock_waiting_two">%1$s and %2$s are waiting for your approval</string>
     <string name="chat_member_dock_waiting_more">%1$s, %2$s and %3$d more are waiting for your approval</string>
     <string name="chat_member_dock_doing">%1$s · %2$s…</string>
-    <string name="chat_copy_transcript">Copy conversation</string>
     <string name="chat_selection_copy">Copy</string>
     <string name="chat_selection_add_to_input">Add to input</string>
     <string name="chat_selection_copy_markdown">Copy full message</string>
-    <string name="chat_longpress_copy">Copy</string>
     <string name="chat_menu_copy">Copy</string>
     <string name="chat_menu_select_text">Select text</string>
     <string name="chat_copy_all">Copy all</string>
     <string name="chat_menu_share">Share</string>
     <string name="chat_menu_edit_resend">Edit and resend</string>
     <string name="chat_menu_edit_resend_hint">Change it, then send again</string>
-    <string name="chat_longpress_edit">Edit</string>
     <string name="home_pin">Pin</string>
     <string name="home_unpin">Unpin</string>
     <string name="home_delete">Delete</string>
@@ -239,8 +218,6 @@
     <string name="bot_settings_schedule_delete">Delete</string>
     <string name="bot_settings_schedule_title">Task name</string>
     <string name="bot_settings_schedule_prompt">What should it do?</string>
-    <string name="bot_settings_schedule_time">Time (HH:mm, daily)</string>
-    <string name="bot_settings_manage_section">Manage</string>
     <string name="bot_settings_duplicate">Duplicate</string>
     <string name="bot_settings_duplicate_hint">Same role and model, fresh memory</string>
     <string name="bot_settings_no_role">No role set</string>
@@ -271,9 +248,7 @@
     <string name="composer_add_image">Add image</string>
     <string name="composer_take_photo">Take photo</string>
     <string name="composer_attach_remove">Remove attachment</string>
-    <string name="composer_mention">Mention a member</string>
     <string name="composer_mention_everyone">Everyone</string>
-    <string name="chat_expand">Show all</string>
     <string name="chat_collapse">Collapse</string>
     <string name="chat_artifacts_delivered">Delivered %1$d files</string>
     <string name="chat_artifacts_generated">Generated %1$d files</string>
@@ -336,7 +311,6 @@
     <string name="search_hint">Type to search bots and groups</string>
 
     <string name="settings_title">Settings</string>
-    <string name="settings_overview_host">This phone · Not connected · DSH not linked</string>
     <string name="settings_group_ai">AI</string>
     <string name="settings_team_secrets">Secrets</string>
     <string name="settings_team_connectors">Connectors</string>
@@ -353,7 +327,6 @@
     <string name="team_secrets_purpose">What it is for (optional)</string>
     <string name="team_secrets_who">Who may use it</string>
     <string name="team_secrets_scope_all">All Bots</string>
-    <string name="team_secrets_scope_some">Chosen Bots</string>
     <string name="team_secrets_scope_some_of">For %1$s</string>
     <string name="team_secrets_scope_none">For no Bot</string>
     <string name="team_secrets_delete">Delete</string>
@@ -363,7 +336,6 @@
     <string name="team_connectors_empty">No connectors available</string>
     <string name="team_connectors_connected">Connected</string>
     <string name="team_connectors_connected_as">Connected as %1$s</string>
-    <string name="team_connectors_not_connected">Not connected</string>
     <string name="team_connectors_connect">Connect</string>
     <string name="team_connectors_connect_title">Connect %1$s</string>
     <string name="team_connectors_disconnect">Disconnect</string>
@@ -434,11 +406,6 @@
     <string name="bot_prefs_accent_default">Theme accent</string>
     <string name="bot_prefs_accent_auto_short">A</string>
     <string name="bot_prefs_chat">Conversation</string>
-    <string name="bot_prefs_layout">Message layout</string>
-    <string name="bot_prefs_layout_bubble">Bubble</string>
-    <string name="bot_prefs_layout_flat">Flat</string>
-    <string name="bot_prefs_width">Bubble width</string>
-    <string name="bot_prefs_flat_width">Text width</string>
     <string name="bot_prefs_thinking">Show thinking</string>
     <string name="bot_prefs_thinking_hint">Show the model thinking above its replies.</string>
     <string name="bot_prefs_motion">Animation</string>
@@ -452,47 +419,30 @@
     <string name="settings_plugins">Plugins</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_chat_font">Chat text size</string>
-    <string name="settings_interface">Interface</string>
     <string name="settings_language">Language</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_voice">Voice input</string>
     <string name="settings_local_engine">Local engine</string>
     <string name="settings_engine_params">Engine settings</string>
     <string name="settings_background_running">Background running</string>
-    <string name="settings_remote_host">Remote host</string>
     <string name="settings_version">Version</string>
     <string name="settings_dsh_version">DSH version</string>
     <string name="settings_licenses">Open-source licenses</string>
     <string name="settings_value_not_set">Not set</string>
     <string name="settings_value_default">Default</string>
     <string name="settings_value_off">Off</string>
-    <string name="settings_value_not_configured">Not configured</string>
-    <string name="settings_value_plugins_count">%1$d</string>
     <string name="settings_value_on">On</string>
     <string name="settings_value_auto">Auto</string>
     <string name="settings_value_standard">Standard</string>
-    <string name="settings_value_native">Native</string>
     <string name="settings_value_follow_system">Follow system</string>
-    <string name="settings_value_not_running">Not running</string>
-    <string name="settings_value_not_connected">Not connected</string>
-    <string name="settings_value_needs_setup">Needs setup</string>
     <string name="settings_value_not_linked">Not linked</string>
     <string name="theme_system">Follow system</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
-    <string name="settings_theme_dialog_title">Choose theme</string>
-    <string name="settings_coming_soon">Coming soon</string>
     <string name="engine_title">Local engine</string>
-    <string name="engine_intro">This phone needs a small runtime (Ubuntu + Node + DSH) to run bots locally. It downloads once, then works offline.</string>
-    <string name="engine_intro_hint">Download is about 150 MB. Keep the app open until it finishes.</string>
-    <string name="engine_not_installed">Runtime not installed yet</string>
-    <string name="engine_installed">Runtime %1$s installed</string>
     <string name="engine_install_action">Download and install</string>
     <string name="engine_starting">Starting engine…</string>
-    <string name="engine_running">Running at %1$s</string>
-    <string name="engine_stopped">Engine stopped</string>
     <string name="engine_start_action">Start engine</string>
-    <string name="engine_stop_action">Stop engine</string>
     <string name="engine_continue">Enter DSHM Bot</string>
     <string name="engine_value_running">Running</string>
     <string name="engine_value_installed">Installed</string>
@@ -501,7 +451,6 @@
     <string name="engine_value_failed">Failed</string>
     <string name="engine_value_stopped">Stopped</string>
     <string name="engine_value_not_installed">Not installed</string>
-    <string name="engine_restart_action">Restart</string>
     <string name="engine_local_title">Local engine</string>
     <string name="engine_notification_channel">Local engine</string>
     <string name="engine_notification_channel_desc">Keeps the local DSH engine alive in the background so bots keep working.</string>
@@ -519,7 +468,6 @@
     <string name="engine_runtime_info">Runtime</string>
     <string name="engine_version">Version</string>
     <string name="engine_arch">Architecture</string>
-    <string name="engine_method">Launch method</string>
     <string name="engine_reset_title">Reset runtime?</string>
     <string name="engine_reset_body">The downloaded and unpacked rootfs will be deleted. You will need to download it again next time.</string>
     <string name="engine_reset_hint">Only use this when the engine is broken.</string>
@@ -570,37 +518,25 @@
     <string name="language_chinese">中文</string>
     <string name="language_english">English</string>
     <string name="settings_account">Account</string>
-    <string name="account_logged_out">Not signed in</string>
-    <string name="account_login_hint">Sign in with your DSH account to sync bots and usage.</string>
-    <string name="account_login">Log in to DSH</string>
     <string name="account_engine_required">Start the local engine first, then sign in.</string>
     <string name="account_signed_in">Signed in</string>
-    <string name="account_signing_in">Signing in…</string>
     <string name="account_sign_out">Sign out</string>
     <string name="account_balance">Balance %1$s</string>
     <string name="account_top_up">Top up</string>
     <string name="account_usage">Usage</string>
-    <string name="api_key_title">DeepSeek API Key</string>
     <string name="api_key_not_set">Not set</string>
-    <string name="api_key_set">Set</string>
-    <string name="api_key_replace">Replace</string>
     <string name="api_key_clear">Clear</string>
     <string name="api_key_save">Save</string>
     <string name="api_key_hint">Paste your DeepSeek API Key. It is stored encrypted on this phone and passed to the local engine at launch.</string>
-    <string name="interface_web">Web</string>
     <string name="voice_system">System</string>
     <string name="voice_engine">Voice model</string>
     <string name="info_engine_required">Connect the local engine to configure this.</string>
-    <string name="info_privacy">Chats and credentials stay on this phone. Nothing is uploaded unless you turn it on in DSH.</string>
-    <string name="info_pets">Pet support will be ported from dsh-Go later.</string>
-    <string name="info_licenses">DSHM Bot is released under AGPL-3.0. Runtime build recipe from dsh-Go (AGPL-3.0). Bot team semantics from DS-Bot (Apache-2.0). Icons from Lucide (ISC).</string>
     <string name="settings_privacy">Privacy &amp; sharing</string>
     <string name="notify_channel_chat">Chat</string>
     <string name="notify_channel_attention">Needs attention</string>
     <string name="notify_done_title">%1$s finished</string>
     <string name="notify_done_body">Open to see the reply</string>
     <string name="notify_error_title">%1$s failed</string>
-    <string name="notify_stopped_body">This run was stopped.</string>
     <string name="notify_approval_title">%1$s needs approval</string>
     <string name="notify_question_title">%1$s has a question</string>
     <string name="voice_hint_auto">Uses the voice model when it’s ready, otherwise the phone’s service</string>
@@ -623,17 +559,12 @@
     <string name="voice_state_cancelled">Cancelled</string>
     <string name="voice_state_failed">Preparation failed</string>
     <string name="voice_state_unprepared">Not downloaded</string>
-    <string name="voice_model_hint">The SenseVoice model runs in the local engine. Download it from dsh-Go’s voice settings once wired.</string>
-    <string name="personalization_hint">Your own AGENTS.md, loaded by the engine after its managed one. Describe how the bots should work with you.</string>
-    <string name="personalization_save">Save</string>
-    <string name="personalization_saved">Saved</string>
     <string name="composer_voice">Voice input</string>
     <string name="composer_voice_cancel">Cancel dictation</string>
     <string name="composer_voice_stop">Stop dictation</string>
     <string name="composer_stop">Stop reply</string>
     <string name="composer_voice_listening">Listening…</string>
     <string name="composer_voice_transcribing">Transcribing…</string>
-    <string name="chat_thinking">Thinking it through…</string>
     <string name="chat_memory_updated">Memory updated</string>
     <string name="chat_jump_bottom">Jump to latest</string>
     <string name="image_viewer_close">Close</string>
@@ -645,10 +576,6 @@
     <string name="image_share_failed">Couldn\'t share image</string>
     <string name="image_saved">Saved to gallery</string>
     <string name="image_save_failed">Couldn\'t save image</string>
-    <string name="providers_count">%1$d providers</string>
-    <string name="providers_group_official">Official</string>
-    <string name="providers_group_subscription">Subscriptions</string>
-    <string name="providers_group_custom">Custom</string>
 
     <string name="action_cancel">Cancel</string>
     <string name="action_save">Save</string>
@@ -656,21 +583,18 @@
     <string name="action_delete">Delete</string>
     <string name="action_retry">Retry</string>
     <string name="action_refresh">Refresh</string>
-    <string name="action_reload">Reload</string>
     <string name="action_continue">Continue</string>
     <string name="action_loading">Loading…</string>
 
     <string name="settings_search_title">Search settings</string>
     <string name="settings_search_hint">Search settings</string>
     <string name="settings_search_empty">No matching settings</string>
-    <string name="settings_value_set">Set</string>
     <string name="settings_this_phone">This phone</string>
     <string name="settings_overview_engine">This phone · %1$s</string>
     <string name="settings_no_fields">This section has no editable fields.</string>
     <string name="settings_modified">Modified</string>
     <string name="settings_reset_default">Reset to default</string>
     <string name="settings_engine_read_only">This setting is fixed by the engine configuration and cannot be changed in the app.</string>
-    <string name="settings_engine_revision">%1$d configurable sections from the engine</string>
     <string name="settings_engine_revision_one">Revision %1$d · provided by the local engine</string>
     <string name="settings_secret_set">Set</string>
     <string name="settings_secret_unset">Not set</string>
@@ -703,26 +627,16 @@
     <string name="plugins_detail_meta_error">Couldn’t read plugin info: %1$s</string>
     <string name="settings_plugin_count">%1$d plugins</string>
     <string name="settings_plugins_read_only">This engine version only exposes the plugin list here.</string>
-    <string name="settings_plugins_managed_hint">Plugin settings follow the engine inventory.</string>
     <string name="settings_plugin_configs">Plugin settings</string>
-    <string name="settings_plugin_disabled">Disabled</string>
-    <string name="settings_plugin_active">Running</string>
-    <string name="settings_plugin_failed">Failed</string>
-    <string name="settings_plugin_loading">Loading</string>
-    <string name="settings_plugin_enabled">Enabled</string>
 
     <string name="settings_model_channels">%1$d providers</string>
-    <string name="settings_model_summary">%1$d providers · %2$d available</string>
     <string name="settings_model_official">Official</string>
     <string name="settings_model_subscription">Subscriptions</string>
-    <string name="settings_model_account_line">Account · %1$s</string>
-    <string name="settings_model_not_signed_in">Not signed in</string>
     <string name="settings_model_signed_in">Signed in</string>
     <string name="settings_model_custom_subtitle">%1$s compatible · %2$d models</string>
     <string name="settings_model_basic">Basic information</string>
     <string name="settings_model_name">Name</string>
     <string name="settings_model_name_hint">e.g. My gateway</string>
-    <string name="settings_model_route_hint">Route id: %1$s</string>
     <string name="settings_model_protocol">Compatible protocol</string>
     <string name="settings_model_connection">Connection</string>
     <string name="settings_model_base_url">Base URL</string>
@@ -734,36 +648,21 @@
     <string name="settings_model_fetch_models">Fetch models</string>
     <string name="settings_model_fetched">%1$d models found</string>
     <string name="settings_model_fetch_hint">Ask the endpoint for its model list</string>
-    <string name="settings_model_list">Model list</string>
     <string name="settings_model_show_key">Show key</string>
     <string name="settings_model_hide_key">Hide key</string>
-    <string name="settings_model_registered">Registered routes</string>
-    <string name="settings_model_registered_hint">Official and subscription routes come from the engine.</string>
-    <string name="settings_model_deepseek">DeepSeek</string>
-    <string name="settings_model_deepseek_hint">Sign in or use the API Key managed by the app</string>
     <string name="settings_model_custom">Custom providers</string>
     <string name="settings_model_custom_hint">OpenAI- or Anthropic-compatible routes of the engine.</string>
     <string name="settings_model_add">Add provider</string>
-    <string name="settings_model_add_hint">Route id, endpoint, protocol and models</string>
-    <string name="settings_model_count">%1$d models</string>
     <string name="settings_model_empty">No custom providers yet.</string>
     <string name="settings_model_edit">Edit provider</string>
     <string name="settings_model_delete">Delete provider</string>
     <string name="settings_model_delete_confirm">Remove “%1$s”? Its API Key stays in the credential store.</string>
 
-    <string name="settings_web_search_service">Search service</string>
     <string name="settings_web_search_new_api">New search API</string>
     <string name="settings_web_search_deepseek">DeepSeek search</string>
     <string name="settings_web_search_switch_hint">The engine writes both the search and fetch provider.</string>
-    <string name="settings_web_search_api">Use DeepSeek Search / Fetch API</string>
-    <string name="settings_web_search_api_on">Search and fetch use the API providers.</string>
-    <string name="settings_web_search_api_off">Search and fetch use the Messages defaults.</string>
-    <string name="settings_web_search_api_config">Search API</string>
-    <string name="settings_web_search_messages_config">Messages search</string>
-    <string name="settings_web_search_current">Search: %1$s · Fetch: %2$s</string>
     <string name="settings_web_search_api_short">Search API</string>
 
-    <string name="settings_permission_default">Default for new chats</string>
     <string name="settings_permission_hint">This preset applies to conversations started from now on.</string>
     <string name="settings_permission_reset_hint">Back to the engine default (%1$s).</string>
     <string name="settings_permission_confirm_title">Use this permission?</string>
@@ -778,27 +677,19 @@
     <string name="settings_notify_approval_hint">Waiting for your approval</string>
     <string name="settings_notify_question_hint">Questions waiting for you</string>
     <string name="settings_notifications_system_footer">Lock-screen privacy is controlled by Android; notification content may appear on the lock screen.</string>
-    <string name="settings_notifications_engine_ready">Engine ready</string>
-    <string name="settings_notifications_engine_ready_hint">Notify when the local engine has started.</string>
     <string name="settings_notifications_system">System</string>
     <string name="settings_notifications_system_status">System notifications</string>
     <string name="settings_notifications_allowed">Allowed</string>
     <string name="settings_notifications_blocked">Blocked</string>
     <string name="settings_notifications_denied">Blocked</string>
-    <string name="settings_notifications_open_system">Open system notification settings</string>
     <string name="settings_notifications_open_system_hint">Allow notifications for DSHM Bot in Android.</string>
     <string name="settings_notifications_permission_denied">Notification permission was denied. Enable it in system settings.</string>
 
 
-    <string name="settings_background_status">Status</string>
     <string name="settings_background_hint">Without the exemption, Android may stop the engine while the app is in the background.</string>
     <string name="settings_background_battery">Battery optimization</string>
     <string name="settings_background_allowed">Allowed</string>
     <string name="settings_background_needs_setup">Needs setup</string>
-    <string name="settings_background_open">Allow background running</string>
-    <string name="settings_background_open_hint">Open the battery settings for DSHM Bot.</string>
-    <string name="settings_background_vendor">Phone makers</string>
-    <string name="settings_background_vendor_hint">Some ROMs also have an “auto-start” or “high power use” switch. Allow DSHM Bot there so the engine keeps running.</string>
     <string name="settings_background_system">System</string>
     <string name="settings_background_exempt">Allowed</string>
     <string name="settings_background_not_exempt">Needs setup</string>
@@ -828,40 +719,17 @@
     <string name="settings_background_vendor_samsung_key">Background usage limits</string>
     <string name="settings_background_vendor_samsung_path">Settings → Battery → Background usage limits → don’t remove DSHM Bot</string>
 
-    <string name="settings_privacy_local">On this phone</string>
     <string name="settings_privacy_log">Upload chat logs to DeepSeek</string>
     <string name="settings_privacy_log_hint">When enabled, the engine uploads chat logs to DeepSeek.</string>
     <string name="settings_privacy_log_unavailable">This engine version does not expose the chat log setting.</string>
 
-    <string name="settings_interface_home">Start screen</string>
-    <string name="settings_interface_hint">The web home is the DSH Web UI inside the app.</string>
-    <string name="settings_interface_web_hint">Open DSH Web as the home screen.</string>
-    <string name="settings_interface_web_unavailable">Start the local engine to edit the web app settings.</string>
 
-    <string name="settings_about_app">App</string>
-    <string name="settings_licenses_components">Components</string>
-    <string name="settings_licenses_project">This project</string>
 
-    <string name="personalization_title_hint">Loaded by the engine after its managed AGENTS.md.</string>
-    <string name="personalization_section">Your AGENTS.md</string>
-    <string name="personalization_placeholder">Describe how the bots should work with you…</string>
-    <string name="personalization_saved_hint">Saved. New sessions pick it up automatically.</string>
-    <string name="personalization_save_failed">Could not write the file. Check that the runtime is installed.</string>
 
-    <string name="voice_engine_unavailable">Engine voice model is not bundled in this build; use system recognition.</string>
     <string name="voice_engine_unavailable_short">Not bundled</string>
-    <string name="voice_model_note">The SenseVoice model needs the engine voice runtime. This build uses Android speech recognition.</string>
-    <string name="voice_model_not_installed">Not installed</string>
 
-    <string name="pets_display">Display</string>
-    <string name="pets_hint">The pet floats inside the app. A system-wide overlay needs the native bridge from dsh-Go.</string>
-    <string name="pets_enable">Show pet</string>
-    <string name="pets_enable_hint">Draw the pet above the app content.</string>
-    <string name="pets_style">Pet</string>
-    <string name="pets_size">Size</string>
 
     <string name="phone_control_service_description">Lets DSHM Bot perform taps, swipes and navigation actions when you ask it to control the phone.</string>
-    <string name="phone_control_service">Accessibility service</string>
     <string name="phone_control_service_hint">Android only allows app control after you enable the accessibility service in system settings.</string>
     <string name="phone_control_accessibility">Accessibility service</string>
     <string name="phone_control_service_enabled">Enabled</string>
@@ -869,12 +737,10 @@
     <string name="phone_control_open_settings">Open accessibility settings</string>
     <string name="phone_control_open_settings_hint">Settings → Accessibility → DSHM Bot</string>
     <string name="phone_control_enable">Allow phone control</string>
-    <string name="phone_control_enable_hint">The chosen phone-control Bot may control this phone when you ask.</string>
     <string name="phone_control_enable_main_bot_hint">Only the Bot you chose in its own chat may control this phone. Other Bots and group chats cannot.</string>
     <string name="phone_control_enable_blocked">Enable the accessibility service first.</string>
     <string name="phone_control_confirm">Confirmation</string>
     <string name="phone_control_confirm_hint">The phone-control Bot sends confirmation notifications; password, verification-code and payment fields are never filled in.</string>
-    <string name="phone_control_bridge_note">The engine bridge for phone control is not wired yet. This page stores the service state and confirmation preference.</string>
     <string name="phone_approval_channel">Phone control confirmation</string>
     <string name="phone_approval_channel_hint">Used when the phone-control Bot needs your approval before acting</string>
     <string name="phone_approval_title">Allow this phone action?</string>
@@ -889,7 +755,6 @@
     <string name="phone_handoff_stop">Stop</string>
     <string name="phone_handoff_done">The user finished; continue.</string>
     <string name="phone_handoff_stopped">The user stopped phone control.</string>
-    <string name="phone_sensitive_blocked">This is a password, verification-code or payment field. Use phone_handoff and let the user fill it in.</string>
     <string name="settings_phone_recent_actions">Recent actions</string>
     <string name="settings_phone_no_actions">No phone actions yet</string>
     <string name="settings_phone_no_actions_hint">Screen reads, taps, typing and app openings made by the phone-control Bot appear here.</string>
@@ -898,16 +763,10 @@
     <string name="settings_notify_error">Error or stopped</string>
     <string name="settings_notify_approval">Waiting for your approval</string>
     <string name="settings_notify_question">Asking you a question</string>
-    <string name="settings_notify_hint">Sound, banners and lock screen are controlled by the system.</string>
     <!-- dsh-Go settings IA: appearance -->
-    <string name="settings_fold_process">Collapse process when done</string>
-    <string name="settings_fold_process_hint">Fold thinking and tool calls into one line.</string>
     <!-- Shared state for capabilities that are not wired up yet -->
-    <string name="settings_unavailable">Not available in this version</string>
-    <string name="settings_unavailable_hint">Requires a capability that is not wired up yet.</string>
     <string name="settings_engine_required">Requires the local engine to be running.</string>
     <!-- Permissions -->
-    <string name="settings_permission_current">Current conversation</string>
     <string name="settings_permission_new_default">Default for new conversations</string>
     <string name="settings_permission_phone_files">Access phone files</string>
     <string name="settings_permission_phone_confirm">Phone control confirmation</string>
@@ -919,24 +778,13 @@
     <string name="settings_permission_phone_files_grant">Grant All files access in system settings, then come back and turn this on.</string>
     <string name="settings_permission_phone_confirm_hint">Choose when phone control asks for confirmation.</string>
     <!-- Personalization -->
-    <string name="settings_personal_preference">Personal preference</string>
-    <string name="settings_visual_replies">Visual replies</string>
     <string name="settings_agent_presets">Agent presets</string>
     <!-- Privacy and about -->
-    <string name="settings_privacy_share_links">My shared links</string>
-    <string name="settings_privacy_share_config">Share configuration</string>
-    <string name="settings_privacy_usage">Anonymous usage statistics</string>
-    <string name="settings_privacy_upload_logs">Upload chat logs</string>
-    <string name="settings_about_help">Help</string>
-    <string name="settings_about_community">Community</string>
-    <string name="settings_about_diagnostics">Diagnostics</string>
     <string name="settings_about_check_update">Check for updates</string>
-    <string name="settings_about_auto_update">Check automatically</string>
     <string name="settings_project_url">Project page</string>
     <string name="settings_harness_url">DeepSeek Harness page</string>
     <string name="info_open_source_thanks">Thanks to dsh-Go, DS-Bot, DeepSeek Harness, proot and other open-source projects. Tap a project name to open its source.</string>
     <string name="settings_model_test_connection">Test connection</string>
-    <string name="settings_model_settings">Model settings</string>
     <string name="settings_model_credential_locked">This credential comes from the launch environment</string>
     <string name="settings_model_enter_name">Enter a name</string>
     <string name="settings_model_enter_base_url">Enter a base URL</string>
@@ -949,10 +797,6 @@
     <string name="plugins_uninstall_hint">The package will be removed and the engine may need a restart.</string>
     <string name="settings_plugins_update">Update plugin</string>
     <string name="settings_plugins_uninstall">Uninstall plugin</string>
-    <string name="settings_web_search_current_label">Current provider</string>
-    <string name="settings_web_search_budget_section">Budget and advanced</string>
-    <string name="settings_web_search_budget">Search budget</string>
-    <string name="settings_phone_before_start">Before you start</string>
     <string name="settings_phone_setup">Setup</string>
     <string name="settings_phone_owner">Phone-control Bot</string>
     <string name="settings_phone_owner_hint">There is one phone, so only the Bot you choose gets it. Other Bots and group chats do not see the phone tools.</string>
@@ -977,8 +821,6 @@
     <string name="settings_phone_supports_row">Read screen, tap, type, scroll, system keys, open apps</string>
     <string name="settings_phone_supports_hint">Phone control is wired to the engine; confirmation prompts, the floating bar, app rules and the action log come next.</string>
     <string name="settings_phone_read_screen">Read the current screen</string>
-    <string name="settings_phone_restore_a11y">Restore accessibility automatically</string>
-    <string name="settings_phone_floating_bar">Floating bar</string>
     <string name="settings_phone_app_rules">App rules</string>
     <string name="settings_phone_rules">Rules</string>
     <string name="settings_phone_app_rules_hint">Set normal / confirm every action / do not touch for one app.</string>
@@ -989,39 +831,23 @@
     <string name="settings_phone_app_rule_normal_hint">Follow the global confirmation mode</string>
     <string name="settings_phone_app_rule_confirm_hint">Ask before every action</string>
     <string name="settings_phone_app_rule_deny_hint">Do not read or operate</string>
-    <string name="settings_phone_unlock">Unlock restrictions</string>
-    <string name="settings_phone_dnd">Invisible screen</string>
-    <string name="settings_phone_operation_log">Operation log</string>
-    <string name="settings_phone_advanced">Advanced</string>
     <string name="phone_confirm_ask">Ask every time</string>
     <string name="phone_confirm_task">Ask per task</string>
     <string name="phone_confirm_always">Never ask</string>
     <string name="phone_confirm_ask_hint">Confirm before every action</string>
     <string name="phone_confirm_task_hint">Confirm once per task</string>
     <string name="phone_confirm_always_hint">Execute actions without asking</string>
-    <string name="settings_web_option_code_view">Show code workspace</string>
-    <string name="settings_web_option_steps">When to show or collapse work steps</string>
-    <string name="settings_web_option_performance">Performance and usage</string>
-    <string name="settings_web_option_send_busy">Sending while the AI is working</string>
-    <string name="settings_web_option_links">How links open</string>
-    <string name="settings_web_option_phone_layout">Phone layout</string>
-    <string name="settings_web_option_open_once">Open web version once</string>
-    <string name="settings_voice_offline_model">Offline speech model</string>
-    <string name="settings_voice_custom_words">Custom vocabulary</string>
-    <string name="settings_web_section_display">Web display and send</string>
-    <string name="settings_web_section_mode">Web mode</string>
-    <string name="settings_voice_other_capabilities">Other voice capabilities</string>
     <string name="settings_phone_service_hint">Enable DSHM Bot in Settings → Accessibility. After that, only the phone-control Bot’s own chat can call the phone tools.</string>
     <!-- Account page, dsh-Go information architecture -->
     <string name="account_deepseek_title">DeepSeek account</string>
     <string name="account_login_subtitle">No API Key needed after sign-in</string>
     <string name="account_benefit_balance">Usage is charged to your account balance</string>
-    <string name="account_benefit_browser">Sign in in your browser; your password never passes through DSH</string>
+    <string name="account_benefit_browser">Sign in via your browser; your password never passes through DSH</string>
     <string name="account_benefit_local">Sign-in credentials stay on this device</string>
     <string name="account_sign_in">Sign in with DeepSeek</string>
     <string name="account_sign_in_cancel">Cancel sign-in</string>
     <string name="account_stage_preparing">Preparing sign-in…</string>
-    <string name="account_stage_browser">Finish sign-in in your browser</string>
+    <string name="account_stage_browser">Complete sign-in securely in the browser</string>
     <string name="account_stage_finishing">Finishing sign-in…</string>
     <string name="account_api_key_group">API Key</string>
     <string name="account_api_key_row">DeepSeek API Key</string>
@@ -1029,9 +855,7 @@
     <string name="account_sign_out_confirm_title">Sign out?</string>
     <string name="account_sign_out_confirm_body">You will need to sign in again to use your account balance.</string>
     <string name="account_sign_out_confirm_busy">Tasks are using this account; signing out may interrupt them.</string>
-    <string name="account_signed_in_notice">Signed in</string>
     <string name="account_sign_in_failed">Sign-in did not complete; please retry</string>
-    <string name="account_engine_unsupported">This engine does not support account sign-in</string>
     <string name="account_error_offline">No network connection. Check your connection and retry.</string>
     <string name="account_error_service">Sign-in service is unavailable. Retry later.</string>
     <string name="account_error_protocol">Authorization did not complete. Retry.</string>
@@ -1057,9 +881,6 @@
     <string name="settings_model_health_ready">Available</string>
     <string name="settings_model_detail_enter_key">Add API Key</string>
     <string name="settings_model_detail_no_models">No models yet</string>
-    <string name="settings_model_detail_context">Context %1$d</string>
-    <string name="settings_model_detail_max_output">Max output %1$d</string>
-    <string name="settings_model_detail_input_types">Input %1$s</string>
     <string name="settings_model_picker_title">Choose models</string>
     <string name="settings_model_picker_add">Add %1$d models</string>
     <string name="settings_model_picker_empty">The endpoint returned no models</string>
@@ -1075,7 +896,6 @@
     <string name="settings_model_fetching">Fetching models…</string>
     <string name="account_auto_start_hint">Opening the app starts the engine automatically</string>
     <!-- 模型设置页（对齐 dsh-Go provider_model_page） -->
-    <string name="settings_model_item_settings">Model settings</string>
     <string name="settings_model_item_basic">Basic information</string>
     <string name="settings_model_item_name">Name</string>
     <string name="settings_model_item_limits">Token limits</string>
@@ -1108,8 +928,6 @@
     <!-- 子代理页 -->
     <string name="settings_subagent_title">Subagents</string>
     <string name="settings_subagent_limits">Run limits</string>
-    <string name="settings_subagent_max_depth">Max recursion depth</string>
-    <string name="settings_subagent_max_active">Max running at once</string>
     <string name="settings_subagent_model_selection">Model selection</string>
     <string name="settings_subagent_allow_choice">Let AI pick models for subagents</string>
     <string name="settings_subagent_pick_first">Pick a model to apply this</string>
@@ -1121,7 +939,6 @@
     <!-- 插件清单页 -->
     <string name="plugins_inventory_title">Plugin inventory</string>
     <string name="plugins_inventory_empty">The engine has no components yet.</string>
-    <string name="plugins_inventory_failed_group">Failed</string>
     <string name="plugins_inventory_system_group">System components</string>
     <string name="plugins_inventory_running">Enabled</string>
     <string name="plugins_inventory_off">Disabled</string>
@@ -1141,7 +958,6 @@
     <string name="presets_broken">Failed to load</string>
     <string name="presets_view_config">View configuration</string>
     <string name="presets_no_config">This preset has no configuration file.</string>
-    <string name="presets_create_unavailable">Create and edit need Creator mode (not wired yet)</string>
     <string name="presets_copy_id">Copy preset ID</string>
     <string name="presets_copy_config">Copy preset YAML</string>
     <string name="presets_copied">Copied</string>
@@ -1153,19 +969,15 @@
     <string name="schedules_title">Scheduled tasks</string>
     <string name="schedules_empty">No scheduled tasks yet.</string>
     <string name="schedules_untitled">Untitled task</string>
-    <string name="schedules_active">Active</string>
-    <string name="schedules_inactive">Paused</string>
     <string name="schedules_unavailable">Automation tasks are off in DSH</string>
     <string name="schedules_unavailable_hint">Turn on the Automation tasks plugin in DSH to use this.</string>
-    <string name="schedules_delete_title">Delete “%1$s”?</string>
-    <string name="schedules_delete_hint">The task will stop running. Chats already started are unaffected.</string>
     <string name="schedules_send_to">Send to</string>
     <string name="schedules_when">When it runs</string>
     <string name="schedules_kind_at">Once</string>
     <string name="schedules_kind_daily">Every day</string>
     <string name="schedules_kind_weekly">Every week</string>
     <string name="schedules_kind_every">Repeat</string>
-    <string name="schedules_at_hint">2026-11-09 09:00</string>
+    <string name="schedules_at_hint" tools:ignore="TypographyDashes">2026-11-09 09:00</string>
     <string name="schedules_time_hint">09:00</string>
     <string name="schedules_every_hint">Interval (1 minute to 7 days)</string>
     <string name="schedules_unit_minutes">minutes</string>
@@ -1173,13 +985,10 @@
     <string name="schedules_unit_days">days</string>
     <string name="schedules_create">Create task</string>
     <string name="schedules_creating">Creating…</string>
-    <string name="schedules_next">Next: %1$s</string>
-    <string name="schedules_finished">Finished</string>
     <string name="schedules_in_room">in %1$s</string>
     <string name="schedules_delete_again">Tap again to delete</string>
     <string name="schedules_unknown_target">Unlinked</string>
     <string name="schedules_room_suffix">Group chat</string>
-    <string name="schedules_weekdays">Days</string>
     <string name="schedules_need_fields">Fill in the name and what to do</string>
     <string name="schedules_pick_time">Pick a time</string>
     <string name="schedules_pick_date">Pick a date</string>

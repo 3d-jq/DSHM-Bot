@@ -48,6 +48,7 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.ui.components.FloatingIconButton
 import org.json.JSONArray
+import androidx.core.net.toUri
 
 private const val GITHUB_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
 private val GitHubBrand = Color(0xFF181717)
@@ -964,7 +965,7 @@ private fun ConnectorTokenDialog(
                         .clickable {
                             runCatching {
                                 context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, android.net.Uri.parse(GITHUB_TOKEN_URL)),
+                                    Intent(Intent.ACTION_VIEW, GITHUB_TOKEN_URL.toUri()),
                                 )
                             }
                         }

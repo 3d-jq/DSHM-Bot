@@ -680,7 +680,7 @@ private fun ProviderEditorScreen(
                     SettingsRow(
                         title = model.label,
                         icon = R.drawable.ic_lucide_bot,
-                        subtitle = ProviderModelSummary(
+                        subtitle = providerModelSummary(
                             model,
                             ModelDefaults.of(existing),
                         ).takeIf { it.isNotEmpty() },

@@ -49,6 +49,7 @@ import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsPrimaryButton
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsSection
+import androidx.core.net.toUri
 
 /**
  * 账号页：按 dsh-Go `app/lib/ui/account/account_page.dart` 的信息架构重做，
@@ -554,6 +555,6 @@ private fun accountErrorTextRes(code: String): Int = when (code) {
 
 private fun openUrl(context: Context, url: String?) {
     if (url.isNullOrBlank()) return
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    val intent = Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }

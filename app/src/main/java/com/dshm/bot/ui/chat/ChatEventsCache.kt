@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.core.content.edit
 
 /**
  * 会话事件记录（`seq → event`）的落盘副本。
@@ -46,7 +47,7 @@ internal class ChatEventsCache(context: Context, botId: String) {
             // 倒序放进去的要翻回来：老的在前。
             val ordered = JSONArray()
             for (at in array.length() - 1 downTo 0) ordered.put(array.get(at))
-            prefs.edit().putString(KEY_EVENTS, ordered.toString()).apply()
+            prefs.edit { putString(KEY_EVENTS, ordered.toString()) }
         }
     }
 

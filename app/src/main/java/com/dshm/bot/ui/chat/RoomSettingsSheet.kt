@@ -22,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,6 +35,7 @@ import com.dshm.bot.ui.home.ChatRowUi
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /** 群聊名字胶囊弹出的底部面板：只读群资料，不复用单 Bot 的模型/角色字段。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,7 +56,7 @@ fun RoomSettingsSheet(
     val info = state.info
     var showMemory by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.86f
+    val sheetHeight = rememberWindowHeightDp() * 0.86f
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

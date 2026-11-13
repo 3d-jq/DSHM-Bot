@@ -242,10 +242,12 @@ fun DshmBotApp(
     // 引擎页顶栏保留的小入口：用 WebView 打开本机 DSH Web。
     var webOpen by rememberSaveable { mutableStateOf(false) }
     // 设置子页用栈保存，返回时回到上一页而不是直接回设置首页。
-    var settingsStack by rememberSaveable { mutableStateOf(ArrayList<String>()) }
+    // 用不可变 List：mutableStateOf(ArrayList) 会触发 lint 的
+    // MutableCollectionMutableState（状态里塞可变集合，外部改集合不会触发重组）。
+    var settingsStack by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(settingsStack) {
         if (settingsStack.any { runCatching { SettingsPageId.valueOf(it) }.isFailure }) {
-            settingsStack = ArrayList()
+            settingsStack = emptyList()
         }
     }
     var navForward by remember { mutableStateOf(true) }
@@ -266,7 +268,7 @@ fun DshmBotApp(
                 settingsOpen = false
                 engineOpen = false
                 searchOpen = false
-                settingsStack = ArrayList()
+                settingsStack = emptyList()
             }
             kotlinx.coroutines.delay(400)
         }
@@ -374,7 +376,7 @@ fun DshmBotApp(
             // 账号是从模型页等子页打开的：先关账号，回到原来的子页。
             accountOpen -> accountOpen = false
             settingsStack.isNotEmpty() -> {
-                settingsStack = ArrayList(settingsStack).apply { removeAt(lastIndex) }
+                settingsStack = settingsStack.dropLast(1)
                 settingsOpen = true
             }
             openBotId != null -> openBotId = null
@@ -683,7 +685,7 @@ fun DshmBotApp(
                     // 「后台运行」是设置里的一个子页，从引擎页进去后仍能原路返回。
                     navForward = true
                     engineOpen = false
-                    settingsStack = ArrayList(settingsStack).apply { add(SettingsPageId.BACKGROUND.name) }
+                    settingsStack = settingsStack + SettingsPageId.BACKGROUND.name
                 },
                 onOpenDiagnostics = {
                     navForward = true
@@ -737,9 +739,7 @@ fun DshmBotApp(
                 }.getOrNull()
                 val close = {
                     navForward = false
-                    settingsStack = ArrayList(settingsStack).apply {
-                        if (isNotEmpty()) removeAt(lastIndex)
-                    }
+                    settingsStack = settingsStack.dropLast(1)
                     settingsOpen = true
                 }
                 when (page) {
@@ -754,9 +754,7 @@ fun DshmBotApp(
                         onBack = close,
                         onOpenAgentPresets = {
                             navForward = true
-                            settingsStack = ArrayList(settingsStack).apply {
-                                add(SettingsPageId.AGENT_PRESETS.name)
-                            }
+                            settingsStack = settingsStack + SettingsPageId.AGENT_PRESETS.name
                         },
                     )
 
@@ -812,9 +810,7 @@ fun DshmBotApp(
                         settings = settingsViewModel,
                         onOpenPhoneControl = {
                             navForward = true
-                            settingsStack = ArrayList(settingsStack).apply {
-                                add(SettingsPageId.PHONE_CONTROL.name)
-                            }
+                            settingsStack = settingsStack + SettingsPageId.PHONE_CONTROL.name
                         },
                         onRestartEngine = engineViewModel::restart,
                         onBack = close,
@@ -837,15 +833,11 @@ fun DshmBotApp(
                         onBack = close,
                         onOpenPlugins = {
                             navForward = true
-                            settingsStack = ArrayList(settingsStack).apply {
-                                add(SettingsPageId.PLUGINS.name)
-                            }
+                            settingsStack = settingsStack + SettingsPageId.PLUGINS.name
                         },
                         onOpenProviders = {
                             navForward = true
-                            settingsStack = ArrayList(settingsStack).apply {
-                                add(SettingsPageId.MODEL.name)
-                            }
+                            settingsStack = settingsStack + SettingsPageId.MODEL.name
                         },
                     )
 
@@ -916,7 +908,7 @@ fun DshmBotApp(
                 onLanguageChange = settingsViewModel::setLanguage,
                 onOpenPage = {
                     navForward = true
-                    settingsStack = ArrayList(settingsStack).apply { add(it.name) }
+                    settingsStack = settingsStack + it.name
                 },
                 onOpenAccount = {
                     navForward = true

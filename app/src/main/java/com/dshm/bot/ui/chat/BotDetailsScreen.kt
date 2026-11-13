@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.chat
 
+import java.util.Locale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,7 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -65,6 +65,7 @@ import com.dshm.bot.ui.settings.dshmFieldColors
 import com.dshm.bot.ui.settings.dshmFieldShape
 import com.dshm.bot.ui.settings.settingsLanguage
 import org.json.JSONObject
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /** Bot 完整设置页（顶栏右侧按钮进入，走系统 push 动效）。 */
 @Composable
@@ -480,8 +481,8 @@ internal fun TextEditDialog(
 internal fun usageLabel(tokens: Long, cacheHit: Float?): String {
     if (tokens <= 0L) return "—"
     val amount = when {
-        tokens >= 1_000_000 -> String.format("%.1fM", tokens / 1_000_000.0)
-        tokens >= 1_000 -> String.format("%.1fK", tokens / 1_000.0)
+        tokens >= 1_000_000 -> String.format(Locale.ROOT, "%.1fM", tokens / 1_000_000.0)
+        tokens >= 1_000 -> String.format(Locale.ROOT, "%.1fK", tokens / 1_000.0)
         else -> tokens.toString()
     }
     val hit = cacheHit?.let { " · ${(it * 100).toInt()}%" } ?: ""
@@ -570,7 +571,7 @@ fun BotSettingsSheet(
     var sheetNotice by rememberSaveable { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // 面板占屏幕 86%：内容撑到这个高度，ModalBottomSheet 贴底显示，上面留出聊天。
-    val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.86f
+    val sheetHeight = rememberWindowHeightDp() * 0.86f
     // 浏览器分类直接在面板里显示页面（不是「打开浏览器」按钮）。
     val browserContext = LocalContext.current
     val browserSession = remember(bot.id) { BotBrowserStore.of(browserContext).session(bot.id) }

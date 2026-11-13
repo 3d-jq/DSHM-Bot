@@ -43,7 +43,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +55,7 @@ import com.dshm.bot.ui.settings.SettingsInput
 import com.dshm.bot.ui.settings.SettingsMenuItem
 import com.dshm.bot.ui.settings.SettingsSheet
 import com.dshm.bot.ui.settings.ScheduleTimePickerField
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /**
  * 记忆面板，对齐 DS Bot 的 `MemoryDialog`：
@@ -120,7 +120,7 @@ internal fun MemoryPanelDialog(
 
     // 名字胶囊弹的底部面板：高度固定、拉不高，只预览（能删）。
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.86f
+    val sheetHeight = rememberWindowHeightDp() * 0.86f
     ModalBottomSheet(
         onDismissRequest = close,
         sheetState = sheetState,

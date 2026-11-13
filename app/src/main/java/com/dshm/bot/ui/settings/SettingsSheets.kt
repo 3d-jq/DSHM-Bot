@@ -36,7 +36,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
@@ -45,6 +44,7 @@ import com.dshm.bot.data.remote.jsonEquals
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,7 +58,7 @@ fun SettingsSheet(
 ) {
     // 和对话名字胶囊的面板一致：skipPartiallyExpanded = true —— 面板没有
     // 「半屏锚点」那个中间态，高度只由内容决定，往上拖不会越拉越高。
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val screenHeight = rememberWindowHeightDp()
     val fixed = heightFraction < 1f
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(

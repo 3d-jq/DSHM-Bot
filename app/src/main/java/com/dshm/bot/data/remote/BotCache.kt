@@ -3,6 +3,7 @@ package com.dshm.bot.data.remote
 import android.content.Context
 import com.dshm.bot.domain.model.BotSummary
 import org.json.JSONObject
+import androidx.core.content.edit
 
 /**
  * 上次读到的 DS Bot 团队快照：引擎冷启动要十几秒，先用缓存把主界面画出来，
@@ -22,7 +23,7 @@ class BotCache(context: Context) {
         runCatching {
             val raw = state.toString()
             if (raw.length <= MAX_CHARS) {
-                prefs.edit().putString(KEY_STATE, raw).apply()
+                prefs.edit { putString(KEY_STATE, raw) }
             }
         }
     }

@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.core.content.edit
 
 internal data class StoredBrowserShot(
     val shot: ChatBrowserShot,
@@ -53,7 +54,7 @@ internal class BrowserShotStore(context: Context, botId: String) {
                     .apply { entry.seq?.let { put("seq", it) } },
             )
         }
-        prefs.edit().putString(key(sessionId), array.toString()).apply()
+        prefs.edit { putString(key(sessionId), array.toString()) }
     }
 
     private fun key(sessionId: String) = "session:$sessionId"

@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.content.edit
 
 /** 手机操控的操作记录：只存动作和对象，不存屏幕文本、输入内容或密钥。 */
 object PhoneActionLog {
@@ -25,7 +26,7 @@ object PhoneActionLog {
         for (index in 0 until minOf(list.length(), MAX - 1)) {
             list.optJSONObject(index)?.let(next::put)
         }
-        prefs.edit().putString(KEY, next.toString()).apply()
+        prefs.edit { putString(KEY, next.toString()) }
     }
 
     fun recent(context: Context, limit: Int = 5): List<String> {

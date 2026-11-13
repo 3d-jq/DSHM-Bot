@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.core.content.edit
 
 /**
  * 自己发出去的附件（图片缩略图 / 文件卡）在历史重载后的还原表。
@@ -58,7 +59,7 @@ internal class ChatAttachmentCache(context: Context, botId: String) {
                 }
                 json.put(key, array)
             }
-            prefs.edit().putString(KEY_MAP, json.toString()).apply()
+            prefs.edit { putString(KEY_MAP, json.toString()) }
         }
     }
 

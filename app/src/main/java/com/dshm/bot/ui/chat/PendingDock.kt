@@ -39,7 +39,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -52,6 +51,7 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.domain.model.ChatApproval
 import org.json.JSONArray
 import org.json.JSONObject
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /**
  * 输入框上方的待办 dock（DS Bot `conversation.input.dock`）。
@@ -79,7 +79,7 @@ fun PendingDock(
     modifier: Modifier = Modifier,
 ) {
     if (approvals.isEmpty() && questions.isEmpty() && views.isEmpty() && secrets.isEmpty()) return
-    val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.45f
+    val maxHeight = rememberWindowHeightDp() * 0.45f
     Column(
         modifier = modifier
             .fillMaxWidth()

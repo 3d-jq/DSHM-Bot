@@ -7,6 +7,7 @@ import android.webkit.WebResourceResponse
 import com.dshm.bot.data.runtime.RuntimeInstaller
 import java.io.ByteArrayInputStream
 import java.io.File
+import androidx.core.net.toUri
 
 /**
  * 把 rootfs 里的本地页面映射成 WebView 能加载的自定义 scheme。
@@ -105,7 +106,7 @@ object RootfsWeb {
     private fun routeOf(raw: String): Route? {
         if (raw.startsWith("$SCHEME://")) return null
         if (!raw.startsWith("file://") && schemePattern.containsMatchIn(raw)) return null
-        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return null
+        val uri = runCatching { raw.toUri() }.getOrNull() ?: return null
         val implicit = !raw.startsWith("file://") && !raw.startsWith("/")
         val path = when {
             raw.startsWith("file://") -> uri.path.orEmpty()

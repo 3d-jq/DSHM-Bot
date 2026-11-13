@@ -40,7 +40,7 @@ class BotChatPlaceholderScreenTest {
     private fun setContent(onBack: () -> Unit = {}, onDetails: () -> Unit = {}) {
         composeRule.setContent {
             DshmTheme(darkTheme = false) {
-                BotChatPlaceholderScreen(bot = bot, onBack = onBack, onDetails = onDetails)
+                BotChatScreen(bot = bot, endpoint = null, onBack = onBack, onDetails = onDetails)
             }
         }
     }

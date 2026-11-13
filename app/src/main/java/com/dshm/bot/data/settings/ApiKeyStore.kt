@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import androidx.core.content.edit
 
 /**
  * DeepSeek API Key 的本地安全存储（对齐 dsh-Go：Key 存在 App 侧，引擎启动时注入）。
@@ -29,11 +30,11 @@ class ApiKeyStore(context: Context) {
     fun key(): String? = prefs.getString(KEY, null)?.trim()?.ifEmpty { null }
 
     fun save(value: String) {
-        prefs.edit().putString(KEY, value.trim()).apply()
+        prefs.edit { putString(KEY, value.trim()) }
     }
 
     fun clear() {
-        prefs.edit().remove(KEY).apply()
+        prefs.edit { remove(KEY) }
     }
 
     /** 展示用脱敏（保留前 4 后 4）。 */

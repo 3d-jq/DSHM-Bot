@@ -31,6 +31,7 @@ import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.BotInks
+import androidx.core.graphics.toColorInt
 
 /**
  * Bot 头像：优先自定义照片，其次 DS Bot 的角色形状（whale / star / moon / …），
@@ -146,7 +147,7 @@ private fun String.path(): Path = PathParser().apply { parsePathString(this@path
 private data class DrawnPaint(val path: Path, val color: Color, val alpha: Float)
 
 private fun String.toColor(): Color = runCatching {
-    Color(android.graphics.Color.parseColor(this))
+    Color(this.toColorInt())
 }.getOrDefault(Color.Black)
 
 @DrawableRes
