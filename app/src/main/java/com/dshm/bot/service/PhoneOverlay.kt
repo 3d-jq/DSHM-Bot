@@ -40,6 +40,7 @@ object PhoneOverlay {
     private var allowBtn: TextView? = null
     private var denyBtn: TextView? = null
     private var stopBtn: TextView? = null
+    private var interjectBtn: TextView? = null
     private val hide = Runnable { hideNow() }
 
     /** 兼容旧调用：显式文案的工作态。 */
@@ -59,6 +60,7 @@ object PhoneOverlay {
         allowBtn?.visibility = View.GONE
         denyBtn?.visibility = View.GONE
         stopBtn?.visibility = View.VISIBLE
+        interjectBtn?.visibility = View.VISIBLE
         PhoneStage.mood(PhoneStage.Mood.WORKING)
         main.removeCallbacks(hide)
         main.postDelayed(hide, 15_000)
@@ -76,6 +78,7 @@ object PhoneOverlay {
         allowBtn?.visibility = View.GONE
         denyBtn?.visibility = View.GONE
         stopBtn?.visibility = View.VISIBLE
+        interjectBtn?.visibility = View.VISIBLE
         PhoneStage.mood(PhoneStage.Mood.WAITING)
         main.removeCallbacks(hide)
     }
@@ -92,6 +95,8 @@ object PhoneOverlay {
         allowBtn?.visibility = if (decidable) View.VISIBLE else View.GONE
         denyBtn?.visibility = if (decidable) View.VISIBLE else View.GONE
         stopBtn?.visibility = View.VISIBLE
+        // 批准态按钮已经够多，插话收起来，避免胶囊挤爆。
+        interjectBtn?.visibility = View.GONE
         PhoneStage.mood(PhoneStage.Mood.WAITING)
         main.removeCallbacks(hide)
     }
@@ -272,11 +277,15 @@ object PhoneOverlay {
             PhoneControlSession.paused = false
             hideNow()
         }
+        interjectBtn = button(service, "插话", ACCENT) {
+            PhoneInterjectOverlay.show(service, PhoneControlSession.activeBotId)
+        }.apply { visibility = View.VISIBLE }
         capsule.addView(continueBtn)
         capsule.addView(openBtn)
         capsule.addView(allowBtn)
         capsule.addView(denyBtn)
         capsule.addView(stopBtn)
+        capsule.addView(interjectBtn)
         return capsule
     }
 

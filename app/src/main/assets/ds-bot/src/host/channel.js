@@ -433,7 +433,8 @@ export function install(rt) {
           await ctx.sessionController.prompt({
             requestId,
             sessionId,
-            mode: 'queue',
+            // 手机操控悬浮条「插话」：插进当前正在跑的回合，而不是排到下一轮。
+            mode: body.mode === 'steer' ? 'steer' : 'queue',
             content: [{ type: 'text', text }],
           }, AbortSignal.timeout(30_000))
           return ok(true)

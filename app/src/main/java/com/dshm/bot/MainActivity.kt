@@ -28,6 +28,8 @@ import com.dshm.bot.ui.settings.SettingsViewModel
 class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_BOT_ID = "open_bot_id"
+        /** 手机操控悬浮条「插话」：回到对话时把这句话预填进输入框。 */
+        const val EXTRA_INTERJECT_DRAFT = "interject_draft"
 
         @Volatile
         var isForeground: Boolean = false
@@ -36,9 +38,18 @@ class MainActivity : ComponentActivity() {
         @Volatile
         private var pendingOpenBotId: String? = null
 
+        @Volatile
+        private var pendingInterjectDraft: String? = null
+
         fun consumePendingOpenBot(): String? {
             val value = pendingOpenBotId
             pendingOpenBotId = null
+            return value
+        }
+
+        fun consumePendingInterjectDraft(): String? {
+            val value = pendingInterjectDraft
+            pendingInterjectDraft = null
             return value
         }
     }
@@ -57,11 +68,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingOpenBotId = intent.getStringExtra(EXTRA_OPEN_BOT_ID)
+        pendingInterjectDraft = intent.getStringExtra(EXTRA_INTERJECT_DRAFT)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingOpenBotId = intent?.getStringExtra(EXTRA_OPEN_BOT_ID)
+        pendingInterjectDraft = intent?.getStringExtra(EXTRA_INTERJECT_DRAFT)
         setContent {
             val settingsViewModel: SettingsViewModel = viewModel(
                 factory = SettingsViewModel.factory(applicationContext),

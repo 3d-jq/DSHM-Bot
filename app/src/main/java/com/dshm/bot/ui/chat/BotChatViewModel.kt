@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.R
 import com.dshm.bot.data.remote.BotFeedEvent
+import com.dshm.bot.data.remote.DsBotCapabilities
 import com.dshm.bot.data.remote.DsBotParser
 import com.dshm.bot.domain.model.ChatApproval
 import com.dshm.bot.data.remote.DELIVERABLES_PRESENTED_EVENT
@@ -1052,14 +1053,22 @@ class BotChatViewModel internal constructor(
     }
 
     /** 发一条消息：用户气泡立刻上屏，服务端回显按 requestId 跳过。 */
-    fun send(raw: String, attachments: List<ChatAttachmentDraft> = emptyList()) {
+    /**
+     * @param steer true = 手机操控悬浮条「插话」：消息插进**当前正在跑的回合**
+     *   （`session/prompt` 的 `mode=steer`），而不是排队等下一轮。
+     *   注意不能走 [PhoneControlSession.beginTurn]，否则会清掉用户刚按的「停止」。
+     */
+    fun send(raw: String, attachments: List<ChatAttachmentDraft> = emptyList(), steer: Boolean = false) {
         val connection = client ?: return
         val text = raw.trim()
         if ((text.isEmpty() && attachments.isEmpty()) || _uiState.value.sending) return
         // 新一轮指令：清掉上一轮手机操控留下的“停止/暂停”状态和回合标记。
-        val phoneOwner = notifyContext?.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
-            ?.getString("phone_control_bot_id", null)
-        if (phoneOwner == null || phoneOwner == botId) PhoneControlSession.beginTurn()
+        // 插话不算新一轮，不能清「停止」。
+        if (!steer) {
+            val phoneOwner = notifyContext?.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
+                ?.getString("phone_control_bot_id", null)
+            if (phoneOwner == null || phoneOwner == botId) PhoneControlSession.beginTurn()
+        }
         val requestId = UUID.randomUUID().toString()
         optimisticRun = true
         userStoppedRun = false
@@ -1101,7 +1110,8 @@ class BotChatViewModel internal constructor(
                         payload = JSONObject()
                             .put("sessionId", botId)
                             .put("requestId", requestId)
-                            .put("text", text),
+                            .put("text", text)
+                            .apply { if (steer) put("mode", "steer") },
                     )
                 } else {
                     val session = sessionId ?: botId
@@ -1151,11 +1161,14 @@ class BotChatViewModel internal constructor(
                 error = if (initial) state.error else null,
             )
         }
+        // `room-chat` 只存在于 mobile-api 分支；协商没成功（旧版插件）时别发注定
+        // `bot/not-found` 的请求，退回 `chat`（用 roomId 当 botId），至少能出历史。
+        val roomChat = isGroup && DsBotCapabilities.supports("room-chat")
         viewModelScope.launch {
             runCatching {
                 connection.bot(
-                    endpoint = if (isGroup) "room-chat" else "chat",
-                    payload = JSONObject().put(if (isGroup) "roomId" else "botId", botId),
+                    endpoint = if (roomChat) "room-chat" else "chat",
+                    payload = JSONObject().put(if (roomChat) "roomId" else "botId", botId),
                 )
             }.onSuccess { value ->
                 historyCache?.save(value)
@@ -1227,10 +1240,11 @@ class BotChatViewModel internal constructor(
         val current = cursor ?: return
         if (_uiState.value.loadingEarlier) return
         _uiState.update { it.copy(loadingEarlier = true, error = null) }
+        val roomChat = isGroup && DsBotCapabilities.supports("room-chat")
         viewModelScope.launch {
-            val payload = JSONObject().put(if (isGroup) "roomId" else "botId", botId)
+            val payload = JSONObject().put(if (roomChat) "roomId" else "botId", botId)
             current.toJson()?.let { payload.put("cursor", it) }
-            runCatching { connection.bot(endpoint = if (isGroup) "room-chat" else "chat", payload = payload) }
+            runCatching { connection.bot(endpoint = if (roomChat) "room-chat" else "chat", payload = payload) }
                 .onSuccess { value ->
                     val items = value.optJSONArray("items")
                     val scope = sessionId ?: botId

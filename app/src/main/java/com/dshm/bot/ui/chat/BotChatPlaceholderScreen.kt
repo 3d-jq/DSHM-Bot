@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import com.dshm.bot.MainActivity
 import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -159,6 +160,16 @@ fun BotChatScreen(
     // 高频流式文本只在这层读，不经过整个对话页的 state（DeepSearch 侧通道同款）。
     val streaming by viewModel.streamingText.collectAsStateWithLifecycle()
     var draft by rememberSaveable(bot.id) { mutableStateOf("") }
+    /** 手机操控悬浮条「插话」带过来的预填文本；用掉一次就清，避免旋转/重进重复填。 */
+    var interject by rememberSaveable(bot.id) { mutableStateOf(false) }
+    LaunchedEffect(bot.id) {
+        if (interject) return@LaunchedEffect
+        val text = MainActivity.consumePendingInterjectDraft()
+        if (!text.isNullOrBlank()) {
+            draft = text
+            interject = true
+        }
+    }
     var pendingAttachments by remember { mutableStateOf<List<ChatAttachmentDraft>>(emptyList()) }
     val attachContext = LocalContext.current
     val attachScope = rememberCoroutineScope()
@@ -578,8 +589,11 @@ fun BotChatScreen(
                 onValueChange = { draft = it },
                 onSend = {
                     if ((ComposerRules.canSend(draft) || pendingAttachments.isNotEmpty()) && !state.sending) {
-                        viewModel.send(draft, pendingAttachments)
+                        // 悬浮条「插话」预填的那条：用 steer 模式插进当前正在跑的回合，
+                        // 而不是排到下一轮。发完清掉标记。
+                        viewModel.send(draft, pendingAttachments, steer = interject)
                         draft = ""
+                        interject = false
                         pendingAttachments = emptyList()
                         sendCount += 1
                         lastSendAt = System.currentTimeMillis()
