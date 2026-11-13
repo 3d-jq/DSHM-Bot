@@ -53,3 +53,6 @@ runtime-dev/
 # WorkBuddy 本地工作笔记（不属于项目源码）
 .workbuddy/
 
+# ZCode 本地工作产物（计划文件等，不属于项目源码）
+.zcode/
+
