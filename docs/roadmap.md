@@ -910,3 +910,202 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 - ☑️ 同卡片底部「添加密钥」行补同尺寸加号块，否则标题会和上面几行错位；
   顺手把模型渠道页里私有的 `PlusTile` 提成共享组件 `SettingsAddTile()`
   （`SettingsComponents.kt`），两处共用、不再各写一份。
+
+### 修「流式期间用户气泡错位」（2026-11-13）
+
+现象：大模型流式输出时，用户自己发的气泡会跑到错误位置（本轮的工具/事件行插到了它**上面**）；
+重新进对话或重新加载历史后又恢复。
+
+根因（`BotChatViewModel`）：乐观用户气泡的占位 seq 写成 `maxSeenSeq + ++optimisticSeq`，
+`optimisticSeq` 每次发送都累加且从不清零。`mergeTimeline` 按「插到第一条 seq 更大的条目之前」
+定位，占位 seq 一旦高过**本轮**的真实 seq，本轮事件就被插到用户气泡前面 —— 发得越多越明显
+（新进对话/新 ViewModel 计数归零，所以看起来「过一会又好了」）。
+
+- ☑️ 占位 seq 改成 `maxSeenSeq + 1`（只比「已加载历史」大一档），删掉累加计数；
+- ☑️ 服务端回显虽然被 `seen` 去重，但它带着真实 seq：`adoptLocalSeq()` 把真 seq 认领回本地气泡，
+  之后本轮事件按真 seq 插在气泡后面，位置自愈；
+- ☑️ `BotChatTimelinePositionTest`（3 例）先复现（本轮事件被插到气泡上方、占位 seq 累加）
+  再验证修复：本轮事件落在最新用户气泡之后、占位 seq 不累加、回显认领真 seq。
+- 验证：76 测试类 / 438 用例全绿，lint 零 warning，assembleDebug 通过，真机确认。
+
+### ⬜ 待办：交付产物卡要等整轮结束才出现（2026-11-13 定位完成，**未修**，用户要求先记着）
+
+**现象**（2026-11-13 用户两次校订）：Bot 交付文件后，私聊里那张产物卡**不是马上出现**；
+**等一会儿会自己出来**，重新进对话也能立刻看到。（用户原话：这个图片显示产物又不及时显示。）
+
+**根因（已定位，是 9381887 引入的回归）**：产物卡从「声明即出」变成了「等整轮结束」。
+
+- **旧实现**（`9381887^`，`BotChatViewModel.kt:687`）：
+  ```kotlin
+  val seq = turnEndSeq[turn] ?: presentedSeq[turn] ?: writtenSeq[turn] ?: return@mapNotNull null
+  ```
+  位置优先 `turn/end`，**没有就退回 `presentedSeq`（`present` 声明那一刻）** ——
+  所以 `present` 一到就出卡，不等整轮跑完。
+- **新实现**（`9381887` 起，`ArtifactDerivation.kt` + `artifactEntries()`）：
+  ```kotlin
+  if (turns.none { !it.running && it.endSeq != null }) return emptyList()   // artifactEntries
+  for (trace in turns) if (!trace.running && trace.endSeq != null) finished[trace.turn] = trace
+  ```
+  **必须有一轮已经 `turn/end`** 才推导，`deliverables/presented` 到了也不画。
+
+**真机证据**（`adb shell run-as com.dshm.bot cat shared_prefs/bot-chat-events:<sessionId>.xml`，
+一份 1.5MB 的真实事件记录，604 条）——turn 256 的事件序列：
+
+| seq | 事件 |
+|---|---|
+| 6042 | turn/start |
+| 6048 | tool/call |
+| **6049** | **deliverables/presented**（`/root/.dsh/bot/workspace/agnes_cat.png`） |
+| 6050 | tool/result |
+| 6053 | assistant/message（收尾文字） |
+| **6055** | **turn/end** ← 卡到这里才出现 |
+
+事件完整送达（`turn/end` 也到了），所以不是链路/订阅问题；是**推导门槛**卡住了。
+模型 `present` 之后如果还要接着干活/等子代理，这段间隔就越拉越长 → 用户感觉「要等一会儿」；
+重新进对话时 `eventsCache` 里已经有 `turn/end`，所以**立刻**就有 → 这也解释了「重进就马上有」。
+
+**顺带确认过的（都不是主因，记录备查）**：
+
+- 推导 + 合并这条链本身没问题：`BotChatArtifactLiveTest` 喂
+  `turn/start → presented → turn/end` 当场出卡；
+- 这台机器上 logcat 里 tag `DshMux` **一条都没有**（进程和引擎都活着），
+  下次取证**不要依赖 logcat**，直接读上面的 `bot-chat-events` 缓存（debug 包 `run-as` 可用）；
+- 「`ensureFollow` 的 `onEnd` 之后没人重订、follow 可能永久死」这条**仍在**（
+  `DshMux` 收到 `TYPE_END`/`TYPE_ERROR` 会把流从 `streams` 移除），但解释不了本现象，
+  单独记一笔当后续风险；
+- `ChatEventsCache.MAX_CHARS = 1MB`，真机那份 prefs 1.5MB（XML 转义膨胀），
+  `load()` 有 `raw.length > MAX_CHARS → emptyList()` 的早退；当前样本正文约 1.03MB 还能加载，
+  但**已经很接近上限**，会话再长就会读不出缓存（重新进对话时产物卡也会跟着丢）——单独记一笔。
+
+**建议的修法（待用户发话再动）**：把「已结束」的门槛放宽成「已结束 **或** 本轮已有交付声明」，
+两个文件各一处：
+
+- `deriveArtifacts()`：`finished` 里除了 `!running && endSeq != null` 的轮，也纳入
+  「有 `presented` 声明」的轮，位置取 `presented` 事件的 seq（拿不到就取 endSeq）；
+- `artifactEntries()` 开头那句 `turns.none { ... }` 同步放宽；
+- `turn/end` 到了以后卡的位置自然前进到 `endSeq`（和旧实现一致），卡片 id 仍是
+  `present:<turn>`、`base` 仍过滤 `present:`，不会重复。
+- 补一条测试：只喂 `turn/start → presented`（**不给 turn/end**）时就该出卡；
+  再补 `turn/end` 后卡的位置前移到 endSeq。
+
+**修完的行为预期（2026-11-13 与用户确认过口径）**：位置**最终仍然落在这一轮结束处**
+（官方网页版也是画在轮末，`present` 之后往往还有一段收尾文字）——修的是**出现时刻**
+（`present` 一到就画），不是最终位置。所以：
+
+- `present` 完马上收尾的短回合，肉眼差别很小（例如 turn 256 只差 6 个事件）；
+- 长尾回合（先交文件、又接着干几十秒 / 等子代理）差别明显：现在这段什么都看不到，
+  修完立刻能看到文件卡。
+
+两个位置策略，动手时二选一（用户尚未定）：
+
+- **A（推荐，与网页版一致）**：先出在 `present` 位置，`turn/end` 到了再落到轮末 —— 会有一次小幅下移；
+- **B（不挪）**：出在 `present` 位置就不动，无跳动，但最终位置与网页版不完全一致。
+
+
+### 产物卡延迟：二次定位（2026-11-13，真机实锤，已修）
+
+第一次定位（「卡要等 `turn/end`」）只解释了文档那一半。用户用修复后的包再测：**图片卡还是慢，文档卡正常**。
+从设备拉 `bot-chat-events` 缓存逐轮对比，真正原因是**图片那轮压根没有 `present` 声明**：
+
+- **turn 291（文档，正常）**：模型调了 `present` → `deliverables/presented` → `DELIVERED` → 卡立刻出；
+- **turn 290（图片，慢）**：
+  1. `bash` 用 node 脚本调 agnes 接口把图下到工作区（`meta={"cwd":...}`，**无 `meta.path`**）；
+  2. `read_image` 只是**读**图验证（`meta.path=hotpot.png`，但它是读不是写）；
+  3. 最终回复里写的是**行内代码** `` `/root/.dsh/bot/workspace/hotpot.png` ``，**不是 markdown 链接**；
+  4. **没有 `present`**。
+
+  于是三个来源全落空：`WRITTEN` 只认 `write` / `str_replace_editor`；`LINKED` 只解析 `](...)`；
+   只剩 `OUTPUT` 兜底 —— 要 **等轮末 + 5 秒 TTL 的异步扫盘** 才出卡 → 用户感觉「要等一会儿」。
+
+**先试过的客户端兜底（已回退）**：`linkedPaths()` 曾增加「行内代码里的绝对路径也算产物」
+（`INLINE_PATH`）。它能出卡，但会**掩盖「模型到底有没有调 `present`」**，用户要求去掉兜底做干净 A/B，
+所以该改动和两条对应测试已回退（现在只认 markdown 链接）。
+
+**最终修法（已真机验证）**：走**提示词**——`GuestSetup` 的 AGENTS.md 增加「交付文件」一节，
+明确「文档/表格/演示/**图片/视频/音频**都算交付物，交给用户时调 `present`」。
+用户实测：**图片产物卡现在实时出现**（= 模型在这一轮调了 `present`）。详见下一节。
+
+**仍然存在的边界（未改）**：如果模型在回复里完全没提那个文件路径、也没 `present`，只能靠
+`OUTPUT` 兜底（轮末 + 扫盘 TTL）。是否彻底去掉三路兜底（只认 `present`，对齐官方
+`dsh-client-ui-deliverables`）尚未决定；当前保留。
+
+## 🎯 大目标：让 DSH / DS Bot 适配我们（2026-11-13 用户定，**未排期**）
+
+> 用户原话（要点）：**「我们要本地化魔改一下 DSH 和 DS Bot。DSH 本身是插件思想，可以随时替换和魔改。
+> 我们不仅可以完美继承它的能力，还可以魔改出我们想要的。这比我们不断打补丁适配他们强太多了。
+> 所以不是我们魔改他、是打补丁适配他吗？是让他适配我们。」**
+>
+> 关系反转：**从「追着上游打补丁」→「插件化接管，让上游能力长成我们的形状」**。
+>
+> **决定（2026-11-13）：确认按这个方向走 —— 基于 DSH 的插件思想魔改它，让它适配我们。**
+> **本轮只记录，不改任何代码**；动手时从下面「分阶段」的第 1 步开始。
+>
+> **再度确认（2026-11-13）：核心是把 DSH 和 DS-Bot 这两个「底层」本身魔改成我们要的样子，之后不再打补丁适配它们。**
+> 有新问题就回到这两个底层去改，而不是一遍遍 patch 上游。现有 13 个 `runtime/patches` 属于过去的方式，
+> 会被「分阶段」第 1 步逐个消化掉。
+
+### 可行性已确认（2026-11-13 研究 `@deepseek-ai/dsh@0.2.2-rc.1`）
+
+- DSH 的 `dsh` npm 包只是 20 个文件的引导壳；**所有能力都是独立插件包**：
+  `dsh-tool-present` / `dsh-tool-bash` / `dsh-tool-ask-user` / `dsh-agent-instructions` /
+  `dsh-persona` / `dsh-system-prompt` / `dsh-skill*` …（完整清单见
+  [dsh-plugin-architecture.md](dsh-plugin-architecture.md)）。
+- profile 是「**有序 patch 层栈**」：`bundles → profile/cordis.patch.yml → $DSH_HOME/cordis.patch.yml → --patch`；
+  `dsh plugin` 直接转发 pnpm —— **加/删/替换插件是官方一等操作，不用动 `node_modules`**。
+- 提示词有四级扩展点：AGENTS.md / `ctx.systemPrompt.section(...)` / `system-prompt/assemble` waterfall /
+  替换官方插件包。**每个包还自带 `locale/*.json`（含 `zh`）**，多语言骨架现成。
+- 实测原因之一就在上游文案：官方 `present` 的工具描述写着
+  「especially **Office documents**, spreadsheets, and slide decks」——
+  这就是模型给 docx 调 `present`、给图片不调的直接原因；自写 `present` 插件即可改掉。
+
+### 现状差距
+
+- 我们目前只有 **13 个 build-time patch**（`runtime/patches`，见 `assets/runtime/manifest.json` 的
+  `dshPatches`），全部打在 `node_modules/@deepseek-ai/*/lib/index.js` 上，**每次上游升级都要重打 + 回归**。
+- DS Bot 插件（`assets/ds-bot`）同样是「改源码 + merge」，没有走插件化替换。
+- 提示词方面只注入了「手机操控」一段 AGENTS.md（`DSH_PHONE_CONTROL` / `DSH_PHONE_OWNER`）。
+
+### 分阶段（待排期）
+
+| 阶段 | 做什么 | 产出 |
+|---|---|---|
+| **0（已完成）** | 摸清 DSH 插件模型、确认可替换性 | [dsh-plugin-architecture.md](dsh-plugin-architecture.md) |
+| 1 | 逐个评估 13 个 patch：能迁成插件/profile 的迁走，剩下才继续 patch | patch 数量下降 |
+| 2 | 自写插件接管模型可见面：`present`（中文描述 + 图片/视频也算交付）、自定义 systemPrompt section、按 Bot 的 persona | 产物卡、行为规则可控 |
+| 3 | 提示词本地化：AGENTS.md / section / persona 三层写中文产品文案（参照 dsh-Go 的 AGENTS.md、安全简报、工具目录写法） | 中文优先的 agent 行为 |
+| 4 | DS Bot 插件同策略：`prompt.js` / `tools.js` 走扩展或替换，而不是 merge 上游 diff | 升级成本可控 |
+| 5 | 工具集裁剪：profile 里移除不用的 `experimental-*` 包，减少工具 schema token | 更少的模型选择困难 |
+
+### 约束（研究结论）
+
+- **「魔改」不等于「没有适配成本」**：成本形态变了 —— 从「上游升级后重打 diff」变成
+  「把上游改动 merge 进我们自己的副本 / 适配我们的插件」。所以**改动要尽量压在插件层**
+  （profile + 自写插件），必须 fork 的部分越少越好；fork 一旦变大，升级就是不可控的 merge。
+- profile 是 per-installation，App 启动要写/更新它，且不能覆盖用户的 `cordis.patch.yml`；
+- 替换官方包要跟 `name` / `inject` / 输出契约，用 `engines.dsh` 卡版本；
+- `complete` section 全 scope 只能一个；同名 section / tool 重复注册会抛错（替换前要确保官方那个没加载）；
+- `locale/*.json` 只是包元数据，**工具描述是硬编码英文**，想中文化只能改插件。
+
+### 立即可做的一小步（成本最低，不是本轮）
+
+在 AGENTS.md 里加一条「交付任何文件（含图片/视频）都调用 `present`」——零升级成本，
+能先验证「模型行为可被提示词稳定驱动」，再决定要不要走插件化替换（自写 `present`）。
+
+
+### 交付规则进 AGENTS.md（2026-11-13，提示词第一档）
+
+背景：图片产物卡走兜底（`present` 不调）的根因是官方 `present` 工具描述偏向
+「especially Office documents, spreadsheets, and slide decks」。
+按「让 DSH 适配我们」的策略，先走**成本最低的提示词层**（AGENTS.md，零升级成本）：
+
+- `data/runtime/GuestSetup.kt` 的 `AGENTS.md` 增加一节「交付文件（DSHM Bot）」：
+  交付任何文件都调 `present`（**文档/表格/演示/图片/视频/音频都算**），
+  只声明成品、不要只在回复里贴路径；
+- 仍是 `dshm-bot:managed` 标记 + 用户自己改过不覆盖；每次引擎启动重写，升级即生效；
+- 新增 `GuestSetupTest`（4 例）：交付规则写入 / 自有旧版被升级 / 用户自有文件不动 / 缺失目录能创建；
+- 真机验证：装新包冷启动后，`run-as` 读 `files/runtime/rootfs/root/.dsh/AGENTS.md`，
+  确认新章节已落盘。
+
+**真机回归（2026-11-13，通过）**：去掉客户端行内路径兜底后让它生成图片，**产物卡实时出现**
+（= 模型在这一轮调了 `present`），说明提示词第一档就够用，不必升级到 `systemPrompt.section`
+或替换 `tool-present` 描述。若以后在别的模型/场景下失效，再按这条阶梯升级。

@@ -120,3 +120,62 @@ PRoot 内的 dsh web ──HTTP/SSE──> DshClient ──> DsBotRepository ─
 - **版本跟随**：本项目同时受「自身发版 / 上游 DSH / 上游 DS Bot 插件」三条线牵动，
   任何一条都要我们自己适配（补丁重打 + 插件 merge + 界面契约回归）。
   现状、待办与已知的升级丢数据风险见 `docs/roadmap.md` 的「更新与版本跟随」一节。
+  ⚠️ 方向已调整（2026-11-13）：不再以「打补丁适配上游」为主，而是**插件化接管、让 DSH / DS Bot 适配我们**；
+  插件模型与可行性见 [dsh-plugin-architecture.md](dsh-plugin-architecture.md)，分阶段见
+  `docs/roadmap.md` 的「🎯 大目标：让 DSH / DS Bot 适配我们」。
+
+## 「给用户看的结果」的统一写法（2026-11-13 讨论结论，**未决定做**）
+
+用户提出：网页（浏览器页）和产物卡都是"给用户看的结果"，能不能统一写法？讨论结论记在这里，
+属于**取舍备忘**，没有排期，也没有改动代码。
+
+### 现状：5 条独立的路，共用很少
+
+| 类型 | 数据来自 | 渲染 | 交互 |
+|---|---|---|---|
+| 产物卡 `ARTIFACTS` | `deliverables/presented` / 本轮新建文件 / 回复里链接 / 输出目录（由会话事件推导） | `ui/chat/ArtifactCard.kt` 文件行 | `ui/chat/ChatArtifacts.kt`：下载到 `cacheDir/artifacts` → `FileProvider` → `ACTION_VIEW` 外部应用；分享 `ACTION_SEND`；另存 `MediaStore`；复制路径 |
+| 视图卡 `VIEW`（含 `html` 节点） | `show_view`（`state.views`） | 蓝图递归（text / metric / table / chart / html…）+ `ChatFormula` | 选 / 填 / 确认 / 提交（回执给引擎） |
+| 浏览器页 | 真网页 / `dshm://` 本地页 | `BotBrowserScreen` + `RootfsWeb`（`shouldInterceptRequest` 直接返文件流） | 真导航、下载、截图、`read_browser`（页面→markdown）、点击/输入/滚动、交接用户 |
+| 浏览器缩略图卡 `BROWSER_SHOT` | 一轮结束抓图（`BrowserShotStore`） | `ui/chat/BrowserShotCard.kt` | 点开进这个 Bot 的浏览器 |
+| 附件图片 | 本地附件（`ChatAttachmentCache`） | 气泡缩略图 | `ui/chat/FullscreenImageViewer.kt`（自己一套复制/分享） |
+
+重复点：**5 处 WebView 用法**（`BotBrowserStore` / `BotBrowserScreen` / `BrowserReadBridge` /
+`ChatHtmlCard` / `ui/settings/WebHostScreen`）、**2 套「打开文件」**
+（`ChatArtifacts` 与 `FullscreenImageViewer`）、**3 种卡片**。
+
+### 值得统一的（横切面）
+
+1. **「打开 / 分享 / 另存一个资源」的动作层**：抽成一个分发器（open / share / saveToDownloads /
+   copyPath / 图片全屏），产物卡、附件图、缩略图卡、视图卡里的文件都走它。
+   收益：以后加 PDF / Office / 日志 / diff 预览只改一处。
+2. **本地资源寻址**：项目**已有** `dshm://`（`RootfsWeb`：`workspace|attachments|dsh/...`）。
+   把产物、附件也纳入同一 scheme，WebView 就能直接渲染 md / html / 图片 / 文本 ——
+   「看文件」和「看网页」在实现上变成同一件事：给 WebView 一个 URL，不必先落到 `cacheDir`
+   再交给外部应用。
+3. **卡片外壳**（圆角 / 内边距 / 标题行 / 展开折叠 / 错误行文案）：可共享，落成
+   `ui/components` 里的共享小件（先例：`SettingsAddTile`、`InitialMark`、`rememberWindowHeightDp()`）。
+
+### 不该统一的
+
+- **协议 / 模型层**：产物卡来自 `deliverables/presented`、视图卡来自 `show_view`、
+  浏览器来自真导航 + `read_browser` —— 上游 DS Bot / DSH 本身就是三套协议，我们是对齐方。
+  合成一个「ResultItem」会把「可交互表单」和「文件清单」塞进同一个抽象：产物卡的动词是
+  **打开 / 分享 / 另存**，视图卡是**选 / 填 / 确认 / 提交**，浏览器是**导航 / 滚动 / 输入 / 接管**。
+  磨平三种语义会把与基线的一致性一起磨掉。
+- **沙箱 html 卡片 ≠ 真浏览器**：`ChatHtmlCard` 是 `loadDataWithBaseURL(null, …)` + CSP + 禁网 /
+  禁文件 / 禁跳转；浏览器是真会话（还带 cookie，而 WebView 的 cookie 是进程级共享，见
+  `docs/roadmap.md` 浏览器一节）。安全等级不同，不能共用同一个 WebView 实例池。
+
+### 代价与边界
+
+- WebView 能渲染 md / html / 图片 / 文本，**不能渲染 PDF / Office** → 统一层必须保留
+  「交给外部应用」这个出口，`ChatArtifacts` 现在那条 `FileProvider` 路不能删；
+- 把产物塞进 `dshm://` 需要**扩 `RootfsWeb` 的目录白名单**（现在只暴露 `.dsh` 下），
+  安全边界要重审，别把整个 rootfs 暴露出去；
+- 统一层要落成 `ui/components` 的共享组件，不能做成"万能渲染器"（设计令牌 + 骨架模板是硬规则）。
+
+### 结论
+
+**统一「资源 → 查看方式」这条横切（寻址 + 动作分发 + 卡片外壳）；不统一卡片与协议模型。**
+收益是「将来加一种能看的东西只改一处」；现在做是纯重构、用户无感，属于工程债级别，
+适合跟「要做 PDF 预览 / 统一长按菜单」这类需求一起做。

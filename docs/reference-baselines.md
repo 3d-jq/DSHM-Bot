@@ -53,3 +53,48 @@
 - Bot 对话的 UI 形状、胶囊、状态文案 → `DS-Bot/`，不是 dsh-Go
 
 一句话：**做 DS Bot 看 DS Bot，做 DSH 看 dsh-Go；不要用 dsh-Go 的 Bot 页面冒充 DS Bot。**
+
+## dsh-Go 的「本地化」盘点（2026-11-13，为「提示词 + DSH 大改」做的参考）
+
+> 用户方向：本项目接下来要**大改提示词（prompt）和 DSH**。先把 dsh-Go 到底做了多少本地化盘清楚，
+> 避免我们重复造轮子，也避免照着它的做法踩它的坑。以下数字来自本地 `dsh-Go/` 只读基线。
+
+### 结论：它的「本地化」核心不是翻译，而是「中文优先的 agent 产品化」
+
+| 层面 | 规模 |
+|---|---|
+| UI 文案 | 46 个文案域、92 个 ARB（zh/en 各 46），**5,441 key × 2 语言**；生成 Dart 约 69,874 行；另有 219 行中文-only 的插件设置文案 |
+| Agent 注入指令 | AGENTS.md（`GuestSetup.kt` 约 55 行/1.1k 汉字）、安全模式修复简报（`SafeMode.kt` 约 125 行/1.4k 汉字）、手机操控段（`PhoneGuest.kt`） |
+| Agent 可见工具/观测 | 13 个手机 MCP 工具（描述+参数+返回全中文）、`dsh-media` 5 个媒体工具 + 7 条中文 `systemPrompt.section`；手机目录 65 文件/15,264 行/6,209 汉字 |
+| 自研 DSH 插件 | `dsh-go-bridge` 4,263 行 + `dsh-media` 8,073 行（**新增插件，不 fork DSH**） |
+| DSH 本体 | **11 个 build-time patch、22 个产物文件、约 +524/−60 行，全部是功能性补丁**（rootfs/插件管理/会话删除等），**没有一处改 prompt / 内建工具描述** |
+| 技能/文档 | 4 个中文教学技能（60 文件/11,406 行/21,601 汉字）；指南 zh/en 各 12 页 |
+
+一个很说明问题的细节：全仓 **618 处 `l10n:keep` 豁免标注，其中 462 处是 `agent …` / `model …`**，
+即「这是给模型看的文案，别当 UI 漏翻处理」。
+
+### 值得借鉴的三点
+
+1. **把 agent 提示词当产品资产**：AGENTS.md、安全简报、工具目录、屏幕序列化格式都自己写、
+   自己版本化、自己审计（`l10n:keep` 扫描器 + 托管标记 `<!-- xxx:managed`，用户删标记才停止覆盖）。
+2. **改 DSH 用 build-time patch，不 fork**：11 个 diff 打在 `node_modules/@deepseek-ai/*/lib/index.js` 上，
+   版本/哈希钉死在 `pins.json`；我们 `runtime/patches` 也是同一套思路。
+3. **agent 行为的改造主要靠「外挂」而不是改内核**：AGENTS.md / skills / MCP / `ctx.systemPrompt.section`。
+   这四样都不需要动 DSH 源码，升级上游时几乎零 merge 成本。
+
+### 它**没有**做的（避免误判）
+
+- 没有 zh/en 之外的 locale；
+- **没有改 DSH 内建的 system prompt 和工具描述**（`bash` / `web_search` / `present` / `ask_user` 全是原样）；
+- 没有 fork / vendor 任何 DSH 包，也没有 vendored `node_modules`；
+- 没有英文版 AGENTS.md / 手机工具描述 / 媒体工具描述（这些是中文-only）；
+- 没有默认人设 prompt（人设/预设由用户在宿主侧编辑，内容来自 DSH 默认）；
+- 指南里没有专门讲「提示词结构 / 工具描述定制 / prompt 调试」的页面。
+
+### 对我们的含义
+
+- 想改「`present` 什么时候被调用」这类**模型行为**，最轻的路是 **AGENTS.md / 技能 / systemPrompt.section**，
+  不用动 DSH；dsh-Go 就是这么做的，而且它的 AGENTS.md 注释明确写着「把 DS Bot 的
+  `show_view` 描述和 `prompt.js` 规则重写成中文指令」——**上游英文 prompt 重写成中文**本身就是它的做法。
+- 只有确实改不动（比如内建工具描述、系统提示的硬性行为）时，才考虑给 DSH 打 patch；
+  那意味着每次上游升级都要重打 + 回归（我们已经有 13 个 dsh patch 的负担）。
