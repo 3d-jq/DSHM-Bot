@@ -879,3 +879,34 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   - 「保存」按钮从 `SettingsPage(bottomBar = ...)` 固定浮底改成表单滚动内容里的一张
     `SettingsSection` 白卡，跟其它卡片一起滚；文案（保存中 / 等待引擎连接 / 保存）
     和禁用逻辑不变。
+
+### 设置深页返回修复（2026-11-13）
+
+现象：设置里的内层页（渠道详情/编辑、插件清单、namespace 表单、应用名单）按**系统返回**
+会直接弹掉一级设置栈、回到上一级设置页，而不是回到该页的上一层。
+
+根因：全 App 只有两个 `BackHandler` —— `DshmBotApp.kt` 顶层（弹设置栈 / 关设置页）
+和 `BotBrowserScreen.kt`（内层页，正确样板）。这几个页面自己带内层页（`return` 早退或
+`AnimatedContent` 切换），但只接了顶栏返回按钮，没注册内层 `BackHandler`，系统返回被顶层吃掉。
+
+- ☑️ 4 个内层页补内层 `BackHandler`（栈空时不拦截，交回顶层）：`ModelProvidersScreen`、
+  `EngineSettingsScreen`（插件清单 / 子代理 / namespace）、`PluginsScreen`（插件表单）、
+  `PhoneControlSettingsScreen`（应用名单）；
+- ☑️ `ModelProvidersScreen` 的 `page: ProviderTarget?` 改成**真栈**（新 `ui/settings/ProviderNav.kt`，
+  `ProviderTarget` 移过去并改 `internal`）：返回永远弹一层，所以
+  **详情 → 编辑 → 返回回到详情**（原来直接回列表）；列表「添加渠道」进的表单返回则回列表；
+  保存/删除落点保持原样（表单保存成功回列表、详情内改模型成功回详情）。
+  `ProviderNavTest`（7 例）锁住这几条栈序列。
+- ☑️ 顺带：定时任务页的「新建任务」内联表单接返回（先收表单再退页）。
+- 约定（写进 design-system 已知坑）：**设置内层页必须注册内层 `BackHandler`**，样板见
+  `BotBrowserScreen.kt`；否则系统返回会跳级。
+- 验证：75 测试类 / 435 用例全绿，lint 零 warning，`assembleDebug` 与插桩测试编译通过；
+  真机手动过一遍上述路径（顶栏返回与系统返回行为要一致）。
+
+### 密钥列表首字母图标（2026-11-13）
+
+- ☑️ 「团队 → 密钥」列表行左侧补首字母方块，和能力 / 连接器列表同一套
+  （`TeamSettingsScreens.kt` 的 `InitialMark`，原来是 `CapabilityMark`，改名成中性名字）；
+- ☑️ 同卡片底部「添加密钥」行补同尺寸加号块，否则标题会和上面几行错位；
+  顺手把模型渠道页里私有的 `PlusTile` 提成共享组件 `SettingsAddTile()`
+  （`SettingsComponents.kt`），两处共用、不再各写一份。

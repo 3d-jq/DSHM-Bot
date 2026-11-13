@@ -1,5 +1,7 @@
 package com.dshm.bot.ui.settings
 
+import androidx.activity.compose.BackHandler
+
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -56,6 +58,9 @@ fun PhoneControlSettingsScreen(
     var testText by remember { mutableStateOf<String?>(null) }
     var rulesOpen by remember { mutableStateOf(false) }
     var ownerPickerOpen by remember { mutableStateOf(false) }
+
+    // 应用名单是这一页的内层页：系统返回先收它，别让顶层弹掉设置栈。
+    BackHandler(enabled = rulesOpen) { rulesOpen = false }
     var recentActions by remember { mutableStateOf(PhoneActionLog.recent(context, 5)) }
     val ownerName = bots.firstOrNull { it.id == ownerBotId }?.name
     val lifecycleOwner = LocalLifecycleOwner.current

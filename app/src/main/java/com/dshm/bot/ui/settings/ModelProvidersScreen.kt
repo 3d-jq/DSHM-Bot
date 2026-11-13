@@ -19,11 +19,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,25 +57,6 @@ import com.dshm.bot.data.remote.isValidProviderBaseUrl
 import com.dshm.bot.data.remote.normalizeDiscoveryBaseUrl
 import com.dshm.bot.data.remote.providerRoutePattern
 
-/** 渠道子页面目标：列表 → 详情 → 编辑 → 模型设置。 */
-private sealed interface ProviderTarget {
-    data class Detail(val route: String) : ProviderTarget
-
-    data class Editor(val existing: ProviderProfile?) : ProviderTarget
-
-    /**
-     * 模型设置页。
-     *
-     * @param writes true = 从渠道详情页进来，保存直接写引擎；
-     *   false = 从渠道表单进来，完成后把规格交回表单，跟着表单一起保存。
-     */
-    data class Model(
-        val route: String,
-        val model: ProviderModelSpec,
-        val writes: Boolean,
-    ) : ProviderTarget
-}
-
 /** 渠道表单的草稿：放在页面外壳里，模型设置页返回时才有地方回填。 */
 private data class ProviderDraft(
     val existing: ProviderProfile?,
@@ -105,7 +86,13 @@ fun ModelProvidersScreen(
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
-    var page by remember { mutableStateOf<ProviderTarget?>(null) }
+    // 内层导航栈：列表（空）→ 详情 → 编辑 / 模型。用栈而不是单个目标，
+    // 返回才永远是「弹一层」；栈为空（列表态）时不拦截，交回顶层路由。
+    var targets by remember { mutableStateOf<List<ProviderTarget>>(ProviderNav.reset()) }
+    val page = ProviderNav.current(targets)
+    BackHandler(enabled = page != null) {
+        targets = ProviderNav.back(targets)
+    }
     var draft by remember { mutableStateOf<ProviderDraft?>(null) }
     val providers = viewModel.providers()
     val customRoutes = providers.profiles.map { it.route }.toSet()
@@ -165,7 +152,7 @@ fun ModelProvidersScreen(
                 ProviderDetailPage(
                     viewModel = viewModel,
                     route = current.route,
-                    onBack = { page = null },
+                    onBack = { targets = ProviderNav.back(targets) },
                     onEdit = { profile ->
                         draft = ProviderDraft(
                             existing = profile,
@@ -176,16 +163,19 @@ fun ModelProvidersScreen(
                             showKey = false,
                             models = profile?.models.orEmpty(),
                         )
-                        page = ProviderTarget.Editor(profile)
+                        targets = ProviderNav.push(targets, ProviderTarget.Editor(profile))
                     },
                     onOpenModel = { model ->
-                        page = ProviderTarget.Model(current.route, model, writes = true)
+                        targets = ProviderNav.push(
+                            targets,
+                            ProviderTarget.Model(current.route, model, writes = true),
+                        )
                     },
                 )
             } else if (current is ProviderTarget.Editor) {
                 val currentDraft = draft
                 if (currentDraft == null) {
-                    page = null
+                    targets = ProviderNav.reset()
                 } else {
                     ProviderEditorScreen(
                         viewModel = viewModel,
@@ -193,11 +183,14 @@ fun ModelProvidersScreen(
                         onDraftChange = { draft = it },
                         language = language,
                         reduceMotion = reduceMotion,
-                        onBack = { page = null },
+                        onBack = { targets = ProviderNav.back(targets) },
                         onOpenModel = { route, model ->
-                            page = ProviderTarget.Model(route, model, writes = false)
+                            targets = ProviderNav.push(
+                                targets,
+                                ProviderTarget.Model(route, model, writes = false),
+                            )
                         },
-                        onSaved = { page = null },
+                        onSaved = { targets = ProviderNav.reset() },
                     )
                 }
             } else if (current is ProviderTarget.Model) {
@@ -219,7 +212,7 @@ fun ModelProvidersScreen(
                             ui.value = ui.value.copy(saving = true, error = null)
                             viewModel.saveProviderModel(current.route, spec) { failure ->
                                 ui.value = ui.value.copy(saving = false, error = failure)
-                                if (failure == null) page = ProviderTarget.Detail(current.route)
+                                if (failure == null) targets = ProviderNav.back(targets)
                             }
                         } else {
                             // 表单进来：交回表单，跟着表单一起保存。
@@ -228,17 +221,11 @@ fun ModelProvidersScreen(
                                 draft = editing.copy(
                                     models = editing.models.map { if (it.id == spec.id) spec else it },
                                 )
-                                page = ProviderTarget.Editor(editing.existing)
+                                targets = ProviderNav.back(targets)
                             }
                         }
                     },
-                    onBack = {
-                        page = if (current.writes) {
-                            ProviderTarget.Detail(current.route)
-                        } else {
-                            ProviderTarget.Editor(draft?.existing)
-                        }
-                    },
+                    onBack = { targets = ProviderNav.back(targets) },
                 )
             } else {
                 SettingsPage(
@@ -355,13 +342,16 @@ fun ModelProvidersScreen(
                                                 }
                                             },
                                             onClick = {
-                                                page = ProviderTarget.Detail(profile.route)
+                                                targets = ProviderNav.push(
+                                                    targets,
+                                                    ProviderTarget.Detail(profile.route),
+                                                )
                                             },
                                         )
                                     }
                                     SettingsRow(
                                         title = stringResource(R.string.settings_model_add),
-                                        leading = { PlusTile() },
+                                        leading = { SettingsAddTile() },
                                         enabled = state.description?.namespace(PROVIDER_NAMESPACE)?.writable == true,
                                         trailing = {},
                                         onClick = {
@@ -374,7 +364,10 @@ fun ModelProvidersScreen(
                                                 showKey = false,
                                                 models = emptyList(),
                                             )
-                                            page = ProviderTarget.Editor(null)
+                                            targets = ProviderNav.push(
+                                                targets,
+                                                ProviderTarget.Editor(null),
+                                            )
                                         },
                                     )
                                 }
@@ -919,25 +912,8 @@ private fun ProtocolSelector(
     )
 }
 
-/** dsh-Go 的「添加渠道」行图标：主色 + 号，无箭头。 */
 @Composable
-private fun PlusTile() {
-    Box(
-        modifier = Modifier
-            .size(Dshm.spacing.composerKey)
-            .clip(CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_lucide_plus),
-            contentDescription = null,
-            tint = Dshm.colors.accent,
-            modifier = Modifier.size(Dshm.spacing.topBarIcon),
-        )
-    }
-}
 
-@Composable
 private fun Chevron() {
     Icon(
         painter = painterResource(R.drawable.ic_lucide_chevron_right),

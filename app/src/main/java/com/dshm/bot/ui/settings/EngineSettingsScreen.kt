@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,6 +30,13 @@ fun EngineSettingsScreen(
     val language = settingsLanguage()
     var openNs by rememberSaveable { mutableStateOf<String?>(null) }
     var openInventory by rememberSaveable { mutableStateOf(false) }
+
+    // 内层页（插件清单 / 子代理 / namespace 表单）自己吃系统返回：只弹一层内层页，
+    // 栈为空时才交回顶层。没有这一条，系统返回会被 DshmBotApp 的顶层 BackHandler
+    // 当成「弹设置栈」，直接回到上一级设置页。
+    BackHandler(enabled = openInventory || openNs != null) {
+        if (openInventory) openInventory = false else openNs = null
+    }
 
     // 插件清单是引擎参数页内部的一层，点条目直接进它的设置表单。
     if (openInventory) {

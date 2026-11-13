@@ -92,6 +92,7 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
                     state.secrets.forEachIndexed { index, secret ->
                         if (index > 0) SettingsRowDivider()
                         SettingsRow(
+                            leading = { InitialMark(secret.name) },
                             title = secret.name,
                             subtitle = secretSubtitle(secret, state.members),
                             value = secret.lastUsedAt?.let { stringResource(R.string.team_secrets_used) },
@@ -101,6 +102,7 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
                 }
                 SettingsRowDivider()
                 SettingsRow(
+                    leading = { SettingsAddTile() },
                     title = stringResource(R.string.team_secrets_add),
                     onClick = {
                         sheetError = null
@@ -330,7 +332,7 @@ fun CapabilitiesScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
                         if (index > 0) SettingsRowDivider()
                         val users = state.attached.count { (_, names) -> capability.name in names }
                         SettingsRow(
-                            leading = { CapabilityMark(capability.name) },
+                            leading = { InitialMark(capability.name) },
                             title = capability.name,
                             subtitle = listOfNotNull(
                                 capabilityKindLabel(capability.kind),
@@ -378,10 +380,11 @@ fun CapabilitiesScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
 }
 
 /**
- * 能力列表左侧的首字母方块 —— 和连接器 / 插件列表同一套写法。
+ * 列表行左侧的首字母方块 —— 能力 / 密钥用同一套写法（连接器有品牌图时用
+ * [ConnectorBrandMark]）。名字为空时退回 `?`。
  */
 @Composable
-private fun CapabilityMark(
+private fun InitialMark(
     name: String,
     size: androidx.compose.ui.unit.Dp = Dshm.spacing.avatar,
 ) {
@@ -456,7 +459,7 @@ private fun CapabilitySheet(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CapabilityMark(capability.name, size = Dshm.spacing.settingsAvatar)
+                InitialMark(capability.name, size = Dshm.spacing.settingsAvatar)
                 Spacer(Modifier.size(Dshm.spacing.md))
                 Column(Modifier.weight(1f)) {
                     Text(

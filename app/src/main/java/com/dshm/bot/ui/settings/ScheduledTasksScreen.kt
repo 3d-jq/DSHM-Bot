@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -74,6 +75,9 @@ fun ScheduledTasksScreen(
     var adding by rememberSaveable { mutableStateOf(false) }
     var detail by remember { mutableStateOf<ScheduledTask?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // 「新建任务」是页面里的内联表单（不是 sheet）：系统返回先收表单，别整页退出去。
+    BackHandler(enabled = adding) { adding = false }
 
     LaunchedEffect(Unit) { viewModel.refresh() }
 

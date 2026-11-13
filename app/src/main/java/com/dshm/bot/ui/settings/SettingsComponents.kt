@@ -211,6 +211,29 @@ fun SettingsSection(
 
 enum class SettingsSectionState { NORMAL, DANGER }
 
+/**
+ * 列表底部「添加 xxx」行左侧的圆形加号。
+ *
+ * 行首有首字母方块的列表（模型渠道、密钥）底部再加一个「添加」行时，
+ * 要放一个同尺寸的方块，标题才不会和上面几行错位。
+ */
+@Composable
+fun SettingsAddTile() {
+    Box(
+        modifier = Modifier
+            .size(Dshm.spacing.composerKey)
+            .clip(CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_lucide_plus),
+            contentDescription = null,
+            tint = Dshm.colors.accent,
+            modifier = Modifier.size(Dshm.spacing.topBarIcon),
+        )
+    }
+}
+
 @Composable
 fun SettingsRowDivider() {
     HorizontalDivider(

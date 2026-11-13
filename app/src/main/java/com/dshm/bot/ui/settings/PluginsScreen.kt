@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,10 @@ fun PluginsScreen(
     var marketQuery by rememberSaveable { mutableStateOf("") }
     var marketUninstall by remember { mutableStateOf<MarketPlugin?>(null) }
     var openNs by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // 插件设置表单是这一页的内层页：系统返回先收它，别让顶层弹掉设置栈。
+    BackHandler(enabled = openNs != null) { openNs = null }
+
     var detailName by rememberSaveable { mutableStateOf<String?>(null) }
     var actionError by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by rememberSaveable { mutableStateOf<String?>(null) }
