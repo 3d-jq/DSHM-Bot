@@ -14,13 +14,10 @@ import com.dshm.bot.domain.model.ChatApproval
 import com.dshm.bot.data.remote.DELIVERABLES_PRESENTED_EVENT
 import com.dshm.bot.data.remote.presentedFilesOf
 import com.dshm.bot.data.remote.isArtifactPath
+import com.dshm.bot.data.remote.ChatTransport
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.parseChatPage
-import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.remote.ChatCursor
-import com.dshm.bot.data.remote.DshClients
-import com.dshm.bot.data.remote.DshClient
-import com.dshm.bot.data.remote.DshSessionRepository
 import com.dshm.bot.data.remote.DshMuxHub
 import com.dshm.bot.data.remote.DshMux
 import com.dshm.bot.data.remote.DshMuxLog
@@ -30,7 +27,6 @@ import com.dshm.bot.data.remote.DshQuestionAnswer
 import com.dshm.bot.data.remote.answersToJson
 import com.dshm.bot.data.remote.BotApproval
 import com.dshm.bot.data.remote.parseBotApprovals
-import com.dshm.bot.data.remote.RemoteSpeechRepository
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.data.runtime.RuntimeInstaller
@@ -295,13 +291,23 @@ data class BotChatUiState(
  *
  * 数据形状对齐 ds-bot 的 `parts.js`（displayItems）与 `feed.js`。
  */
-class BotChatViewModel(
+class BotChatViewModel internal constructor(
     private val botId: String,
     private val botName: String,
     private val isGroup: Boolean,
     private val endpoint: RuntimeEndpoint?,
-    appContext: Context? = null,
+    appContext: Context?,
+    private val dependencies: BotChatDependencies,
 ) : ViewModel() {
+
+    /** 生产入口：依赖全部按端点从 `DshClients` 造。 */
+    constructor(
+        botId: String,
+        botName: String,
+        isGroup: Boolean,
+        endpoint: RuntimeEndpoint?,
+        appContext: Context? = null,
+    ) : this(botId, botName, isGroup, endpoint, appContext, BotChatDependencies.production(endpoint))
 
     private val notifyContext: Context? = appContext
     private val settingsRepository = notifyContext?.let { SharedPrefsSettingsRepository(it) }
@@ -323,10 +329,10 @@ class BotChatViewModel(
         }
     }
 
-    private val client: DshRemoteApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
-    private val rawClient: DshClient? = endpoint?.let { DshClients.of(it) }
+    private val client: DshRemoteApi? = dependencies.remote
+    private val transport: ChatTransport? = dependencies.transport
     /** 语音输入：页面/输入框只依赖接口。 */
-    val speechRepository: SpeechRepository? = endpoint?.let { RemoteSpeechRepository(DshClients.of(it)) }
+    val speechRepository: SpeechRepository? = dependencies.speech
     private val historyCache = appContext?.let { ChatHistoryCache(it, botId) }
     private val cachedHistory = historyCache?.load()
     /** 自己发过的附件（`rpcId → 本地文件`）：历史重载后把缩略图贴回去。 */
@@ -467,12 +473,23 @@ class BotChatViewModel(
                 client.feed().collect { event -> handleFeed(event) }
             }
             // 主机事件流（`$events`）只用来显示 Bot 反问用户；审批已归 DS Bot。
-            endpoint?.let { runtime ->
+            // 注入的 mux（JVM 单测）优先；生产仍按端点走 DshMuxHub。
+            val injectedMux = dependencies.mux
+            if (injectedMux != null) {
                 viewModelScope.launch {
-                    val hub = DshMuxHub.start(runtime)
-                    mux = hub
+                    injectedMux.start()
+                    mux = injectedMux
                     sessionId?.let { ensureFollow(it) }
-                    hub.hostEvents.collect { event -> handleHostEvent(event) }
+                    injectedMux.hostEvents.collect { event -> handleHostEvent(event) }
+                }
+            } else {
+                endpoint?.let { runtime ->
+                    viewModelScope.launch {
+                        val hub = DshMuxHub.start(runtime)
+                        mux = hub
+                        sessionId?.let { ensureFollow(it) }
+                        hub.hostEvents.collect { event -> handleHostEvent(event) }
+                    }
                 }
             }
         }
@@ -1061,11 +1078,11 @@ class BotChatViewModel(
                     )
                 } else {
                     val session = sessionId ?: botId
+                    val channel = transport ?: error("本机引擎未运行")
                     val receipts = attachments.map { draft ->
-                        (rawClient ?: error("本机引擎未运行"))
-                            .uploadAttachment(session, draft.name, draft.bytes)
+                        channel.uploadAttachment(session, draft.name, draft.bytes)
                     }
-                    DshSessionRepository(rawClient ?: error("本机引擎未运行")).prompt(
+                    channel.prompt(
                         sessionId = session,
                         text = text,
                         requestId = requestId,
@@ -1660,15 +1677,15 @@ class BotChatViewModel(
         val clientId = hostClientId
         val eventId = approval.eventId
         val questionId = approval.questionId
-        val repo = rawClient
-        if (clientId == null || eventId == null || questionId == null || repo == null || selected.isEmpty()) {
+        val channel = transport
+        if (clientId == null || eventId == null || questionId == null || channel == null || selected.isEmpty()) {
             onDone("这条提问暂时无法作答")
             return
         }
         viewModelScope.launch {
             val answers = answersToJson(selected.map { DshQuestionAnswer(questionId, it) })
             val error = runCatching {
-                DshSessionRepository(repo).answerQuestion(clientId, eventId, answers)
+                channel.answerQuestion(clientId, eventId, answers)
             }.exceptionOrNull()?.let { describeChatError(it) }
             if (error == null) {
                 hostQuestions.remove(eventId)

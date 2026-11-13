@@ -10,7 +10,7 @@ import java.util.UUID
  *
  * 本批只做 unary RPC；`session/follow` 的 WebSocket mux 流留到下一批。
  */
-class DshSessionRepository(private val client: DshClient) {
+class DshSessionRepository(private val client: DshClient) : SessionModelCatalogSource {
 
     private fun request(fill: JSONObject.() -> Unit): JSONObject =
         JSONObject().put("request", JSONObject().apply(fill))
@@ -148,7 +148,7 @@ class DshSessionRepository(private val client: DshClient) {
         )
     }
 
-    suspend fun modelCatalog(): JSONObject = client.rpc("session/modelCatalog")
+    override suspend fun modelCatalog(): JSONObject = client.rpc("session/modelCatalog")
 
     suspend fun selectModel(
         sessionId: String,

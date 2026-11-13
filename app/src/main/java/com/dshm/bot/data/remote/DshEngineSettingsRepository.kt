@@ -14,12 +14,12 @@ import org.json.JSONObject
  * - `permissionPresets/catalog` → 权限预设
  * - `credentials/describe|set|unset` → API Key（值永远不回显）
  */
-class DshEngineSettingsRepository(private val client: DshClient) {
+class DshEngineSettingsRepository(private val client: DshClient) : EngineSettingsGateway {
 
     /** 语音输入用例，和设置 schema 解耦。 */
-    val speech: SpeechRepository = RemoteSpeechRepository(client)
+    override val speech: SpeechRepository = RemoteSpeechRepository(client)
 
-    suspend fun describe(): SettingsDescription {
+    override suspend fun describe(): SettingsDescription {
         val root = client.rpc("settings/describe")
         val writable = root.optBoolean("writable", true)
         val namespaces = LinkedHashMap<String, SettingsNamespace>()
@@ -36,11 +36,11 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         )
     }
 
-    suspend fun mutate(
+    override suspend fun mutate(
         ns: String,
         ops: List<SettingsOp>,
         expectedRevision: Int?,
-        writable: Boolean = true,
+        writable: Boolean,
     ): SettingsNamespace {
         val args = JSONObject()
             .put("ns", ns)
@@ -51,7 +51,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
             ?: error("settings/mutate 返回了无效的 namespace：$ns")
     }
 
-    suspend fun pluginInventory(): PluginInventory {
+    override suspend fun pluginInventory(): PluginInventory {
         val root = client.rpc("pluginInventory/list")
         val entries = mutableListOf<PluginInventoryEntry>()
         root.optJSONArray("entries")?.let { array ->
@@ -120,7 +120,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
      * 卸载一个插件包（`pluginManager/removeBundle`）。
      * 引擎会把它卸掉并恢复原来的文件。
      */
-    suspend fun removeBundle(name: String) {
+    override suspend fun removeBundle(name: String) {
         client.rpc("pluginManager/removeBundle", JSONObject().put("name", name), timeoutMs = 600_000)
     }
 
@@ -128,7 +128,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
      * 按安装目标重新安装一个包 —— 「更新」就是重装一遍。
      * 安装要跑 pnpm 加激活，很慢，所以给 30 分钟。
      */
-    suspend fun installBundle(spec: String, enabled: Boolean?) {
+    override suspend fun installBundle(spec: String, enabled: Boolean?) {
         val options = JSONObject().apply { if (enabled != null) put("enabled", enabled) }
         client.rpc(
             "pluginManager/installBundle",
@@ -138,7 +138,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
     }
 
     /** `pluginManager/listBundles`：官方可选包 + 第三方已安装包（隐藏基础设施包）。 */
-    suspend fun pluginBundles(): List<PluginBundle> {
+    override suspend fun pluginBundles(): List<PluginBundle> {
         val array = client.rpcValue("pluginManager/listBundles") as? JSONArray ?: return emptyList()
         return buildList {
             for (index in 0 until array.length()) {
@@ -150,7 +150,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
     }
 
     /** Host 的结果：`application=restart-required` 表示已保存但需要重启引擎。 */
-    suspend fun setPluginBundleEnabled(name: String, enabled: Boolean): PluginToggleResult {
+    override suspend fun setPluginBundleEnabled(name: String, enabled: Boolean): PluginToggleResult {
         val result = client.rpc(
             "pluginManager/setBundleEnabled",
             JSONObject().put("name", name).put("enabled", enabled),
@@ -168,7 +168,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         return PluginToggleResult(succeeded = succeeded, needsRestart = needsRestart, message = message)
     }
 
-    suspend fun permissionCatalog(): PermissionCatalog {
+    override suspend fun permissionCatalog(): PermissionCatalog {
         val root = client.rpc("permissionPresets/catalog")
         fun options(raw: JSONArray?): List<PermissionOption> {
             if (raw == null) return emptyList()
@@ -200,7 +200,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         )
     }
 
-    suspend fun describeCredentials(refs: List<String>): Map<String, CredentialStatus> {
+    override suspend fun describeCredentials(refs: List<String>): Map<String, CredentialStatus> {
         if (refs.isEmpty()) return emptyMap()
         val root = client.rpc("credentials/describe", JSONObject().put("refs", JSONArray(refs)))
         val out = LinkedHashMap<String, CredentialStatus>()
@@ -217,12 +217,12 @@ class DshEngineSettingsRepository(private val client: DshClient) {
         return out
     }
 
-    suspend fun setCredential(ref: String, value: String) {
+    override suspend fun setCredential(ref: String, value: String) {
         require(value.isNotBlank()) { "API Key 不能为空" }
         client.rpc("credentials/set", JSONObject().put("ref", ref).put("value", value))
     }
 
-    suspend fun unsetCredential(ref: String) {
+    override suspend fun unsetCredential(ref: String) {
         client.rpc("credentials/unset", JSONObject().put("ref", ref))
     }
 
@@ -232,7 +232,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
     data class ListedProvider(val id: String, val name: String)
 
     /** `llm/listProviders`：引擎当前注册的渠道（官方 / 订阅）。 */
-    suspend fun listProviders(): List<ListedProvider> {
+    override suspend fun listProviders(): List<ListedProvider> {
         val array = client.rpcValue("llm/listProviders") as? JSONArray ?: return emptyList()
         return buildList {
             for (index in 0 until array.length()) {
@@ -251,7 +251,7 @@ class DshEngineSettingsRepository(private val client: DshClient) {
      * 两者同时传；只有用户当场输入的新 Key 才作为 `apiKey` 明文传过去。
      * 裸域名端点返回 404 时，按 dsh-Go 的写法补一次 `/v1` 并回填生效 URL。
      */
-    suspend fun discoverModels(
+    override suspend fun discoverModels(
         baseUrl: String,
         api: String,
         apiKey: String,

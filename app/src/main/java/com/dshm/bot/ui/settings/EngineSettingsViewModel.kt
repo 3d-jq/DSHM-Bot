@@ -6,13 +6,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.data.remote.AgentPresetSource
 import com.dshm.bot.data.remote.CredentialStatus
-import com.dshm.bot.data.remote.DshClient
-import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.DshEngineSettingsRepository
 import com.dshm.bot.data.remote.DshRpcException
-import com.dshm.bot.data.remote.DshFeaturesRepository
-import com.dshm.bot.data.remote.DshSessionRepository
+import com.dshm.bot.data.remote.EngineSettingsGateway
+import com.dshm.bot.data.remote.EngineSettingsRepositoryFactory
+import com.dshm.bot.data.remote.ProductionEngineSettingsRepositories
+import com.dshm.bot.data.remote.SessionModelCatalogSource
 import com.dshm.bot.data.remote.PROVIDER_NAMESPACE
 import com.dshm.bot.data.remote.PermissionCatalog
 import com.dshm.bot.data.remote.PluginBundle
@@ -54,7 +55,13 @@ import org.json.JSONObject
  * - providers 走 `llm-pi-ai` + `credentials/set|unset`；
  * - 插件清单走 `pluginInventory/list`。
  */
-class EngineSettingsViewModel : ViewModel() {
+class EngineSettingsViewModel(
+    /**
+     * 按端点创建三组 repository。默认是生产实现；JVM 单测传假工厂，
+     * 就能覆盖 revision 冲突重试、凭据写入这些原来只能靠真机验证的路径。
+     */
+    private val repositoryFactory: EngineSettingsRepositoryFactory = ProductionEngineSettingsRepositories,
+) : ViewModel() {
 
     data class UiState(
         val loading: Boolean = false,
@@ -83,9 +90,9 @@ class EngineSettingsViewModel : ViewModel() {
         val speechPreparing: Boolean = false,
     )
 
-    private var repository: DshEngineSettingsRepository? = null
-    private var sessionRepository: DshSessionRepository? = null
-    private var featuresRepository: DshFeaturesRepository? = null
+    private var repository: EngineSettingsGateway? = null
+    private var sessionRepository: SessionModelCatalogSource? = null
+    private var featuresRepository: AgentPresetSource? = null
     private var endpoint: RuntimeEndpoint? = null
     private var speechPoll: Job? = null
     private val writeMutex = Mutex()
@@ -96,9 +103,10 @@ class EngineSettingsViewModel : ViewModel() {
     fun setEndpoint(next: RuntimeEndpoint?) {
         if (endpoint == next && repository != null) return
         endpoint = next
-        repository = next?.let { DshEngineSettingsRepository(DshClients.of(it)) }
-        sessionRepository = next?.let { DshSessionRepository(DshClients.of(it)) }
-        featuresRepository = next?.let { DshFeaturesRepository(DshClients.of(it)) }
+        val repositories = next?.let(repositoryFactory::create)
+        repository = repositories?.settings
+        sessionRepository = repositories?.sessions
+        featuresRepository = repositories?.features
         if (repository == null) {
             _ui.value = UiState(error = "本机引擎未运行")
         } else {
@@ -297,7 +305,7 @@ class EngineSettingsViewModel : ViewModel() {
         }
     }
 
-    private fun pollSpeech(repo: DshEngineSettingsRepository) {
+    private fun pollSpeech(repo: EngineSettingsGateway) {
         speechPoll?.cancel()
         speechPoll = viewModelScope.launch {
             repeat(400) {
@@ -352,7 +360,7 @@ class EngineSettingsViewModel : ViewModel() {
         }
     }
 
-    private fun loadCredentials(repo: DshEngineSettingsRepository, description: SettingsDescription) {
+    private fun loadCredentials(repo: EngineSettingsGateway, description: SettingsDescription) {
         val refs = credentialRefs(description)
         if (refs.isEmpty()) return
         viewModelScope.launch {

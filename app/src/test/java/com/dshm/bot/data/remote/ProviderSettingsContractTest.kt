@@ -57,6 +57,7 @@ class ProviderSettingsContractTest {
                         ),
                     ),
                     expectedRevision = 3,
+                    writable = true,
                 )
             }
 
