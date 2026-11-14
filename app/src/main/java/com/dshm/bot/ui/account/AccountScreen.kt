@@ -34,6 +34,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -459,6 +462,9 @@ private fun KeyDialog(
     onSave: () -> Unit,
     onClear: () -> Unit,
 ) {
+    // Key 是敏感凭据：默认掩码输入，不给截图/录制留明文；需要核对时再点眼睛显示
+    // （和渠道页的 API Key 输入框同一套交互，见 ModelProvidersScreen）。
+    var showKey by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Dshm.colors.surface,
@@ -481,6 +487,26 @@ private fun KeyDialog(
                     value = value,
                     onValueChange = onValueChange,
                     placeholder = "sk-…",
+                    keyboardType = KeyboardType.Password,
+                    visualTransformation = if (showKey) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailing = {
+                        Icon(
+                            painter = painterResource(
+                                if (showKey) R.drawable.ic_lucide_eye_off else R.drawable.ic_lucide_eye,
+                            ),
+                            contentDescription = stringResource(
+                                if (showKey) R.string.settings_model_hide_key else R.string.settings_model_show_key,
+                            ),
+                            tint = Dshm.colors.textTertiary,
+                            modifier = Modifier
+                                .size(Dshm.spacing.topBarIcon)
+                                .clickable { showKey = !showKey },
+                        )
+                    },
                 )
                 if (hasKey) {
                     TextButton(onClick = onClear) {

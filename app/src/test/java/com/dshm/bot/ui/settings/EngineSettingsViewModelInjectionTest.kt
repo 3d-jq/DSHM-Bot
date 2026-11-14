@@ -22,6 +22,7 @@ import com.dshm.bot.data.remote.SettingsOp
 import com.dshm.bot.data.remote.SpeechCatalog
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -29,6 +30,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -167,6 +169,52 @@ class EngineSettingsViewModelInjectionTest {
         assertEquals(listOf("OpenAI"), state.listedProviders.map { it.name })
     }
 
+    @Test
+    fun staleRefreshFromOldEndpointDoesNotOverwriteNewEndpointState() = runTest(mainDispatcherRule.testDispatcher) {
+        // 旧端点的 describe 挂起（模拟慢返回）；切到新端点、新状态落定后再放行，
+        // 旧端点的结果必须按代际被丢弃，不能把新端点的状态盖回去。
+        val gatewayA = FakeGateway(
+            descriptions = listOf(descriptionOf(namespace(1, JSONObject().put("theme", "from-a")))),
+            describeGate = CompletableDeferred(),
+        )
+        val gatewayB = FakeGateway(
+            descriptions = listOf(descriptionOf(namespace(1, JSONObject().put("theme", "from-b")))),
+        )
+        val endpointA = RuntimeEndpoint("http://127.0.0.1:1/", "token-a")
+        val endpointB = RuntimeEndpoint("http://127.0.0.1:2/", "token-b")
+        val viewModel = EngineSettingsViewModel(
+            EngineSettingsRepositoryFactory { next ->
+                if (next == endpointA) {
+                    EngineSettingsRepositories(
+                        settings = gatewayA,
+                        sessions = EmptyModelCatalog,
+                        features = EmptyAgentPresets,
+                    )
+                } else {
+                    EngineSettingsRepositories(
+                        settings = gatewayB,
+                        sessions = EmptyModelCatalog,
+                        features = EmptyAgentPresets,
+                    )
+                }
+            },
+        )
+
+        viewModel.setEndpoint(endpointA)
+        advanceUntilIdle() // A 的 describe 还挂在门上，loading 中
+        assertTrue(viewModel.ui.value.loading)
+
+        viewModel.setEndpoint(endpointB)
+        advanceUntilIdle() // B 完成，状态是 from-b
+        assertEquals("from-b", viewModel.ui.value.description?.namespace("appearance")?.valueOf(listOf("theme")))
+
+        gatewayA.releaseDescribe()
+        advanceUntilIdle() // A 的慢返回落地，应被代际校验丢掉
+        assertEquals("from-b", viewModel.ui.value.description?.namespace("appearance")?.valueOf(listOf("theme")))
+        assertNull(viewModel.ui.value.error)
+        assertTrue(!viewModel.ui.value.loading)
+    }
+
     // ------------------------------------------------------------------
     // 假依赖
     // ------------------------------------------------------------------
@@ -178,15 +226,22 @@ class EngineSettingsViewModelInjectionTest {
         },
         private val bundles: List<PluginBundle> = emptyList(),
         private val providers: List<DshEngineSettingsRepository.ListedProvider> = emptyList(),
+        /** 非 null 时 describe() 先挂到这扇门上，用来模拟旧端点的慢返回。 */
+        private val describeGate: CompletableDeferred<Unit>? = null,
     ) : EngineSettingsGateway {
 
         val mutateRevisions = mutableListOf<Int?>()
         val savedCredentials = mutableListOf<Pair<String, String>>()
         private var describeCalls = 0
 
+        fun releaseDescribe() {
+            describeGate?.complete(Unit)
+        }
+
         override val speech: SpeechRepository = EmptySpeech
 
         override suspend fun describe(): SettingsDescription {
+            describeGate?.await()
             val index = describeCalls.coerceAtMost(descriptions.lastIndex)
             describeCalls += 1
             return descriptions[index]

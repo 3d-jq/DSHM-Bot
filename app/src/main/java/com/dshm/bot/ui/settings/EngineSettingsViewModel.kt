@@ -95,6 +95,12 @@ class EngineSettingsViewModel(
     private var featuresRepository: AgentPresetSource? = null
     private var endpoint: RuntimeEndpoint? = null
     private var speechPoll: Job? = null
+    /**
+     * 端点代际：setEndpoint 换端点就 +1。读侧（refresh / loadCredentials）和写侧
+     * （applyWrite 落状态）都按它 + repository 引用校验，旧端点的慢返回不许覆盖
+     * 新端点的状态——写侧另有 revision 冲突重试，这里是读侧对齐。
+     */
+    private var repositoryGeneration = 0
     private val writeMutex = Mutex()
 
     private val _ui = MutableStateFlow(UiState())
@@ -103,6 +109,7 @@ class EngineSettingsViewModel(
     fun setEndpoint(next: RuntimeEndpoint?) {
         if (endpoint == next && repository != null) return
         endpoint = next
+        repositoryGeneration += 1
         val repositories = next?.let(repositoryFactory::create)
         repository = repositories?.settings
         sessionRepository = repositories?.sessions
@@ -329,6 +336,7 @@ class EngineSettingsViewModel(
 
     fun refresh() {
         val repo = repository ?: return
+        val generation = repositoryGeneration
         _ui.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             runCatching {
@@ -342,6 +350,8 @@ class EngineSettingsViewModel(
                     listedProviders = runCatching { repo.listProviders() }.getOrDefault(emptyList()),
                 )
             }.onSuccess { loaded ->
+                // 引擎换端点后，旧端点的慢返回直接丢弃，不让它把新端点的状态盖回去。
+                if (generation != repositoryGeneration || repository !== repo) return@onSuccess
                 _ui.update {
                     it.copy(
                         loading = false,
@@ -355,6 +365,7 @@ class EngineSettingsViewModel(
                 }
                 loadCredentials(repo, loaded.description)
             }.onFailure { error ->
+                if (generation != repositoryGeneration || repository !== repo) return@onFailure
                 _ui.update { it.copy(loading = false, error = describeSettingsError(error)) }
             }
         }
@@ -363,9 +374,13 @@ class EngineSettingsViewModel(
     private fun loadCredentials(repo: EngineSettingsGateway, description: SettingsDescription) {
         val refs = credentialRefs(description)
         if (refs.isEmpty()) return
+        val generation = repositoryGeneration
         viewModelScope.launch {
             runCatching { repo.describeCredentials(refs) }
-                .onSuccess { credentials -> _ui.update { it.copy(credentials = credentials) } }
+                .onSuccess { credentials ->
+                    if (generation != repositoryGeneration || repository !== repo) return@onSuccess
+                    _ui.update { it.copy(credentials = credentials) }
+                }
         }
     }
 
@@ -672,6 +687,7 @@ class EngineSettingsViewModel(
         fields: List<List<String>>,
     ): String? {
         val repo = repository ?: return "本机引擎未运行"
+        val generation = repositoryGeneration
         return writeMutex.withLock {
             val current = _ui.value.description?.namespace(ns) ?: return@withLock "引擎没有提供 $ns 设置"
             if (!current.writable) return@withLock "该设置由配置文件固定，无法在 App 内修改"
@@ -713,14 +729,18 @@ class EngineSettingsViewModel(
 
             if (updated != null) {
                 val next = if (updated.schemaProvided) updated else updated.copy(schema = current.schema)
-                _ui.update { state ->
-                    val description = state.description
-                    if (description == null) {
-                        state
-                    } else {
-                        val map = LinkedHashMap(description.namespaces)
-                        map[next.ns] = next
-                        state.copy(description = description.copy(namespaces = map))
+                // 写已经发生在捕获的 repo 上；若中途换过端点，本地不再把旧引擎的
+                // 返回合并进新状态（saving/fieldErrors 的收尾照常做，不留挂起态）。
+                if (generation == repositoryGeneration && repository === repo) {
+                    _ui.update { state ->
+                        val description = state.description
+                        if (description == null) {
+                            state
+                        } else {
+                            val map = LinkedHashMap(description.namespaces)
+                            map[next.ns] = next
+                            state.copy(description = description.copy(namespaces = map))
+                        }
                     }
                 }
             }

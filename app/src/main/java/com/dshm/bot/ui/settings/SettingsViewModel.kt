@@ -108,7 +108,7 @@ class SettingsViewModel(
     companion object {
         fun factory(context: Context): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                SettingsViewModel(SharedPrefsSettingsRepository(context.applicationContext))
+                SettingsViewModel(SharedPrefsSettingsRepository.getInstance(context))
             }
         }
     }

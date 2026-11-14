@@ -71,7 +71,7 @@ object PhoneControlBridge {
         PhoneControlSession.engage(request.optString("botId").takeIf { it.isNotBlank() })
         PhoneOverlay.working(service, describe(kind))
         return try {
-            val denied = confirmIfNeeded(context, service, kind)
+            val denied = confirmIfNeeded(context, service, kind, request)
             if (denied != null) return denied
             when (kind) {
                 "screen" -> screen(service)
@@ -80,7 +80,7 @@ object PhoneControlBridge {
                 "type" -> type(service, request)
                 "scroll" -> scroll(service, request)
                 "key" -> key(service, request)
-                "tap_xy" -> tapXY(service, request)
+                "tap_xy" -> tapXY(context, service, request)
                 "apps" -> apps(context, request)
                 "open" -> open(context, service, request)
                 "notify" -> notify(context, request)
@@ -99,6 +99,7 @@ object PhoneControlBridge {
         context: Context,
         service: DshmAccessibilityService,
         kind: String,
+        request: JSONObject,
     ): JSONObject? {
         val packageName = service.rootInActiveWindow?.packageName?.toString().orEmpty()
         val appRule = if (kind == "apps") PhoneAppRule.NORMAL else PhoneAppRules.ruleOf(context, packageName)
@@ -107,7 +108,10 @@ object PhoneControlBridge {
         }
         // intent 是「对第三方可见」的动作，和 open 一样要过确认门；
         // screenshot / collect 都是读，不过门（但仍受上面的 DENY 名单约束）。
-        if (kind !in setOf("tap", "type", "scroll", "key", "tap_xy", "open", "intent")) return null
+        // clipboard 的 get 会把用户复制过的内容交出去，也要过门；set 是写，维持免确认。
+        val gated = kind in setOf("tap", "type", "scroll", "key", "tap_xy", "open", "intent") ||
+            (kind == "clipboard" && request.optBoolean("get", false))
+        if (!gated) return null
         val mode = context.getSharedPreferences("dshm_settings", Context.MODE_PRIVATE)
             .getString("phone_confirm_mode", "ASK")
             ?: "ASK"
@@ -118,11 +122,12 @@ object PhoneControlBridge {
         ) {
             return null
         }
-        PhoneOverlay.approval(service, "要${describe(kind)}")
+        val what = if (kind == "clipboard") "读取剪贴板内容" else describe(kind)
+        PhoneOverlay.approval(service, "要$what")
         val allowed = PhoneApprovalGate.request(
             context = context,
             title = context.getString(com.dshm.bot.R.string.phone_approval_title),
-            body = context.getString(com.dshm.bot.R.string.phone_approval_body, describe(kind)),
+            body = context.getString(com.dshm.bot.R.string.phone_approval_body, what),
             allowLabel = context.getString(com.dshm.bot.R.string.phone_approval_allow),
             denyLabel = context.getString(com.dshm.bot.R.string.phone_approval_deny),
             timeoutMs = 30_000L,
@@ -131,10 +136,37 @@ object PhoneControlBridge {
             return failure(context.getString(com.dshm.bot.R.string.phone_approval_unavailable))
         }
         if (!allowed) return failure(context.getString(com.dshm.bot.R.string.phone_approval_denied))
-        PhoneOverlay.working(service, "继续${describe(kind)}")
+        PhoneOverlay.working(service, "继续$what")
         if (mode == "TASK") {
             taskApprovedUntil[key] = System.currentTimeMillis() + 10 * 60 * 1000L
         }
+        return null
+    }
+
+    /**
+     * 不看确认模式、不做 TASK 豁免，直接问一次用户。tap_xy 的落点归属不了控件时
+     * 用它兜底：敏感判定没法做，就把决定权交回给用户。
+     * 返回 null = 放行，非 null = 拒绝/失败的应答。
+     */
+    private suspend fun forceConfirm(
+        context: Context,
+        service: DshmAccessibilityService,
+        what: String,
+    ): JSONObject? {
+        PhoneOverlay.approval(service, "要$what")
+        val allowed = PhoneApprovalGate.request(
+            context = context,
+            title = context.getString(com.dshm.bot.R.string.phone_approval_title),
+            body = context.getString(com.dshm.bot.R.string.phone_approval_body, what),
+            allowLabel = context.getString(com.dshm.bot.R.string.phone_approval_allow),
+            denyLabel = context.getString(com.dshm.bot.R.string.phone_approval_deny),
+            timeoutMs = 30_000L,
+        )
+        if (allowed == null) {
+            return failure(context.getString(com.dshm.bot.R.string.phone_approval_unavailable))
+        }
+        if (!allowed) return failure(context.getString(com.dshm.bot.R.string.phone_approval_denied))
+        PhoneOverlay.working(service, "继续$what")
         return null
     }
 
@@ -244,8 +276,20 @@ object PhoneControlBridge {
             ?: return failure("[${
                 element.index
             }] 不是输入框，而且现在没有带光标的输入框；请先点一下输入框，再使用 phone_type。")
-        if (element.password || target.isPassword || isSensitive(element.label)) {
+        // target 的自带文案（text/hint/contentDescription）也要过一遍敏感词：
+        // 模型可能引用输入框旁边的标签元素，而光标实际落在一个带 hint 的验证码框上。
+        val targetLabel = labelOf(target)
+        if (element.password || target.isPassword ||
+            isSensitive(element.label) || isSensitive(targetLabel)
+        ) {
             return failure("这是密码 / 验证码 / 支付输入框，手机操控 Bot 不能代填。请使用 phone_handoff 让用户自己完成。")
+        }
+        // labelOf 已经把 hintText 算进去；到这里仍一行可读文案都没有的输入框
+        // （无 text / hint / contentDescription），没法判断它是不是密码 / 验证码框，
+        // 一律不代填。这类无标识输入框在验证码、支付场景最常见，误填的代价
+        // 远大于让用户自己输一次。
+        if (element.editable && element.label.isBlank() && targetLabel.isBlank()) {
+            return failure("这个输入框没有任何可读文案（可能是密码 / 验证码框），手机操控 Bot 不能代填。请使用 phone_handoff 让用户自己完成。")
         }
         val text = request.optString("text")
         if (text.length > 2_000) return failure("一次最多输入 2000 个字。")
@@ -462,7 +506,11 @@ object PhoneControlBridge {
         return success(render(capture(service) ?: return failure("动作已执行，但新的屏幕读不到。")))
     }
 
-    private suspend fun tapXY(service: DshmAccessibilityService, request: JSONObject): JSONObject {
+    private suspend fun tapXY(
+        context: Context,
+        service: DshmAccessibilityService,
+        request: JSONObject,
+    ): JSONObject {
         val current = captured
         if (current != null && current.id != request.optString("screen")) {
             return failure("屏幕已经变化，请重新调用 phone_screen。")
@@ -474,10 +522,20 @@ object PhoneControlBridge {
         if (x < 0f || y < 0f || x >= width || y >= height) {
             return failure("坐标 ($x, $y) 不在当前屏幕 ${width}×${height} 内，没有点击。")
         }
+        // tap_xy 是按坐标盲点，绕过了编号路径上 per-元素的敏感检查；这里按落点做
+        // 同样的敏感命中判定（纯函数，JVM 有测试），命中密码 / 验证码 / 支付控件直接拒绝。
+        val probes = current?.elements?.map { asProbe(it) }.orEmpty()
+        tapXYRejectionReason(probes, x.toInt(), y.toInt())?.let { return failure(it) }
         val label = current?.elements
             ?.firstOrNull { it.bounds.contains(x.toInt(), y.toInt()) }
             ?.let { it.label.ifBlank { it.role } }
             ?: "按坐标点按"
+        // 落点不在任何已捕获元素上（没读过屏幕，或点在空白处）时归属不了控件，
+        // 敏感判定也无从谈起：强制问一次用户，不受 ASK/TASK/ALWAYS 模式豁免。
+        if (probeAt(probes, x.toInt(), y.toInt()) == null) {
+            val denied = forceConfirm(context, service, "按坐标点按（落点不在已知控件上）")
+            if (denied != null) return denied
+        }
         PhoneOverlay.working(service, "正在点按「$label」")
         PhoneOverlay.dodge(service, x.toInt(), y.toInt())
         PhoneStage.aim(x.toInt(), y.toInt(), "点按「$label」")
@@ -780,7 +838,13 @@ object PhoneControlBridge {
     }
 
     private fun labelOf(node: AccessibilityNodeInfo): String =
-        listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+        listOfNotNull(
+            node.text?.toString(),
+            node.contentDescription?.toString(),
+            // 验证码 / PIN 框的标识文案常在 hint 里（text 为空），敏感判定不能漏了它。
+            // minSdk 26，hintText 可以直接用。
+            node.hintText?.toString(),
+        )
             .map { it.replace(Regex("\\s+"), " ").trim() }
             .filter { it.isNotEmpty() }
             .distinct()
@@ -789,13 +853,60 @@ object PhoneControlBridge {
     private fun roleOf(node: AccessibilityNodeInfo): String =
         node.className?.toString()?.substringAfterLast('.') ?: "View"
 
-    private fun isSensitive(label: String): Boolean {
+    // 敏感控件词表。pin / otp 这类短词不能裸 contains —— "spinner"、"spinning"
+    // 里都有 pin，会误伤滚动控件；它们走 [SENSITIVE_SHORT_RE] 的词边界匹配。
+    private val SENSITIVE_WORDS = listOf(
+        "密码", "验证码", "支付密码", "安全码", "付款密码", "确认密码", "口令", "令牌",
+        "password", "passcode", "verification code", "verification-code", "cvv", "cvc",
+    )
+    private val SENSITIVE_SHORT_RE = Regex("(^|[^a-z])(pin|otp)([^a-z]|$)")
+
+    internal fun isSensitive(label: String): Boolean {
         val text = label.lowercase()
-        return listOf(
-            "密码", "验证码", "支付密码", "安全码", "付款密码", "确认密码",
-            "password", "passcode", "verification code", "verification-code", "cvv", "cvc",
-        ).any(text::contains)
+        return SENSITIVE_WORDS.any(text::contains) || SENSITIVE_SHORT_RE.containsMatchIn(text)
     }
+
+    /**
+     * tap_xy 命中判定的纯数据：只带判定需要的字段，不持有 AccessibilityNodeInfo，
+     * JVM 单测可以直接构造（节点侧由 [asProbe] 负责转换）。
+     */
+    internal data class SensitiveProbe(
+        val label: String,
+        val password: Boolean,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    ) {
+        /** 点是否落在这个元素上（右 / 下边界算在外面，语义与 Rect.contains 一致）。 */
+        internal fun contains(x: Int, y: Int): Boolean =
+            x >= left && x < right && y >= top && y < bottom
+    }
+
+    private fun asProbe(element: Element): SensitiveProbe =
+        SensitiveProbe(
+            label = element.label,
+            password = element.password,
+            left = element.bounds.left,
+            top = element.bounds.top,
+            right = element.bounds.right,
+            bottom = element.bounds.bottom,
+        )
+
+    /** 点 (x, y) 命中的探针里最贴身（面积最小）的那个；没有命中返回 null。 */
+    internal fun probeAt(probes: List<SensitiveProbe>, x: Int, y: Int): SensitiveProbe? =
+        probes.filter { it.contains(x, y) }.minByOrNull { (it.right - it.left) * (it.bottom - it.top) }
+
+    /**
+     * tap_xy 的敏感拒绝：落点**任一**命中的探针是密码框或敏感词控件就拒绝。
+     * 查全部而不只最贴身一层 —— 坐标点按本来就是盲点，宁可拦错也不放行。
+     */
+    internal fun tapXYRejectionReason(probes: List<SensitiveProbe>, x: Int, y: Int): String? =
+        if (probes.any { it.contains(x, y) && (it.password || isSensitive(it.label)) }) {
+            "这个坐标落在密码 / 验证码 / 支付相关控件上，手机操控 Bot 不能代点。请使用 phone_handoff 让用户自己操作。"
+        } else {
+            null
+        }
 
     /** 通用系统 intent：只走 [PhoneIntents] 的白名单，不接受模型拼的裸 Intent。 */
     private suspend fun intent(

@@ -128,7 +128,7 @@ fun AgentPresetsScreen(
                     color = Dshm.colors.textPrimary,
                 )
                 action.description?.let {
-                    Spacer(Modifier.heightIn(min = 0.dp))
+                    Spacer(Modifier.heightIn(min = Dshm.spacing.none))
                     Text(
                         text = it,
                         style = Dshm.typography.rowPreview,
@@ -243,6 +243,8 @@ fun AgentPresetsScreen(
                     color = Dshm.colors.textSecondary,
                     modifier = Modifier
                         .fillMaxWidth()
+                        // 「查看配置」YAML 块的最大高度（对齐 dsh-Go 的 preset 详情弹层），
+                        // 没有语义匹配的令牌，保留字面量。
                         .heightIn(max = 420.dp)
                         .verticalScroll(rememberScrollState()),
                 )

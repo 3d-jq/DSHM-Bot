@@ -153,6 +153,9 @@ object PhoneOverlay {
 
     fun hideNow(): Unit = onMain {
         main.removeCallbacks(hide)
+        // 舞台先收：就算胶囊还没加上（ensure 的 addView 失败过），这里也不能在
+        // root 短路 return 之前漏掉它，否则全屏光晕会一直留在屏幕上，服务销毁都带不走。
+        PhoneStage.hide()
         val view = root ?: return@onMain
         runCatching { manager?.removeView(view) }
         root = null
@@ -167,7 +170,6 @@ object PhoneOverlay {
         allowBtn = null
         denyBtn = null
         stopBtn = null
-        PhoneStage.hide()
     }
 
     private fun onMain(block: () -> Unit) {
@@ -192,7 +194,12 @@ object PhoneOverlay {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             y = statusBarHeight(service) + dp(service, 6)
         }
-        runCatching { wm.addView(capsule, p) }.onFailure { return }
+        runCatching { wm.addView(capsule, p) }
+            .onFailure {
+                // 胶囊加不上就把刚点亮的舞台一起收掉，别让全屏光晕独自留在屏幕上。
+                PhoneStage.hide()
+                return
+            }
         manager = wm
         root = capsule
         params = p
@@ -265,12 +272,20 @@ object PhoneOverlay {
             runCatching { service.startActivity(intent) }
         }.apply { visibility = View.GONE }
         allowBtn = button(service, "允许", ACCENT) {
-            PhoneApprovalGate.allowLatest()
-            DshmAccessibilityService.current?.let { working(it, "继续操作手机") }
+            // 批准请求可能已经超时 / 被通知栏处理过（latest 已清空）；
+            // 这时不能误报「继续」，要明说请求失效。
+            if (PhoneApprovalGate.allowLatest()) {
+                DshmAccessibilityService.current?.let { working(it, "继续操作手机") }
+            } else {
+                DshmAccessibilityService.current?.let { working(it, "该请求已失效，等 Bot 发起新操作") }
+            }
         }.apply { visibility = View.GONE }
         denyBtn = button(service, "拒绝", STOP_RED) {
-            PhoneApprovalGate.denyLatest()
-            DshmAccessibilityService.current?.let { working(it, "已拒绝这一步") }
+            if (PhoneApprovalGate.denyLatest()) {
+                DshmAccessibilityService.current?.let { working(it, "已拒绝这一步") }
+            } else {
+                DshmAccessibilityService.current?.let { working(it, "该请求已失效，等 Bot 发起新操作") }
+            }
         }.apply { visibility = View.GONE }
         stopBtn = button(service, "停止", STOP_RED) {
             PhoneControlSession.stopped = true

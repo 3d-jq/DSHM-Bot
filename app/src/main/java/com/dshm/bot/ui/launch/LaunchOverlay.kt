@@ -114,6 +114,8 @@ fun LaunchOverlay(
                     scaleY = scale
                     translationY = -RISE.toPx() * settle
                 }
+                // 图标圆角沿用启动画面里那颗图的形状（dsh-Go LaunchMotion 同款），
+                // 无对应令牌，保留字面量。
                 .clip(RoundedCornerShape(30.dp)),
         ) {
             Image(
@@ -148,6 +150,8 @@ fun LaunchOverlay(
         Text(
             text = stringResourceAppName(),
             style = Dshm.typography.pageTitle.copy(
+                // 启动画面字标的专用字号（对齐 dsh-Go LaunchMotion），无对应令牌，
+                // 保留字面量。
                 fontSize = 28.sp,
                 lineHeight = 36.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -181,6 +185,7 @@ private val WordCurve = CubicBezierEasing(0f, 0f, 0.2f, 1f)
 private const val TOTAL_MS = 1_360
 private const val MIN_HOLD_MS = 650f
 
+/** 图标画布：Android 12 系统启动画面是 288dp，里头图标占 276dp（dsh-Go 同款）。 */
 private val ICON_SIZE = 276.dp
 
 private const val SETTLED_SCALE = 0.62f

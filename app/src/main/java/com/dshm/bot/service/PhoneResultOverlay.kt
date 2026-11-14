@@ -32,7 +32,8 @@ object PhoneResultOverlay {
 
     fun show(context: Context?, text: String) {
         val service = DshmAccessibilityService.current
-        Log.i("PhoneResult", "show service=${service != null} text=${text.take(80)}")
+        // 只留状态不落内容：结果文本里常带屏读出来的用户数据，logcat 不该有。
+        Log.i("PhoneResult", "show service=${service != null} textLen=${text.length}")
         if (service == null) return
         val body = text.trim().ifBlank { "任务已完成。" }
         onMain {

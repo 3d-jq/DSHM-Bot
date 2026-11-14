@@ -31,6 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,6 +71,49 @@ private data class ProviderDraft(
     val models: List<ProviderModelSpec>,
 )
 
+/**
+ * 内层导航栈的 saveable 化：把 target 序列化成 route / model id 这些简单参数。
+ * 恢复时按 route 从当前引擎状态反查 profile / model；渠道被删或引擎还没读回来的层
+ * 直接丢弃（落回上一层或列表）。`editor|` 空 route 表示「新建渠道」的编辑层，原样还原。
+ */
+private fun providerStackSaver(
+    profileOf: (String) -> ProviderProfile?,
+    // listSaver 的 Saveable 泛型在返回值里被擦成 Any（restore 会转回 Original），
+    // 这里声明成 Saver<..., Any> 与之对齐。
+): Saver<List<ProviderTarget>, Any> = listSaver(
+    save = { stack -> stack.map { it.encodeTarget() } },
+    restore = { encoded -> encoded.mapNotNull { it.decodeTarget(profileOf) } },
+)
+
+private fun ProviderTarget.encodeTarget(): String = when (this) {
+    is ProviderTarget.Detail -> "detail|$route"
+    is ProviderTarget.Editor -> "editor|${existing?.route.orEmpty()}"
+    is ProviderTarget.Model -> "model|$route|${model.id}|${if (writes) "1" else "0"}"
+}
+
+private fun String.decodeTarget(profileOf: (String) -> ProviderProfile?): ProviderTarget? {
+    val parts = split('|')
+    return when (parts.getOrNull(0)) {
+        "detail" -> parts.getOrNull(1)?.takeIf { it.isNotEmpty() }?.let { ProviderTarget.Detail(it) }
+        "editor" -> {
+            val route = parts.getOrNull(1).orEmpty()
+            if (route.isEmpty()) {
+                ProviderTarget.Editor(existing = null)
+            } else {
+                profileOf(route)?.let { ProviderTarget.Editor(existing = it) }
+            }
+        }
+        "model" -> {
+            val route = parts.getOrNull(1) ?: return null
+            val modelId = parts.getOrNull(2) ?: return null
+            val writes = parts.getOrNull(3) == "1"
+            val model = profileOf(route)?.models?.firstOrNull { it.id == modelId } ?: return null
+            ProviderTarget.Model(route = route, model = model, writes = writes)
+        }
+        else -> null
+    }
+}
+
 private val providerProtocols = listOf(
     "openai-completions" to "OpenAI",
     "anthropic-messages" to "Anthropic",
@@ -86,15 +132,21 @@ fun ModelProvidersScreen(
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val language = settingsLanguage()
+    val providers = viewModel.providers()
     // 内层导航栈：列表（空）→ 详情 → 编辑 / 模型。用栈而不是单个目标，
     // 返回才永远是「弹一层」；栈为空（列表态）时不拦截，交回顶层路由。
-    var targets by remember { mutableStateOf<List<ProviderTarget>>(ProviderNav.reset()) }
+    // 栈本身走 rememberSaveable 扛 Activity 重建（深页返回状态），profile/model
+    // 按 route 从当前引擎状态反查；draft 含密钥，特意不进 saveable，重建后回列表。
+    var targets by rememberSaveable(
+        stateSaver = providerStackSaver { route ->
+            providers.profiles.firstOrNull { it.route == route }
+        },
+    ) { mutableStateOf<List<ProviderTarget>>(ProviderNav.reset()) }
     val page = ProviderNav.current(targets)
     BackHandler(enabled = page != null) {
         targets = ProviderNav.back(targets)
     }
     var draft by remember { mutableStateOf<ProviderDraft?>(null) }
-    val providers = viewModel.providers()
     val customRoutes = providers.profiles.map { it.route }.toSet()
     // DeepSeek 的渠道由上面的官方卡统一表示，不再重复列 deepseek-official/account。
     val registered = state.listedProviders.filter {

@@ -53,11 +53,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.rememberLoopValue
@@ -110,8 +108,10 @@ fun EngineScreen(
     var logs by remember { mutableStateOf(logText()) }
     LaunchedEffect(state) {
         while (true) {
-            logs = logText()
-            kotlinx.coroutines.delay(1_000)
+            // 先做整串比较（便宜），内容没变就不触发 remember(logs) 里的整表重切。
+            val next = logText()
+            if (next != logs) logs = next
+            kotlinx.coroutines.delay(3_000)
         }
     }
     val running = state is RuntimeState.Running
@@ -673,6 +673,11 @@ private fun EngineLogCard(logs: String) {
             logState.scrollToItem(0)
         }
     }
+    // 展示是「最新在最上」（reverseLayout）；带着原始行号做 key，新行追加时老行的
+    // 身份不变，不会整列重组。原始行号天然唯一，key 不会撞。
+    val keyedLines = remember(lines) {
+        lines.mapIndexed { index, line -> index to line }.asReversed()
+    }
     LaunchedEffect(copied) {
         if (copied) {
             kotlinx.coroutines.delay(1_500)
@@ -684,11 +689,8 @@ private fun EngineLogCard(logs: String) {
     val wellHeight = (screenHeight * LOG_HEIGHT_FRACTION)
         .coerceIn(Dshm.spacing.logWellMin, Dshm.spacing.logWellMax)
     val shape = RoundedCornerShape(Dshm.radius.settingsCard)
-    val mono = Dshm.typography.rowPreview.copy(
-        fontFamily = FontFamily.Monospace,
-        fontSize = 12.sp,
-        lineHeight = 18.sp,
-    )
+    // 日志井等宽正文：12sp/18sp Monospace 的令牌，别再就地拼字号字面量。
+    val mono = Dshm.typography.logMono
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -771,7 +773,7 @@ private fun EngineLogCard(logs: String) {
                     )
                 }
             } else {
-                items(lines.asReversed()) { line ->
+                items(keyedLines, key = { (index, line) -> "$index:${line.hashCode()}" }) { (_, line) ->
                     SelectionContainer {
                         Text(
                             text = line,

@@ -166,7 +166,7 @@ private fun BackgroundStep(index: Int, text: String) {
         leading = {
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(Dshm.spacing.accentSwatch)
                     .clip(CircleShape)
                     .background(Dshm.colors.accent.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center,

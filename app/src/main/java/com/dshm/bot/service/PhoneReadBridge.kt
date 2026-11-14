@@ -4,6 +4,7 @@ import android.content.Context
 import com.dshm.bot.data.remote.BotCache
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.RemoteDshApi
+import com.dshm.bot.data.runtime.EngineLog
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -66,14 +67,22 @@ object PhoneReadBridge {
         val result = withContext(Dispatchers.IO) {
             PhoneControlBridge.handle(context, item)
         }
-        runCatching {
-            api.botValue(
-                "phone-result",
-                JSONObject().put("id", id).put("ok", result.optBoolean("ok", false)).apply {
-                    if (result.has("result")) put("result", result.opt("result"))
-                    if (result.has("error")) put("error", result.optString("error"))
-                },
-            )
+        val payload = JSONObject().put("id", id).put("ok", result.optBoolean("ok", false)).apply {
+            if (result.has("result")) put("result", result.opt("result"))
+            if (result.has("error")) put("error", result.optString("error"))
+        }
+        postResult(api, payload)
+    }
+
+    /** 回执丢了引擎那头只能干等到超时；失败记引擎日志并重试一次。 */
+    private suspend fun postResult(api: RemoteDshApi, payload: JSONObject) {
+        var attempt = 0
+        while (attempt < 2) {
+            val outcome = runCatching { api.botValue("phone-result", payload) }
+            if (outcome.isSuccess) return
+            EngineLog.log("phone-result 发送失败（第 ${attempt + 1} 次）：${outcome.exceptionOrNull()?.message}")
+            attempt += 1
+            if (attempt < 2) delay(1_000)
         }
     }
 }

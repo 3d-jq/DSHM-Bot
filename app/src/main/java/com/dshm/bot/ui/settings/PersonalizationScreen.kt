@@ -220,11 +220,11 @@ private fun AccentSwatch(
             // 圆盘大小**恒定**：网页端 `.bt-swatch` 就是固定 22px + 固定 2px 边框，
             // 选中只换边框颜色。边框宽度以前写成「选中 2dp / 未选中 1dp」，
             // 选中的那个可见色块就少一圈，看着比别的圆小一号。
-            .size(ACCENT_SWATCH_SIZE)
+            .size(Dshm.spacing.accentSwatch)
             .clip(CircleShape)
             .background(fill)
             .border(
-                width = 2.dp,
+                width = Dshm.spacing.xxs,
                 // 选中 = 高对比墨色（网页端用 `--bt-ink`）；未选中 = 淡分隔线。
                 color = if (selected) Dshm.colors.textPrimary else Dshm.colors.divider,
                 shape = CircleShape,
@@ -233,6 +233,3 @@ private fun AccentSwatch(
             .semantics { contentDescription = label },
     )
 }
-
-/** 强调色圆点的直径；几个圆点必须一样大。 */
-private val ACCENT_SWATCH_SIZE = 28.dp

@@ -51,7 +51,6 @@ import org.json.JSONArray
 import androidx.core.net.toUri
 
 private const val GITHUB_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
-private val GitHubBrand = Color(0xFF181717)
 
 /**
  * 「密钥」页（对齐 DS Bot `SecretsPage`）：列出名字/用途/范围，能改用途与范围、能换值、能删。
@@ -678,6 +677,8 @@ private fun UsageDayBars(days: List<Pair<String, Long>>) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // 14 根柱子的固定绘图高（对齐 dsh-Go 的 UsageBars），没有语义匹配的
+            // 令牌，保留字面量。
             .height(132.dp)
             .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
         horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xxs),
@@ -1027,7 +1028,7 @@ private fun ConnectorBrandMark(
         modifier = Modifier
             .size(size)
             .clip(RoundedCornerShape(Dshm.radius.sm))
-            .background(if (github) GitHubBrand else Dshm.colors.surfaceMuted),
+            .background(if (github) Dshm.colors.githubBrand else Dshm.colors.surfaceMuted),
         contentAlignment = Alignment.Center,
     ) {
         if (github) {

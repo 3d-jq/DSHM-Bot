@@ -42,7 +42,7 @@ internal object PhoneScreenshot {
         // 悬浮胶囊会挡在截图里；PhoneOverlay.hideForCapture/restore 本来就是为此预留的。
         PhoneOverlay.hideForCapture()
         try {
-            val bitmap = takeOnce(service)
+            val bitmap = captureWithRetry(service)
                 ?: return@withContext Result.failure(IllegalStateException("系统没返回截图（可能是安全窗口或截图太频繁）"))
             val file = save(context, bitmap)
             Result.success(file.absolutePath)
@@ -53,8 +53,24 @@ internal object PhoneScreenshot {
         }
     }
 
+    /** ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT：系统限制 1 秒内只能截一张。 */
+    private const val ERROR_INTERVAL_TIME_SHORT = 1
+
+    /**
+     * 截图 + 限频重试：1 秒内连续截两张会被系统拒绝，遇到该错误码等 1 秒再试一次。
+     */
     @RequiresApi(Build.VERSION_CODES.R)
-    private suspend fun takeOnce(service: DshmAccessibilityService): Bitmap? =
+    private suspend fun captureWithRetry(service: DshmAccessibilityService): Bitmap? {
+        val (first, code) = takeOnce(service)
+        if (first != null) return first
+        if (code != ERROR_INTERVAL_TIME_SHORT) return null
+        delay(1_000)
+        return takeOnce(service).first
+    }
+
+    /** 请求一次截图：成功回 Bitmap；失败回 null 和系统错误码（有返回但转不成 Bitmap 时码为 -1）。 */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private suspend fun takeOnce(service: DshmAccessibilityService): Pair<Bitmap?, Int> =
         suspendCancellableCoroutine { cont ->
             service.takeScreenshot(
                 Display.DEFAULT_DISPLAY,
@@ -63,19 +79,16 @@ internal object PhoneScreenshot {
                     override fun onSuccess(screenshot: android.accessibilityservice.AccessibilityService.ScreenshotResult) {
                         val buffer = screenshot.hardwareBuffer
                         val colorSpace = screenshot.colorSpace
-                        val bmp = Bitmap.wrapHardwareBuffer(buffer, colorSpace)
-                            ?.copy(Bitmap.Config.ARGB_8888, false)
+                        val bmp = runCatching {
+                            Bitmap.wrapHardwareBuffer(buffer, colorSpace)
+                                ?.copy(Bitmap.Config.ARGB_8888, false)
+                        }.getOrNull()
                         buffer.close()
-                        cont.resume(bmp)
+                        cont.resume(bmp to if (bmp == null) -1 else 0)
                     }
 
                     override fun onFailure(errorCode: Int) {
-                        // ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT：1 秒内只能截一张，重试一次。
-                        if (errorCode == 1) {
-                            cont.resume(null)
-                        } else {
-                            cont.resume(null)
-                        }
+                        cont.resume(null to errorCode)
                     }
                 },
             )

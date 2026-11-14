@@ -569,11 +569,17 @@ private fun DateTimePickerField(
         onClick = { stage = 1 },
     )
     if (stage == 1) {
-        val zone = java.time.ZoneId.systemDefault()
         val parsed = runCatching { java.time.LocalDateTime.parse(value, atFormatter) }.getOrNull()
             ?: java.time.LocalDateTime.now().plusHours(1)
         val state = rememberDatePickerState(
-            initialSelectedDateMillis = parsed.atZone(zone).toInstant().toEpochMilli(),
+            // M3 DatePicker 把 selectedDateMillis 按 **UTC 零点** 解释日期；直接传
+            // 本地午夜的 instant，UTC+ 时区会回显成前一天。这里按 UTC 语义构造，
+            // 只取日期部分；回读也统一走 UTC（见下面 confirmButton）。
+            initialSelectedDateMillis = parsed
+                .toLocalDate()
+                .atStartOfDay(java.time.ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli(),
         )
         AlertDialog(
             onDismissRequest = { stage = 0 },
@@ -589,7 +595,9 @@ private fun DateTimePickerField(
             confirmButton = {
                 TextButton(onClick = {
                     pickedDate = state.selectedDateMillis?.let {
-                        java.time.Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
+                        java.time.Instant.ofEpochMilli(it)
+                            .atZone(java.time.ZoneOffset.UTC)
+                            .toLocalDate()
                     }
                     stage = 2
                 }) {

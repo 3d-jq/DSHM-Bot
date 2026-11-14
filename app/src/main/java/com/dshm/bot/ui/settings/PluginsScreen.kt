@@ -432,7 +432,7 @@ private fun PluginBundleSheet(
                 name = bundle.name,
                 title = title,
                 icon = bundle.meta?.icon,
-                size = 56.dp,
+                size = Dshm.spacing.settingsAvatar,
             )
             Spacer(Modifier.size(Dshm.spacing.md))
             Column(Modifier.weight(1f)) {
