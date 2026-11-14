@@ -13,6 +13,7 @@ import { install as installChannel } from '../src/host/channel.js'
 import {
   composeRoomRows,
   inboxRowsOf,
+  roomArtifactRow,
   roomInboxRowsOf,
 } from '../src/host/projection.js'
 import { replyItem, roomItems } from '../src/host/mobile.js'
@@ -98,25 +99,67 @@ test('the live round reply splices at its relay position and swaps into place by
   assert.equal(settled[1].payload.text, '我来')
 })
 
+test('working and approval round events paint no row (user call: noise / already in the panel)', () => {
+  reset()
+  const events = [
+    event('user/message', { source: { kind: 'user', rpcId: 'r-1' }, content: [{ type: 'text', text: '大家看一下' }] }),
+    event('tool/call', { turn: 1, callId: 'relay-w', name: 'group_relay', arguments: {} }),
+    event('tool/result', {
+      turn: 1,
+      message: {
+        toolCallId: 'relay-w',
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            replies: [
+              { kind: 'working', botId: 'b2', name: '写手', time: 5 },
+              { kind: 'approval', botId: 'b3', name: '画师', time: 6 },
+              { kind: 'done', botId: 'b2', name: '写手', time: 7 },
+            ],
+          }),
+        }],
+      },
+    }),
+  ]
+  const rows = baseRows(events)
+  assert.ok(
+    rows.every(row => row.payload.eventKind !== 'working' && row.payload.eventKind !== 'approval'),
+    '「开始做了 / 等你批准」不该出现在群时间线里',
+  )
+  assert.ok(rows.some(row => row.payload.eventKind === 'done'), '「做完了」这类结果行要保留')
+})
+
 test('round events never fold into a tool row: group_relay speaks through its replies', () => {
   reset()
   const rows = baseRows(ROOM_EVENTS())
   assert.ok(rows.every(row => row.kind !== 'tool'), '群聊不该有 group_relay 工具行')
 })
 
-test('the room paints no deliverable card at all (official UI has none)', () => {
+test('the room card carries presents only — the workspace scan never feeds it', () => {
   reset()
-  // 2026-11-14: the group card was removed — the upstream `room-artifacts` endpoint
-  // has no consumer in DS-Bot (web client included) and its feeders cannot tell
-  // group work from a Bot's private work in the shared workspace. The room rows must
-  // therefore never carry an `artifact` row, whatever the endpoint would return.
+  // 2026-11-14 取证的定案：成员会话里确实有带描述的 present，而扫盘捞到的是私聊产物
+  // （描述 null、共用工作区）。所以卡只收声明，扫盘在投影里关掉。
   const events = [
     event('turn/start', { turn: 3 }),
     event('user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: '做吧' }] }),
     event('turn/end', { turn: 3, reason: { kind: 'completed' } }),
   ]
-  const rows = baseRows(events)
-  assert.ok(rows.every(row => row.kind !== 'artifact'), '群聊不该有产物卡行')
+  const card = roomArtifactRow({
+    roomId: 'room-1',
+    events,
+    files: [
+      { path: '/root/w/AI行业动态.docx', description: '近两周动态', botId: 'b2', name: '大总管' },
+      { path: '/root/w/AI行业动态.docx', description: '重复路径被去重', botId: 'b2', name: '大总管' },
+    ],
+  })
+  assert.equal(card.key, 'present:room-1:3')
+  assert.equal(card.seq, 3, '卡贴在该轮 turn/end')
+  assert.equal(card.payload.delivered, true, '声明来源的卡是「交付了」')
+  assert.deepEqual(card.payload.files.map(file => file.path), ['/root/w/AI行业动态.docx'])
+  assert.equal(card.payload.files[0].description, '近两周动态')
+  assert.equal(card.payload.files[0].name, '大总管')
+  // 没有声明就没有卡（扫盘不参与，所以不会再冒出私聊文件）。
+  assert.equal(roomArtifactRow({ roomId: 'room-1', events, files: [] }), null)
 })
 
 test('the room queue (roomInbox) projects as tail inbox rows; kickoff and resume posts do not', () => {

@@ -518,9 +518,16 @@ export function composeRoomRows({ events, baseItems, botName }) {
       case 'bot':
         rows.push(row(`bot:${item.id}`, 'bot', seq, null, timeMs, { text: item.text, ...(item.botId ? { botId: item.botId } : {}), ...(item.name ? { name: item.name } : {}), ...(item.whole ? { whole: item.whole } : {}), ...(item.live ? { live: true } : {}) }))
         break
-      case 'event':
+      case 'event': {
+        // 2026-11-14 用户要求（有意偏离官方）：群轮事件里这两类不再画成时间线行——
+        //   · `working`（官方「{name} started on it」）：每个成员每次开工一条，没有信息量；
+        //   · `approval`（官方「{name} paused for your approval」）：与审批面板/成员 dock
+        //     已经显示的「X 等你批准」重复。
+        // done / stopped / failed / missed / lookup / resumed / cut 保留（它们是结果，不重复）。
+        if (item.event === 'working' || item.event === 'approval') break
         rows.push(row(`event:${item.id}`, 'event', seq, null, timeMs, { eventKind: item.event ?? null, ...(item.code ? { code: item.code } : {}), ...(item.botId ? { botId: item.botId } : {}), ...(item.name ? { name: item.name } : {}), ...(item.text !== undefined ? { text: item.text } : {}), ...(item.live ? { live: true } : {}) }))
         break
+      }
       default:
         break
     }
@@ -529,11 +536,49 @@ export function composeRoomRows({ events, baseItems, botName }) {
   return rows
 }
 
-/** The group's deliverable card was removed (2026-11-14): the official UI never
- * renders one (the upstream `room-artifacts` endpoint has no consumer anywhere in
- * DS-Bot, web client included), and its feeders cannot tell group work from a Bot's
- * private work in the shared workspace. Group members' deliveries show in their own
- * private chats, exactly as officially. */
+/** When the page's latest round began (the newest `turn/start` time), used to scope
+    the group deliverable card to this round. 0 when the page holds no turn. */
+function roundStartMs(events) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'turn/start') continue
+    if (typeof event.time === 'number') return event.time
+  }
+  return 0
+}
+
+/** The group's deliverable card (key `present:<roomId>:<turn>`): what this round's
+ * members declared with `present`.
+ *
+ * Only the declarations — **never** the workspace scan. Declarations live in each
+ * member's group Session, so they describe group work and nothing else; the scan walks
+ * the shared team workspace (where a Bot's private work also lands) and used to pull
+ * private-chat files onto this card. `turn` is the room Session's latest turn; the card
+ * sits at that turn's end (or its start while the round runs). */
+export function roomArtifactRow({ roomId, events, files }) {
+  const traces = turnTracesOf(events)
+  const latest = traces.at(-1)
+  const turn = latest?.turn ?? 0
+  const seq = latest?.endSeq ?? latest?.startSeq ?? (events.length > 0 ? events.at(-1).seq : null)
+  const out = []
+  const seen = new Set()
+  for (const file of Array.isArray(files) ? files : []) {
+    if (typeof file?.path !== 'string' || file.path.trim() === '' || seen.has(file.path)) continue
+    seen.add(file.path)
+    out.push({
+      path: file.path,
+      description: typeof file.description === 'string' && file.description.trim() !== '' ? file.description.trim() : null,
+      ...(file.botId ? { botId: file.botId } : {}),
+      ...(file.name ? { name: file.name } : {}),
+    })
+  }
+  if (out.length === 0) return null
+  return row(`present:${roomId}:${turn}`, 'artifact', seq, turn, null, {
+    files: out,
+    delivered: true,
+    collapsedCount: COLLAPSED_ARTIFACTS,
+  })
+}
 
 
 
@@ -763,13 +808,23 @@ export function install(rt) {
       const queued = typeof rt.roomInbox?.get === 'function' ? rt.roomInbox.get(room.id) : undefined
       rows.push(...roomInboxRowsOf(queued, { roomId: room.id }))
       rows.push(...inboxRowsOf(agent.inbox === undefined ? undefined : { nextTurn: agent.inbox.nextTurn, nextStep: agent.inbox.nextStep }))
-      // 群聊**不画产物卡**（2026-11-14 定案，对齐官方）。上游 `room-artifacts` 端点
-      // 在 DS-Bot 全仓（含网页端 client.js）没有任何消费方 —— 官方群聊界面根本不显示
-      // 群级产物卡，所以是我们接上去的额外 UI。它的两条喂料在共用工作区上都不可信：
-      // 成员会话取最新一页里**每一个** present；`recentFiles` 按 mtime 扫
-      // `/root/.dsh/bot/workspace` —— 那是私聊与群聊**共用**的目录，谁写的分不出来。
-      // 结果就是把 Bot 私聊做的文档/图片全列进群卡（真机实证：6 个文件 mtime 全在
-      // 房间最后一轮之后、`delivered=false`）。群成员交付的文件看各自的私聊（官方同）。
+      // 群产物卡：**只认成员在本轮里的 `present` 声明**，不扫盘。
+      //
+      // 2026-11-14 两次真机取证后的定案：成员会话里确实有带描述的 present
+      // （`AI行业动态…docx` 那种），而扫盘那一路捞到的全是私聊产物（描述 null、
+      // mtime 在房间最后一轮之后）—— 因为 `recentFiles` 扫的是私聊/群聊**共用**的
+      // `/root/.dsh/bot/workspace`，分不清谁写的。所以：声明照出卡，扫盘彻底关掉
+      // （`roomArtifacts(…, {scan:false})`），窗口只截到本轮起点。
+      if (cursor === undefined && typeof rt.roomArtifacts === 'function') {
+        try {
+          const declared = Number.isInteger(body.artifactSince) && body.artifactSince > 0 ? body.artifactSince : undefined
+          const artifacts = await rt.roomArtifacts(room.id, declared ?? roundStartMs(events), { scan: false })
+          const card = roomArtifactRow({ roomId: room.id, events, files: artifacts?.files ?? [] })
+          if (card !== null) rows.push(card)
+        } catch (error) {
+          rt.warn?.('ds-bot: timeline artifacts for %s failed: %s', room.name ?? room.id, error?.message ?? error)
+        }
+      }
       const roundState = roomStateOf(room.id)
       return {
         roomId: room.id,

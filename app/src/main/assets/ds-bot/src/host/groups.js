@@ -1007,7 +1007,19 @@ export function install(rt) {
     return out
   }
 
-  async function roomArtifacts(roomId, sinceMs) {
+  /**
+   * A round's deliverables.
+   *
+   * `files` are the members' own `deliverables/presented` declarations — they live in
+   * each member's **group** Session, so they can only ever describe group work.
+   *
+   * `changed` is the workspace scan and is **off unless asked for** (`scan: true`):
+   * the scan walks the shared team workspace, which is also where a Bot's *private*
+   * work lands, so it cannot attribute a file to the group and used to pull a Bot's
+   * private-chat artifacts onto the group card. The timeline projection never asks
+   * for it.
+   */
+  async function roomArtifacts(roomId, sinceMs, options = {}) {
     const room = rt.roomOf(roomId)
     if (room === undefined) throw new Error('Unknown group chat')
     const since = Number.isFinite(sinceMs) && sinceMs > 0 ? sinceMs : 0
@@ -1027,13 +1039,17 @@ export function install(rt) {
     }
     // 群自己的 Session 就落在这一轮成员写文件的目录：问它拿最准
     // （`workDirOf` 没有配置时会退回队伍工作区，这里不走那条猜的路）。
-    const roomAgent = await rt.resolveAgent(room.id).catch(() => undefined)
-    const dir = roomAgent?.session === undefined ? undefined : rt.sessionFolder(roomAgent.session)
-    const changed = dir === undefined
-      ? []
-      : (await recentFiles(dir, since))
-        .filter(file => !seen.has(file.path))
-        .map(file => ({ path: file.path, name: basename(file.path), at: file.at }))
+    const changed = options.scan !== true ? [] : await (async () => {
+      // 群自己的 Session 就落在这一轮成员写文件的目录：问它拿最准
+      // （`workDirOf` 没有配置时会退回队伍工作区，这里不走那条猜的路）。
+      const roomAgent = await rt.resolveAgent(room.id).catch(() => undefined)
+      const dir = roomAgent?.session === undefined ? undefined : rt.sessionFolder(roomAgent.session)
+      return dir === undefined
+        ? []
+        : (await recentFiles(dir, since))
+          .filter(file => !seen.has(file.path))
+          .map(file => ({ path: file.path, name: basename(file.path), at: file.at }))
+    })()
     return { since, files, changed, ...(errors.length > 0 ? { errors } : {}) }
   }
   rt.roomArtifacts = roomArtifacts

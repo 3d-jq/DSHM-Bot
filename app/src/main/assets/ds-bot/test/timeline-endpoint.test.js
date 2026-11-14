@@ -174,7 +174,7 @@ test('a room answers with room rows and the round state; unknown bots are refuse
   await assert.rejects(() => rt.timelineEndpoint({ botId: 'ghost' }), /Unknown Bot/)
 })
 
-test('a running room splices its live replies and queues roomInbox rows, and paints no deliverable card', async () => {
+test('a running room splices live replies, queues roomInbox rows, and shows the round card from presents only', async () => {
   const { rt } = fakeRt()
   // The round is still running: the relay call is in the log, its result is not,
   // and two posts wait in the plugin's room inbox for the next relay.
@@ -186,14 +186,26 @@ test('a running room splices its live replies and queues roomInbox rows, and pai
   rt.ctx.sessionController.page = async () => ({ records: roomEvents.map(event => ({ event })), hasMore: false })
   rt.roomProgress.set('relay-9', { roomId: 'room-1', replies: [{ kind: undefined, botId: 'b2', name: '写手', text: '先说结论', time: 1300 }], speaking: 'b2' })
   rt.roomInbox.set('room-1', [{ text: '排队的第二条', rpcId: 'r-11' }])
-  // 群聊不画产物卡（2026-11-14）：端点也不该再被咨询分页产物。
+  // 群卡只认 present 声明（2026-11-14 取证定案）：扫盘必须关掉，
+  // 端点回来的 changed（私聊产物）一个字都不能进卡。
   const consulted = []
-  rt.roomArtifacts = async (roomId, since) => { consulted.push([roomId, since]); return { files: [], changed: [] } }
+  rt.roomArtifacts = async (roomId, since, options) => {
+    consulted.push({ roomId, since, options })
+    return {
+      files: [{ path: '/root/w/AI行业动态.docx', description: '近两周动态', botId: 'b2', name: '大总管' }],
+      changed: [{ path: '/root/w/kitten2.png' }],
+    }
+  }
   try {
     const answer = await rt.timelineEndpoint({ roomId: 'room-1' })
-    assert.deepEqual(answer.rows.map(row => row.key), ['user:2', 'bot:relay-9:0', 'inbox:roominx:room-1:0'])
-    assert.ok(answer.rows.every(row => row.kind !== 'artifact'), '群聊不该有产物卡行')
-    assert.deepEqual(consulted, [], '群聊不该再调 room-artifacts 聚合')
+    assert.deepEqual(answer.rows.map(row => row.key), ['user:2', 'bot:relay-9:0', 'inbox:roominx:room-1:0', 'present:room-1:4'])
+    const card = answer.rows[3]
+    assert.equal(card.payload.delivered, true)
+    assert.deepEqual(card.payload.files.map(file => file.path), ['/root/w/AI行业动态.docx'], '扫盘的 changed 不能进卡')
+    assert.equal(card.payload.files[0].description, '近两周动态')
+    assert.equal(consulted.length, 1)
+    assert.equal(consulted[0].options?.scan, false, '扫盘必须显式关掉')
+    assert.equal(consulted[0].since, 1000, '窗口默认成本轮起点（turn/start 的 time）')
     const live = answer.rows[1]
     assert.equal(live.payload.live, true)
     assert.equal(live.payload.text, '先说结论')
