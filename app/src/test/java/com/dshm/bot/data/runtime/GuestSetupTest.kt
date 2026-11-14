@@ -9,11 +9,14 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * `AGENTS.md` 的写入规则。
+ * `AGENTS.md` 的写入规则（幂等 upsert）。
  *
- * 这里锁两件事：
+ * 这里锁四件事：
  * 1. 交付规则真的进了文件（图片/视频也要 `present`）—— 产物卡根治靠它；
- * 2. 用户自己改过的 AGENTS.md 不被覆盖（只覆盖带我们标记的）。
+ * 2. 我们管理的文件在规则更新时整体重写；
+ * 3. 用户自己的文件**追加**规则块（此前「有标记才覆盖」的保护让老设备的规则
+ *    一直缺席，模型不调 `present`，产物卡全灭）；已带我们块 / 已有交付说明则不动；
+ * 4. 每次引擎启动都跑，重复 apply 不重复追加。
  */
 class GuestSetupTest {
 
@@ -52,7 +55,7 @@ class GuestSetupTest {
     }
 
     @Test
-    fun keepsUserOwnedFileUntouched() {
+    fun userOwnedFileGetsDeliveryRuleAppended() {
         val rootfs = temp.newFolder("rootfs")
         val file = agentsFile(rootfs)
         file.parentFile!!.mkdirs()
@@ -61,7 +64,38 @@ class GuestSetupTest {
 
         GuestSetup.apply(rootfs)
 
-        assertEquals("用户自己写的 AGENTS.md 被覆盖了", mine, file.readText())
+        val text = file.readText()
+        assertTrue("用户原有内容丢了", text.startsWith(mine.trimEnd('\n')))
+        assertTrue("交付规则没追加到用户文件", text.contains("# 交付文件"))
+        assertTrue("追加的块没带托管标记", text.contains("<!-- dshm-bot:managed"))
+    }
+
+    @Test
+    fun appendedBlockIsIdempotent() {
+        val rootfs = temp.newFolder("rootfs")
+        val file = agentsFile(rootfs)
+        file.parentFile!!.mkdirs()
+        file.writeText("# 用户内容\n")
+
+        GuestSetup.apply(rootfs)
+        val once = file.readText()
+        GuestSetup.apply(rootfs)
+
+        assertEquals("重复 apply 不该再追加", once, file.readText())
+    }
+
+    @Test
+    fun userOwnedFileWithSameDeliverySectionUntouched() {
+        val rootfs = temp.newFolder("rootfs")
+        val file = agentsFile(rootfs)
+        file.parentFile!!.mkdirs()
+        // 用户把我们的规则抄进了自己的文件（同名小节）：不再追加，避免模型看两份。
+        val mine = "# 我自己写的规则\n\n# 交付文件（DSHM Bot）\n- 我自己说了算\n"
+        file.writeText(mine)
+
+        GuestSetup.apply(rootfs)
+
+        assertEquals("已有同名交付小节时不该动", mine, file.readText())
     }
 
     @Test
