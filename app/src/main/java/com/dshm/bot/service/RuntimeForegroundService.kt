@@ -16,6 +16,7 @@ import com.dshm.bot.MainActivity
 import com.dshm.bot.R
 import com.dshm.bot.data.runtime.EngineLog
 import com.dshm.bot.data.runtime.RuntimeLauncher
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
@@ -34,6 +35,13 @@ import kotlin.concurrent.thread
  */
 class RuntimeForegroundService : Service() {
 
+    /**
+     * 「启动引擎」请求代数：每次非 STOP 的 [onStartCommand] 自增。
+     * 停止请求记下当时的代数，清扫前再核对 —— 期间来了新的启动指令就放弃，
+     * 不然按 `/proc` 反查的清扫会把刚重启的引擎当孤儿杀掉。
+     */
+    private val startGeneration = AtomicInteger(0)
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -44,10 +52,11 @@ class RuntimeForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopEngine()
+                stopEngine(startId)
                 return START_NOT_STICKY
             }
         }
+        startGeneration.incrementAndGet()
         val text = intent?.getStringExtra(EXTRA_STATUS)?.takeIf { it.isNotBlank() }
             ?: getString(R.string.engine_notification_running)
         // 只有「正在启动/校验」才是进行中；引擎跑起来后进度条要收掉，
@@ -71,16 +80,25 @@ class RuntimeForegroundService : Service() {
      * 这里拿不到 `RuntimeLauncher` 里那个 `Process` 句柄（App 可能已经被系统杀过，
      * 引擎是孤儿进程），所以走按 `/proc` 反查的 [RuntimeLauncher.stopAll]。
      */
-    private fun stopEngine() {
+    private fun stopEngine(startId: Int) {
         EngineLog.log("foreground service: stop requested from notification")
+        val requestedGeneration = startGeneration.get()
         thread(name = "dshm-engine-stop") {
+            // 请求停止之后引擎又被重启（例如用户马上点了启动）：放弃清扫，
+            // 也不要广播「已停止」/拆掉前台服务 —— 新引擎还需要这条常驻通知保活。
+            if (startGeneration.get() != requestedGeneration) {
+                EngineLog.log("foreground service: stop aborted, engine restarted meanwhile")
+                return@thread
+            }
             runCatching { RuntimeLauncher(this).stopAll() }
                 .onFailure { EngineLog.log("foreground service: stop failed: ${it.message}") }
             // 通知栏上的「停止引擎」已经生效，让 App 里的引擎页也跟着回到「已停止」。
             sendBroadcast(Intent(ACTION_ENGINE_STOPPED).setPackage(packageName))
             runCatching {
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                // stopSelf(startId) 只在 startId 仍是最新一次启动时才真正停止：
+                // 清扫期间服务又被启动的话，前台通知留给新引擎。
+                stopSelf(startId)
             }
         }
     }

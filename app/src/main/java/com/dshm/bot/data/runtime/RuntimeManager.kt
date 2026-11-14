@@ -1,6 +1,7 @@
 package com.dshm.bot.data.runtime
 
 import android.content.Context
+import com.dshm.bot.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,8 +56,9 @@ class RuntimeManager(
         _state.value = RuntimeState.Installing(0, "准备安装")
         try {
             // 开发/调试：外部目录放了 runtime.zip 就直接本地安装，省去下载。
-            val localZip = File(appContext.getExternalFilesDir(null), "runtime.zip")
-            if (localZip.isFile) {
+            // 只在 debug 构建开放 —— 外部目录可能被其它应用写入，release 必须走下载 + 校验。
+            val localZip = devZipOrNull(BuildConfig.DEBUG, appContext.getExternalFilesDir(null))
+            if (localZip != null) {
                 withContext(Dispatchers.IO) {
                     val version = installer.installFromZip(localZip, manifest) { p, m ->
                         _state.value = RuntimeState.Installing(p, m)
@@ -110,6 +112,16 @@ class RuntimeManager(
         } finally {
             connection.disconnect()
         }
+    }
+
+    companion object {
+        /** 本地 runtime.zip 旁路只在 debug 构建生效；release 返回 null，一律走下载。 */
+        internal fun devZipOrNull(isDebugBuild: Boolean, externalFilesDir: File?): File? =
+            if (isDebugBuild) {
+                externalFilesDir?.let { File(it, "runtime.zip") }?.takeIf { it.isFile }
+            } else {
+                null
+            }
     }
 }
 

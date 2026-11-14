@@ -20,15 +20,24 @@ import java.util.zip.ZipFile
  *   runtime/rootfs.version   当前版本
  *   runtime/staging/         解压中转，完成后整体换入
  */
-class RuntimeInstaller(context: Context) {
-
-    private val appContext = context.applicationContext
-    val baseDir = File(appContext.filesDir, "runtime")
+class RuntimeInstaller private constructor(
+    private val appContext: Context?,
+    val baseDir: File,
+) {
     val rootfsDir = File(baseDir, "rootfs")
     private val versionFile = File(baseDir, "rootfs.version")
     private val stagingDir = File(baseDir, "staging")
     /** 重置运行时时暂存「要保留的东西」的地方（在 rootfs 之外）。 */
     private val stashDir = File(baseDir, "keep")
+
+    /** 常规构造：日志与解压中转都挂在应用私有目录下。 */
+    constructor(context: Context) : this(
+        context.applicationContext,
+        File(context.applicationContext.filesDir, "runtime"),
+    )
+
+    /** 单测构造：baseDir 指向临时目录，不触碰任何 Android API（EngineLog 未初始化时全部空转）。 */
+    internal constructor(baseDir: File) : this(null, baseDir)
 
     fun isInstalled(): Boolean =
         versionFile.isFile && rootfsDir.isDirectory && !rootfsDir.list().isNullOrEmpty()
@@ -43,18 +52,41 @@ class RuntimeInstaller(context: Context) {
         zipFile: File,
         manifest: RuntimeManifest,
         onProgress: (Int, String) -> Unit = { _, _ -> },
+    ): String = installFromZip(zipFile, manifest, appContext?.cacheDir, onProgress)
+
+    /** [cacheDir] 可注入的版本：单测用它绕开 Android 上下文。 */
+    internal fun installFromZip(
+        zipFile: File,
+        manifest: RuntimeManifest,
+        cacheDir: File?,
+        onProgress: (Int, String) -> Unit = { _, _ -> },
     ): String {
-        // zip 里带着 CI 生成的 manifest（哈希对应本次构建的 rootfs），优先用它。
-        val effective = readEmbeddedManifest(zipFile) ?: manifest
-        EngineLog.init(appContext)
+        // 校验基准以 APK 内置清单为准：zip 里自带的 manifest 是随包而来的，
+        // 攻击者连哈希一起改就能「自证合格」——拿它校验等于没校验。
+        // 旧实现里「内嵌 manifest 缺哈希就静默跳过校验」正是从这里被绕过的，一并堵上。
+        val embedded = readEmbeddedManifest(zipFile)
+        val expected = manifest.rootfsSha256?.takeIf { it.isNotBlank() }
+            ?: error("内置清单缺少 rootfsSha256，无法校验运行时包，拒绝安装")
+        if (embedded != null) {
+            val embeddedSha = embedded.rootfsSha256?.takeIf { it.isNotBlank() }
+                ?: error("运行时包 manifest 缺少 rootfsSha256，拒绝安装")
+            require(embeddedSha.equals(expected, ignoreCase = true)) {
+                "运行时包 manifest 与内置清单的哈希不一致：$embeddedSha / $expected"
+            }
+            require(embedded.runtimeVersion == manifest.runtimeVersion) {
+                "运行时包版本 ${embedded.runtimeVersion} 与内置清单 ${manifest.runtimeVersion} 不一致"
+            }
+        }
+        val effective = embedded ?: manifest
+        appContext?.let(EngineLog::init)
         EngineLog.reset()
         EngineLog.log("unpacking runtime ${effective.runtimeVersion} (${effective.abi})")
-        val startedAt = SystemClock.elapsedRealtime()
+        val startedAt = clockMs()
         baseDir.mkdirs()
         stagingDir.deleteRecursively()
         stagingDir.mkdirs()
 
-        val tarFile = File(appContext.cacheDir, "rootfs.tar.xz")
+        val tarFile = File(cacheDir ?: baseDir, "rootfs.tar.xz")
         try {
             ZipFile(zipFile).use { zip ->
                 val entry = findRootfsEntry(zip, effective.rootfsAsset)
@@ -78,37 +110,42 @@ class RuntimeInstaller(context: Context) {
                     }
                 }
                 val actual = digest.digest().joinToString("") { "%02x".format(it) }
-                val expected = effective.rootfsSha256
-                require(expected == null || actual.equals(expected, ignoreCase = true)) {
+                require(actual.equals(expected, ignoreCase = true)) {
                     "rootfs 校验失败：期望 $expected，实际 $actual"
                 }
             }
 
-            val verifyAt = SystemClock.elapsedRealtime()
+            val verifyAt = clockMs()
             EngineLog.log("install verify: ${verifyAt - startedAt} ms")
             onProgress(0, "解压中")
-            extractTarXz(tarFile, stagingDir, effective.entriesTotal, onProgress)
-            EngineLog.log("install extract: ${SystemClock.elapsedRealtime() - verifyAt} ms")
+            extractTarXz(tarFile, stagingDir, effective.entriesTotal, effective.uncompressedBytes, onProgress)
+            EngineLog.log("install extract: ${clockMs() - verifyAt} ms")
         } finally {
             tarFile.delete()
         }
 
-        val syncAt = SystemClock.elapsedRealtime()
+        val syncAt = clockMs()
         rootfsDir.deleteRecursively()
         if (!stagingDir.renameTo(rootfsDir)) {
             stagingDir.copyRecursively(rootfsDir, overwrite = true)
             stagingDir.deleteRecursively()
         }
-        EngineLog.log("install sync: ${SystemClock.elapsedRealtime() - syncAt} ms")
-        val activateAt = SystemClock.elapsedRealtime()
+        EngineLog.log("install sync: ${clockMs() - syncAt} ms")
+        val activateAt = clockMs()
         versionFile.writeText(effective.runtimeVersion)
-        EngineLog.log("install activate: ${SystemClock.elapsedRealtime() - activateAt} ms")
+        EngineLog.log("install activate: ${clockMs() - activateAt} ms")
         // 之前重置时保留的东西这时搬回新装的运行时。
         restoreStash()
-        EngineLog.log("runtime ready in ${(SystemClock.elapsedRealtime() - startedAt) / 1000}s")
+        EngineLog.log("runtime ready in ${(clockMs() - startedAt) / 1000}s")
         onProgress(100, "已安装")
         return effective.runtimeVersion
     }
+
+    /**
+     * 单测环境没有 SystemClock（Android stub 会抛异常）；时间戳只喂给 EngineLog，
+     * 取不到时给 0，不影响安装逻辑。
+     */
+    private fun clockMs(): Long = runCatching { SystemClock.elapsedRealtime() }.getOrDefault(0L)
 
     private fun readEmbeddedManifest(zipFile: File): RuntimeManifest? = runCatching {
         ZipFile(zipFile).use { zip ->
@@ -140,7 +177,21 @@ class RuntimeInstaller(context: Context) {
             .firstNotNullOfOrNull { zip.getEntry(it) }
             ?: error("运行时包缺少 rootfs：$asset")
 
-    private fun extractTarXz(tarFile: File, dest: File, totalEntries: Int, onProgress: (Int, String) -> Unit) {
+    private fun extractTarXz(
+        tarFile: File,
+        dest: File,
+        totalEntries: Int,
+        uncompressedBytes: Long,
+        onProgress: (Int, String) -> Unit,
+    ) {
+        // zip bomb 兜底：manifest 记录了本次构建解压后的文件总字节数（rtbuild 精确统计），
+        // 超过它 + 容差就中止 —— 哈希已经挡住了大多数伪造包，这里是最后一条防线。
+        val cap = if (uncompressedBytes > 0) {
+            uncompressedBytes + uncompressedBytes / 8 + SIZE_TOLERANCE_BYTES
+        } else {
+            0L // 清单没给总量（旧格式）时不设限，由哈希校验把关。
+        }
+        var written = 0L
         BufferedInputStream(tarFile.inputStream()).use { buffered ->
             XZInputStream(buffered).use { xz ->
                 TarArchiveInputStream(xz).use { tar ->
@@ -160,16 +211,21 @@ class RuntimeInstaller(context: Context) {
                             }
 
                             entry.isLink -> {
+                                if (cap > 0 && written + entry.size > cap) failOverCap(written, cap, entry.name)
                                 val source = resolveSafely(dest, entry.linkName)
                                 if (source.isFile) {
                                     target.parentFile?.mkdirs()
                                     source.copyTo(target, overwrite = true)
+                                    written += source.length()
                                 }
                             }
 
                             else -> {
+                                // tar 的 entry.size 就是该成员在流里的真实字节数，写前先卡总量。
+                                if (cap > 0 && written + entry.size > cap) failOverCap(written, cap, entry.name)
                                 target.parentFile?.mkdirs()
-                                target.outputStream().use { out -> tar.copyTo(out) }
+                                target.outputStream().use { out -> written += tar.copyTo(out) }
+                                if (cap > 0 && written > cap) failOverCap(written, cap, entry.name)
                                 if (entry.mode and EXECUTABLE_MASK != 0) target.setExecutable(true, true)
                             }
                         }
@@ -183,6 +239,9 @@ class RuntimeInstaller(context: Context) {
             }
         }
     }
+
+    private fun failOverCap(written: Long, cap: Long, name: String): Nothing =
+        error("解压超出限额：累计 $written 字节 / 上限 $cap（条目 $name）")
 
     private fun resolveSafely(root: File, name: String): File {
         val relative = name.replace('\\', '/').trimStart('/')
@@ -203,6 +262,9 @@ class RuntimeInstaller(context: Context) {
     companion object {
         private const val DEFAULT_BUFFER = 1 shl 20
         private const val EXECUTABLE_MASK = 0b001_001_001
+
+        /** 解压总量容差：哈希钉死的包与清单数字一致，容差只吸收统计口径上的零头。 */
+        private const val SIZE_TOLERANCE_BYTES = 1L shl 20
 
         /**
          * 重置运行时时「保留」的东西（相对 rootfs）：

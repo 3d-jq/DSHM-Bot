@@ -21,6 +21,7 @@ import com.dshm.bot.data.runtime.TextMasking
 import com.dshm.bot.data.runtime.buildDiagnosticsReport
 import com.dshm.bot.data.runtime.phaseName
 import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.DshMuxHub
 import com.dshm.bot.R
 import com.dshm.bot.service.RuntimeForegroundService
 import androidx.core.content.ContextCompat
@@ -101,7 +102,7 @@ class EngineViewModel(
 
     init {
         restoredState = _state.value
-        restoreRunningEngine()
+        viewModelScope.launch { restoreRunningEngine() }
         observeNotificationStop()
         viewModelScope.launch {
             manager.state.collect { state ->
@@ -120,12 +121,17 @@ class EngineViewModel(
      * 从私有偏好恢复上一次的本地端点。只有端口真的还在监听且 token 还能登录时，
      * 才直接把状态设成 Running —— 这样热启动没有「引擎启动中」骨架，也不会重启 proot。
      */
-    private fun restoreRunningEngine() {
+    private suspend fun restoreRunningEngine() {
         if (_state.value is RuntimeState.Running) return
         val url = endpointPrefs.getString("endpoint-url", null) ?: return
         val token = endpointPrefs.getString("endpoint-token", null) ?: return
         val endpoint = RuntimeEndpoint(url, token)
-        if (runCatching { launcher.adoptAlive(manifest) }.getOrNull() != endpoint) return
+        // adoptAlive 要扫 /proc、读日志尾、探测端口，是 IO 级开销，别压在主线程上。
+        val adopted = withContext(Dispatchers.IO) {
+            runCatching { launcher.adoptAlive(manifest) }.getOrNull()
+        }
+        if (_state.value is RuntimeState.Running) return // 探测期间用户可能已手动 start
+        if (adopted != endpoint) return
         _state.value = RuntimeState.Running(endpoint)
         restoredState = _state.value
         EngineLog.log("startup: restored running engine at ${endpoint.baseUrl}")
@@ -232,9 +238,21 @@ class EngineViewModel(
         }
     }
 
+    /**
+     * 引擎停止后把旧连接全部作废：端口/token 都要变（或引擎已死），
+     * 旧 mux 的连接与 DshClients 的 cookie 缓存只属于上一个引擎。
+     */
+    private fun clearStaleConnections() {
+        DshMuxHub.clear()
+        DshClients.clear()
+    }
+
     fun restart() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { launcher.stop() }
+            // 用 stopAll 而不是 stop：接管（adopt）来的引擎没有本实例的 Process 句柄，
+            // stop() 会直接空转 —— UI 显示已停，引擎其实还在跑。
+            withContext(Dispatchers.IO) { launcher.stopAll() }
+            clearStaleConnections()
             _state.value = RuntimeState.Starting
             restoredState = _state.value
             RuntimeForegroundService.start(
@@ -264,7 +282,8 @@ class EngineViewModel(
 
     fun stop() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { launcher.stop() }
+            withContext(Dispatchers.IO) { launcher.stopAll() }
+            clearStaleConnections()
             _state.value = RuntimeState.Stopped
             restoredState = _state.value
             RuntimeForegroundService.stop(appContext)
@@ -275,13 +294,15 @@ class EngineViewModel(
     fun reset(keep: ResetKeep = ResetKeep.DELETE_ALL) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                launcher.stop()
+                // 同 stop()：接管来的引擎只能按 /proc 反查杀掉，stop() 拿不到句柄会空转。
+                launcher.stopAll()
                 // 要保留的东西先挪到 rootfs 之外，删完运行时再装回来。
                 if (keep == ResetKeep.KEEP_WORKSPACE) {
                     installer.stash(RuntimeInstaller.KEEP_PATHS)
                 }
                 installer.delete()
             }
+            clearStaleConnections()
             _state.value = RuntimeState.NotInstalled
             restoredState = _state.value
             RuntimeForegroundService.stop(appContext)
@@ -313,8 +334,10 @@ class EngineViewModel(
     /** 运行日志：与 dsh-Go 一样只展示当前引擎进程的 stdout 流，避免多份文件拼接后顺序混乱。 */
     fun logText(): String = runCatching {
         val engineLog = File(appContext.filesDir, "engine.log")
-            .takeIf { it.isFile }?.readText().orEmpty()
-        TextMasking.maskSecrets(engineLog.trim().takeLast(300_000))
+            .takeIf { it.isFile } ?: return@runCatching ""
+        // 日志文件可能很大，只读尾部再裁剪，不整读进内存。
+        // 落盘前已打过码，这里再过一遍是冗余防线。
+        TextMasking.maskSecrets(EngineLog.readTail(engineLog, LOG_TAIL_BYTES).trim().takeLast(300_000))
     }.getOrDefault("")
 
 
@@ -322,6 +345,9 @@ class EngineViewModel(
         /** 进程级保留，Activity / ViewModel 重建时不把已运行的引擎判回 Installed。 */
         @Volatile
         private var restoredState: RuntimeState? = null
+
+        /** logText 只读日志尾部的字节数：展示层最多用 30 万字符，1 MiB 覆盖有余。 */
+        private const val LOG_TAIL_BYTES = 1L shl 20
 
         fun factory(context: Context): ViewModelProvider.Factory = viewModelFactory {
             initializer {

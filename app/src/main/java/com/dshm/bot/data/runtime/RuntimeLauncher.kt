@@ -10,7 +10,9 @@ import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
 import com.dshm.bot.data.settings.ApiKeyStore
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 用 proot 启动 rootfs 里的 `dsh web`，从 stdout 解析 token 得到连接信息。
@@ -97,13 +99,12 @@ class RuntimeLauncher(
             putString(KEY_PHONE_OWNER, phoneControlOwner())
         }
 
-        val queue = java.util.concurrent.LinkedBlockingQueue<String>()
-        val tail = ArrayDeque<String>()
+        val buffer = StartupOutputBuffer()
         val reader = Thread {
             runCatching {
                 started.inputStream.bufferedReader().forEachLine { line ->
                     EngineLog.raw(line)
-                    queue.put(line)
+                    buffer.onLine(line)
                 }
             }
         }.apply { isDaemon = true; start() }
@@ -111,14 +112,15 @@ class RuntimeLauncher(
         // 插件刚覆盖、设备又忙的时候，冷启动会明显超过两分钟；token 到了才是真的起来了。
         val deadline = System.currentTimeMillis() + 180_000
         while (System.currentTimeMillis() < deadline) {
-            val line = queue.poll(500, TimeUnit.MILLISECONDS)
+            val line = buffer.poll(500)
             if (line == null) {
                 if (!started.isAlive) break
                 continue
             }
-            tail.addLast(line)
-            if (tail.size > 30) tail.removeFirst()
             ProotCommand.parseToken(line)?.let { endpoint ->
+                // token 到手：启动循环结束，切丢弃模式 —— 引擎会一直输出，
+                // 队列再没人消费，无界堆积迟早把 App 进程吃穿。
+                buffer.drain()
                 rememberEndpoint(endpoint)
                 EngineLog.log("DSH is listening at ${endpoint.baseUrl}")
                 EngineLog.log("startup: ${startupLine(requested, spawned, SystemClock.elapsedRealtime())}")
@@ -128,9 +130,14 @@ class RuntimeLauncher(
         }
         val exit = runCatching { started.exitValue() }.getOrNull()
         EngineLog.log("startup failed: no token (exit=$exit)")
+        buffer.drain()
         forgetEndpoint()
+        // 超时/早退的进程要跟着回收：它可能还活着，占着端口与 state.lock，
+        // isRunning 还会把下一次 start() 堵死。走与 stop() 相同的清扫。
+        terminate(started, rootfs)
+        process = null
         throw IllegalStateException(
-            "引擎启动失败：未收到 token（exit=$exit）\n" + tail.joinToString("\n"),
+            "引擎启动失败：未收到 token（exit=$exit）\n" + buffer.tailLines().joinToString("\n"),
         )
     }
 
@@ -143,7 +150,15 @@ class RuntimeLauncher(
         val running = process ?: return
         forgetEndpoint()
         EngineLog.log("stopping engine")
-        val rootfs = installer.rootfsDir
+        terminate(running, installer.rootfsDir)
+        process = null
+    }
+
+    /**
+     * 完整的进程清扫：SIGTERM guest → SIGQUIT proot → 强制结束，最后清 pid 文件。
+     * [stop] 与 [start] 的失败回收共用；不改动 `process` 字段，由调用方处置。
+     */
+    private fun terminate(running: Process, rootfs: File) {
         val records = engineProcesses(rootfs)
         val node = records.filter { it.cmdline.contains("/opt/node") || it.cmdline.contains("/usr/local/bin/dsh") }
         node.forEach { runCatching { Os.kill(it.pid, OsConstants.SIGTERM) } }
@@ -158,7 +173,6 @@ class RuntimeLauncher(
             runCatching { Os.kill(record.pid, OsConstants.SIGQUIT) }
         }
         runCatching { running.waitFor() }
-        process = null
         runCatching { File(rootfs, "tmp/dsh-web.pid").delete() }
     }
 
@@ -346,6 +360,42 @@ class RuntimeLauncher(
 internal fun addPhoneStorageBind(argv: MutableList<String>) {
     val envIndex = argv.indexOf("/usr/bin/env")
     if (envIndex > 0) argv.addAll(envIndex, listOf("-b", "/sdcard"))
+}
+
+/**
+ * 启动期收集引擎 stdout 的策略（纯逻辑，可 JVM 单测）：
+ * - 收集期：每行入队，供启动循环轮询；[tailLines] 保留最近几行用于失败提示；
+ * - [drain] 之后（token 到手或启动失败）：不再入队 —— 引擎会连跑数天并持续输出，
+ *   没人消费的无界队列迟早把 App 进程吃穿，之后每行只进 [EngineLog]。
+ */
+internal class StartupOutputBuffer(private val tailSize: Int = 30) {
+    private val queue = LinkedBlockingQueue<String>()
+    private val tail = ArrayDeque<String>()
+    private val accepting = AtomicBoolean(true)
+
+    /** 读线程回调：每行引擎输出都先写日志，再视收集状态入队。 */
+    fun onLine(line: String) {
+        if (!accepting.get()) return
+        queue.put(line)
+    }
+
+    /** 启动循环取一行；[timeoutMs] 内没有就返回 null。取到的行同时记入尾部环形缓冲。 */
+    fun poll(timeoutMs: Long): String? {
+        val line = queue.poll(timeoutMs, TimeUnit.MILLISECONDS) ?: return null
+        synchronized(tail) {
+            tail.addLast(line)
+            if (tail.size > tailSize) tail.removeFirst()
+        }
+        return line
+    }
+
+    /** 收集结束：停止入队并清掉残留（已取走的尾部保留，供失败提示用）。 */
+    fun drain() {
+        accepting.set(false)
+        queue.clear()
+    }
+
+    fun tailLines(): List<String> = synchronized(tail) { tail.toList() }
 }
 
 
