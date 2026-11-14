@@ -568,8 +568,6 @@ fun BotSettingsSheet(
     var editFolder by rememberSaveable { mutableStateOf(false) }
     var editInstructions by rememberSaveable { mutableStateOf(false) }
     var showMemory by rememberSaveable { mutableStateOf(false) }
-    var showSchedules by rememberSaveable { mutableStateOf(false) }
-    var newSchedule by rememberSaveable { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(DETAILS_TAB) }
     var sheetNotice by rememberSaveable { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -751,19 +749,6 @@ fun BotSettingsSheet(
             }
 
             Spacer(Modifier.height(Dshm.spacing.xxl))
-            SettingsSection(title = stringResource(R.string.bot_settings_schedules)) {
-                SettingsRow(
-                    title = if (state.schedules.isEmpty()) {
-                        stringResource(R.string.bot_settings_schedule_none)
-                    } else {
-                        stringResource(R.string.bot_settings_memory_count, state.schedules.size)
-                    },
-                    value = stringResource(R.string.bot_settings_manage),
-                    onClick = { showSchedules = true },
-                )
-            }
-
-            Spacer(Modifier.height(Dshm.spacing.xxl))
             SettingsSection(title = stringResource(R.string.bot_settings_instructions)) {
                 // 有内容时只显示一次（标题单行省略），空的时候给个提示，不再标题/副标题各来一遍。
                 val instructions = info?.instructions?.trim().orEmpty()
@@ -837,27 +822,6 @@ fun BotSettingsSheet(
             onDismiss = { showMemory = false },
         )
     }
-    if (showSchedules) {
-        SchedulesSheet(
-            tasks = state.schedules,
-            onDelete = { viewModel.deleteSchedule(it) },
-            onDismiss = { showSchedules = false },
-            onNew = {
-                showSchedules = false
-                newSchedule = true
-            },
-        )
-    }
-    if (newSchedule) {
-        NewScheduleSheet(
-            onDismiss = { newSchedule = false },
-            onSave = { title, prompt, time ->
-                newSchedule = false
-                viewModel.createDailySchedule(title, prompt, time)
-            },
-        )
-    }
-
 }
 
 private const val DETAILS_TAB = 0

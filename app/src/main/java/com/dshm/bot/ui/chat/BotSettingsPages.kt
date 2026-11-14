@@ -1,12 +1,14 @@
 package com.dshm.bot.ui.chat
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -19,6 +21,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -236,6 +241,24 @@ private fun MemoryPage(
 }
 
 /** 定时任务：整屏（列表 + 页内新增表单）。 */
+/** Bot 设置 → 定时任务：与密钥/能力列表同款的首字母方块（中文取首字）。 */
+@Composable
+private fun ScheduleInitialMark(title: String) {
+    Box(
+        modifier = Modifier
+            .size(Dshm.spacing.avatar)
+            .clip(RoundedCornerShape(Dshm.radius.sm))
+            .background(Dshm.colors.surfaceMuted),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = title.trim().take(1).uppercase().ifEmpty { "?" },
+            style = Dshm.typography.rowTitle,
+            color = Dshm.colors.textSecondary,
+        )
+    }
+}
+
 @Composable
 fun BotSchedulesPage(row: ChatRowUi, endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
     val vm: BotDetailsViewModel = botDetailsViewModel(row.id, endpoint)
@@ -262,6 +285,7 @@ fun BotSchedulesPage(row: ChatRowUi, endpoint: RuntimeEndpoint?, onBack: () -> U
                         SettingsRow(
                             title = task.title,
                             subtitle = task.prompt,
+                            leading = { ScheduleInitialMark(task.title) },
                             value = stringResource(R.string.bot_settings_schedule_delete),
                             valueColor = Dshm.colors.danger,
                             onClick = { vm.deleteSchedule(task) },
