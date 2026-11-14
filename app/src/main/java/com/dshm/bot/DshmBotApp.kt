@@ -61,7 +61,9 @@ import com.dshm.bot.ui.chat.NewBotScreen
 import com.dshm.bot.ui.chat.RoomMemberOption
 import com.dshm.bot.ui.chat.RoomSettingsScreen
 import com.dshm.bot.ui.chat.RoomSettingsViewModel
+import com.dshm.bot.ui.engine.DiagnosticsActions
 import com.dshm.bot.ui.engine.DiagnosticsScreen
+import com.dshm.bot.ui.engine.DiagnosticsViewModel
 import com.dshm.bot.ui.engine.EngineScreen
 import com.dshm.bot.ui.engine.EngineViewModel
 import com.dshm.bot.ui.engine.OnboardingScreen
@@ -193,11 +195,16 @@ fun DshmBotApp(
     val chatAlertViewModel: ChatAlertViewModel = viewModel(
         factory = ChatAlertViewModel.factory(appContext),
     )
+    // 诊断页的宿主动作（看完整日志 / 清空诊断）：同样单实例 + setEndpoint。
+    val diagnosticsViewModel: DiagnosticsViewModel = viewModel(
+        factory = DiagnosticsViewModel.factory(),
+    )
     // 「引擎就绪」不再单独弹通知：引擎常驻前台服务自己有一条
     // （`RuntimeForegroundService`），再来一条只是重复打扰。
     LaunchedEffect((engineState as? RuntimeState.Running)?.endpoint) {
         val endpoint = (engineState as? RuntimeState.Running)?.endpoint
         chatAlertViewModel.setEndpoint(endpoint)
+        diagnosticsViewModel.setEndpoint(endpoint)
         accountViewModel.setEndpoint(endpoint)
         scheduledTasksViewModel.setEndpoint(endpoint)
         pluginMarketViewModel.setEndpoint(endpoint)
@@ -727,6 +734,7 @@ fun DshmBotApp(
                 } else {
                     stringResource(R.string.diagnostics_not_connected)
                 }
+                val diagnosticsUiState by diagnosticsViewModel.state.collectAsStateWithLifecycle()
                 DiagnosticsScreen(
                     state = engineState,
                     version = engineViewModel.version,
@@ -742,6 +750,13 @@ fun DshmBotApp(
                             connection = connectionLabel,
                         )
                     },
+                    diagnostics = diagnosticsUiState,
+                    actions = DiagnosticsActions(
+                        openLog = diagnosticsViewModel::openLog,
+                        closeLog = diagnosticsViewModel::closeLog,
+                        retryLog = diagnosticsViewModel::reloadLog,
+                        clear = diagnosticsViewModel::clear,
+                    ),
                     onBack = {
                         navForward = false
                         diagnosticsOpen = false
