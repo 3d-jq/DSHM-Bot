@@ -18,6 +18,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -270,6 +271,13 @@ fun DshmBotApp(
     // 点对话通知回到对应 Bot：通知栏把 botId 带进来，这里消费掉并打开聊天。
     // 注意 screenKey 的优先级里 web / 诊断 / 账号 / 新建 Bot 等页都排在对话前面，
     // 所以这些全屏页必须一并关掉，否则停在那些页面时点通知等于没点。
+    // 冷启动预热浏览器引擎：第一个 WebView 的初始化（Chromium 类加载 + 原生库）
+    // 在 UI 线程要几百毫秒。放到首帧之后做一次，用户点开「浏览器」分类时不再承担。
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        BotBrowserStore.of(appContext).warmUp()
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             MainActivity.consumePendingOpenBot()?.let { id ->

@@ -788,6 +788,24 @@ class BotBrowserStore internal constructor(private val context: Context) {
     fun session(botId: String): BotBrowserSession =
         sessions.getOrPut(botId) { BotBrowserSession(botId, context) }
 
+    /**
+     * 预热 WebView 引擎（只做一次）。
+     *
+     * 冷启动后**第一个** `WebView(context)` 要初始化 Chromium（类加载 + 原生库），
+     * 在 UI 线程上就是几百毫秒的卡顿；预热把它挪到启动后的一帧里，用户点开浏览器
+     * 分类时就不用再承担这次开销。只建视图、不加载页面，建完立刻销毁。
+     */
+    fun warmUp() {
+        if (warmed) return
+        warmed = true
+        runCatching {
+            WebView(context).destroy()
+        }
+    }
+
+    /** 预热只做一次；失败也不重试（引擎起不来时反复建更糟）。 */
+    private var warmed = false
+
     fun existing(botId: String): BotBrowserSession? = sessions[botId]
 
     /** 给 `browser-wait` 报的 `open`：每个 Bot 的当前页。 */

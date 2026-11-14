@@ -139,6 +139,7 @@
     <string name="browser_title">浏览器</string>
     <string name="browser_no_bot">没有打开任何 Bot</string>
     <string name="browser_empty_hint">在这里打开一个页面，Bot 就能和你一起看它。</string>
+    <string name="browser_preparing">正在准备浏览器…</string>
     <string name="browser_new_tab">新标签页</string>
     <string name="browser_tabs">标签页</string>
     <string name="browser_close_tab">关闭标签页</string>

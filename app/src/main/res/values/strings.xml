@@ -139,6 +139,7 @@
     <string name="browser_title">Browser</string>
     <string name="browser_no_bot">No Bot is open</string>
     <string name="browser_empty_hint">Open a page here and the Bot can read it with you.</string>
+    <string name="browser_preparing">Preparing the browser…</string>
     <string name="browser_new_tab">New tab</string>
     <string name="browser_tabs">Tabs</string>
     <string name="browser_close_tab">Close tab</string>

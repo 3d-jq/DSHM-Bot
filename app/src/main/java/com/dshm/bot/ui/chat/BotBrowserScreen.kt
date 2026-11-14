@@ -35,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -166,9 +167,19 @@ internal fun BotBrowserPanel(
     var showTabs by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // 首张标签的 WebView 创建很贵（冷启动时要初始化 Chromium 引擎）：
+    // 先让这一帧把「正在准备浏览器…」画出来，下一帧再建，避免点了分类之后界面僵住。
+    var preparingTab by remember(session) { mutableStateOf(false) }
     LaunchedEffect(session) {
-        session?.let { current ->
-            if (current.tabs.isEmpty()) current.newTab()
+        val current = session ?: return@LaunchedEffect
+        if (current.tabs.isNotEmpty()) return@LaunchedEffect
+        preparingTab = true
+        try {
+            withFrameNanos { }
+            current.newTab()
+        } finally {
+            // 建失败（WebView 不可用等）也要收掉占位，否则界面永远停在「正在准备」。
+            preparingTab = false
         }
     }
     LaunchedEffect(tab?.url) {
@@ -216,9 +227,16 @@ internal fun BotBrowserPanel(
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    BrowserHint(stringResource(R.string.browser_empty_hint))
-                    TextButton(onClick = { session.newTab() }) {
-                        Text(stringResource(R.string.browser_new_tab))
+                    // 正在建首张标签：只给一句占位，别把「新建标签」按钮露出来闪一下。
+                    BrowserHint(
+                        stringResource(
+                            if (preparingTab) R.string.browser_preparing else R.string.browser_empty_hint,
+                        ),
+                    )
+                    if (!preparingTab) {
+                        TextButton(onClick = { session.newTab() }) {
+                            Text(stringResource(R.string.browser_new_tab))
+                        }
                     }
                 }
             } else {
