@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
@@ -24,6 +23,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
 import com.dshm.bot.data.runtime.RuntimeState
 
 /**
@@ -110,19 +110,22 @@ fun OnboardingScreen(
 
             val installButton = state is RuntimeState.NotInstalled || state is RuntimeState.Failed
             if (installButton) {
-                Button(onClick = { onInstall(DEFAULT_RUNTIME_URL) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.engine_install_action))
-                }
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.engine_install_action),
+                    onClick = { onInstall(DEFAULT_RUNTIME_URL) },
+                )
             }
             if (state is RuntimeState.Installed || state is RuntimeState.Stopped) {
-                Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.engine_start_action))
-                }
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.engine_start_action),
+                    onClick = onStart,
+                )
             }
             if (state is RuntimeState.Running) {
-                Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.engine_continue))
-                }
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.engine_continue),
+                    onClick = onDone,
+                )
             }
         }
     }

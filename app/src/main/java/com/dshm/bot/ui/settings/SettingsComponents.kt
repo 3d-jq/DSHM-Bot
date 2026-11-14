@@ -581,6 +581,9 @@ fun SettingsSecondaryButton(
         modifier = modifier
             .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
             .heightIn(min = Dshm.spacing.iconButton),
+        // 圆角必须和主按钮同款：设计系统 `md`(14) = 普通按钮。
+        // 不写 shape 会吃 M3 默认（20），并排时一眼看出「两个按钮形状不一样」。
+        shape = RoundedCornerShape(Dshm.radius.md),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = Dshm.colors.textPrimary,
