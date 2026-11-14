@@ -30,6 +30,12 @@ class DsBotRepository(
         cache?.load()?.takeIf { it.isNotEmpty() }?.let { emit(applyKnownPreviews(it, previews.snapshot())) }
         var current = fetchWithRetry()
         emit(current)
+        // 首屏已经上屏了；预览（每 Bot 一次 chat 往返）留在这儿补，补到变化再推一版。
+        // 冷启动时这几跳都不该挡住列表 —— 用户看到的应该是「列表先出来，预览随后填上」。
+        runCatching { fillMissingPreviews(current) }.getOrNull()?.let { patched ->
+            current = patched
+            emit(patched)
+        }
         client.feed().collect { event ->
             when (event.event) {
                 // 模型的新输出 —— 记下来当这个 Bot 的预览，并**立刻**推给界面。
@@ -72,25 +78,39 @@ class DsBotRepository(
         return if (text.isEmpty()) null else botId to text
     }
 
+    /**
+     * 团队列表（只要 `state`）。
+     *
+     * **不等预览**：预览是每个 Bot 一次 `chat` 往返，冷启动时引擎刚起、每次 RPC 都慢，
+     * 串在首屏后面就是「列表转半天」。首屏只贴本地缓存里的预览，缺的由
+     * [fillMissingPreviews] 在首屏画出来之后再补（见 `observeBots`）。
+     */
     suspend fun fetch(): List<BotSummary> {
-        return coroutineScope {
-            // 预览要问 `chat`，那是另一跳往返：用上一次的 Bot 名单先把预览请求发出去，
-            // 和 `state` 并行跑，首屏就不用等「先 usage 再 chat」两跳。
-            val cachedIds = cache?.load().orEmpty()
-                .filter { !it.isGroup }
-                .map { it.id }
-            val stateDeferred = async { client.bot("state") }
-            val previewDeferred = if (cachedIds.isEmpty()) {
-                null
+        val state = client.bot("state")
+        cache?.save(state)
+        return withPreviews(DsBotParser.parseState(state))
+    }
+
+    /**
+     * 补齐缺失的预览（每个 Bot 一次 `chat` 往返），返回打上补丁的新列表；
+     * 没有任何变化时返回 null（调用方据此决定要不要再推一版）。
+     */
+    suspend fun fillMissingPreviews(bots: List<BotSummary>): List<BotSummary>? {
+        val missing = bots.filter { !it.isGroup }.map { it.id }.filter { previews.get(it).isNullOrBlank() }
+        if (missing.isEmpty()) return null
+        fillPreviews(missing)
+        var changed = false
+        val patched = bots.map { bot ->
+            val preview = previews.get(bot.id)
+            val next = if (!bot.isGroup && !preview.isNullOrBlank() && preview != bot.preview) {
+                changed = true
+                bot.copy(preview = preview)
             } else {
-                async { fillPreviews(cachedIds) }
+                bot
             }
-            val state = stateDeferred.await()
-            cache?.save(state)
-            val bots = DsBotParser.parseState(state)
-            previewDeferred?.await()
-            withPreviews(bots)
+            next
         }
+        return if (changed) patched else null
     }
 
     /**

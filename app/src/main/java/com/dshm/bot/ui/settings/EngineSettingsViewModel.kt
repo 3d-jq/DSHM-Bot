@@ -37,6 +37,8 @@ import com.dshm.bot.data.remote.pathKey
 import com.dshm.bot.data.remote.providerRoutePattern
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -210,14 +212,6 @@ class EngineSettingsViewModel(
         }
     }
 
-    private data class Loaded(
-        val description: SettingsDescription,
-        val plugins: PluginInventory?,
-        val bundles: List<PluginBundle>,
-        val permission: PermissionCatalog?,
-        val listedProviders: List<DshEngineSettingsRepository.ListedProvider>,
-    )
-
     fun setPluginEnabled(name: String, enabled: Boolean, onDone: (String?) -> Unit = {}) {
         viewModelScope.launch {
             val repo = repository
@@ -334,42 +328,72 @@ class EngineSettingsViewModel(
         }
     }
 
+    /**
+     * 读设置。
+     *
+     * **两段式**：`settings/describe` 一到就先把页面画出来（loading=false），
+     * 插件清单 / 权限预设 / 渠道列表这些次要数据**并行**补齐后再合并。
+     * 以前这五次 RPC 是串行的，冷启动时每次都要几百毫秒，串起来就是
+     * 「设置页转半天」——其中任何一项慢都不该挡住整页。
+     */
     fun refresh() {
         val repo = repository ?: return
         val generation = repositoryGeneration
         _ui.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
-            runCatching {
-                Loaded(
-                    description = repo.describe(),
-                    plugins = runCatching { repo.pluginInventory() }.getOrNull(),
-                    bundles = runCatching { repo.pluginBundles() }
-                        .onFailure { Log.w("DshSettings", "pluginManager/listBundles failed", it) }
-                        .getOrDefault(emptyList()),
-                    permission = runCatching { repo.permissionCatalog() }.getOrNull(),
-                    listedProviders = runCatching { repo.listProviders() }.getOrDefault(emptyList()),
-                )
-            }.onSuccess { loaded ->
-                // 引擎换端点后，旧端点的慢返回直接丢弃，不让它把新端点的状态盖回去。
-                if (generation != repositoryGeneration || repository !== repo) return@onSuccess
-                _ui.update {
-                    it.copy(
-                        loading = false,
-                        description = loaded.description,
-                        plugins = loaded.plugins,
-                        bundles = loaded.bundles,
-                        permission = loaded.permission,
-                        listedProviders = loaded.listedProviders,
-                        error = null,
-                    )
+            val description = runCatching { repo.describe() }
+                .onFailure { error ->
+                    if (generation != repositoryGeneration || repository !== repo) return@launch
+                    _ui.update { it.copy(loading = false, error = describeSettingsError(error)) }
                 }
-                loadCredentials(repo, loaded.description)
-            }.onFailure { error ->
-                if (generation != repositoryGeneration || repository !== repo) return@onFailure
-                _ui.update { it.copy(loading = false, error = describeSettingsError(error)) }
+                .getOrNull() ?: return@launch
+            // 引擎换端点后，旧端点的慢返回直接丢弃，不让它把新端点的状态盖回去。
+            if (generation != repositoryGeneration || repository !== repo) return@launch
+            _ui.update { it.copy(loading = false, description = description, error = null) }
+            loadCredentials(repo, description)
+
+            // 次要数据并行取：任何一项失败都只丢它自己，不影响已上屏的设置。
+            val extras = coroutineScope {
+                val plugins = async {
+                    runCatching { repo.pluginInventory() }.getOrNull()
+                }
+                val bundles = async {
+                    runCatching { repo.pluginBundles() }
+                        .onFailure { Log.w("DshSettings", "pluginManager/listBundles failed", it) }
+                        .getOrDefault(emptyList())
+                }
+                val permission = async {
+                    runCatching { repo.permissionCatalog() }.getOrNull()
+                }
+                val providers = async {
+                    runCatching { repo.listProviders() }.getOrDefault(emptyList())
+                }
+                Extras(
+                    plugins = plugins.await(),
+                    bundles = bundles.await(),
+                    permission = permission.await(),
+                    listedProviders = providers.await(),
+                )
+            }
+            if (generation != repositoryGeneration || repository !== repo) return@launch
+            _ui.update {
+                it.copy(
+                    plugins = extras.plugins,
+                    bundles = extras.bundles,
+                    permission = extras.permission,
+                    listedProviders = extras.listedProviders,
+                )
             }
         }
     }
+
+    /** [refresh] 第二段并行取回的次要数据。 */
+    private data class Extras(
+        val plugins: PluginInventory? = null,
+        val bundles: List<PluginBundle> = emptyList(),
+        val permission: PermissionCatalog? = null,
+        val listedProviders: List<DshEngineSettingsRepository.ListedProvider> = emptyList(),
+    )
 
     private fun loadCredentials(repo: EngineSettingsGateway, description: SettingsDescription) {
         val refs = credentialRefs(description)
