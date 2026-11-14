@@ -30,6 +30,7 @@ import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.remote.TimelineRequest
 import com.dshm.bot.data.remote.TimelineRow
+import com.dshm.bot.data.remote.TimelineFeedFrame
 import com.dshm.bot.data.remote.TimelineRowPayload
 import com.dshm.bot.data.remote.TimelineSnapshot
 import com.dshm.bot.data.remote.parseTimelineFeedFrame
@@ -344,9 +345,6 @@ class BotChatViewModel internal constructor(
                     .collect { (enabled, prefs) ->
                         notifyEnabled = enabled
                         notifyPrefs = prefs
-                        // timeline 模式随偏好走（Phase 1b parity 主开关 + 1a shadow 对比）；
-                        // 没配 prefs 的测试/进程里保持关闭，主管线零影响。
-                        applyTimelineMode()
                     }
             }
         }
@@ -356,17 +354,15 @@ class BotChatViewModel internal constructor(
     private val transport: ChatTransport? = dependencies.transport
     /** 语音输入：页面/输入框只依赖接口。 */
     val speechRepository: SpeechRepository? = dependencies.speech
-    private val historyCache = appContext?.let { ChatHistoryCache(it, botId) }
-    private val cachedHistory = historyCache?.load()
-    /** 自己发过的附件（`rpcId → 本地文件`）：历史重载后把缩略图贴回去。 */
+    /** 自己发过的附件（`rpcId → 本地文件`）：认领后把缩略图贴回去（附件字节缓存保留）。 */
     private val attachmentCache = appContext?.let { ChatAttachmentCache(it, botId) }
     private val sentAttachments = java.util.concurrent.ConcurrentHashMap<String, List<ChatAttachmentItem>>(
         attachmentCache?.load().orEmpty(),
     )
     private val _uiState = MutableStateFlow(
         BotChatUiState(
-            // 有磁盘缓存时首屏直接画缓存，不再每次热启动闪骨架。
-            loading = cachedHistory == null,
+            // 行管线首屏：等 timeline 快照到达（宿主投影是唯一来源）。
+            loading = true,
             engineOff = endpoint == null,
         ),
     )
@@ -389,7 +385,6 @@ class BotChatViewModel internal constructor(
     )
     private val streamFlush = StreamFlush()
 
-    private val seen = LinkedHashSet<String>()
     private var sessionId: String? = null
     /** 最近一次 `state.work.approvals` 里属于本对话的条目 —— 卡片的显示身份。 */
     private var botApprovals: List<BotApproval> = emptyList()
@@ -398,38 +393,16 @@ class BotChatViewModel internal constructor(
     /** 当前 mux 连接的 clientId；反问作答要带回它。 */
     private var hostClientId: String? = null
     private var mux: DshMux? = null
-    private var followStreamId: String? = null
-    private var followSessionId: String? = null
 
-    // region ---- timeline shadow（Phase 1a，debug 双跑；设计 docs/phase1-design.md §6）----
-    // 同时跑旧管线（本类现状）与新管线（timeline 快照 + feed timeline 增量），对比器输出
-    // 差异日志。**只读**：shadow 状态全在下面这组字段里，绝不写 _uiState / 主管线集合。
-    // Phase 1b 起行管线切主（parity）：parity 开着 shadow 自动关（两路合一，对比无意义）；
-    // parity 关掉回旧管线后它才重新有对比价值。
-    private var shadowEnabled = false
-    private var shadowJob: Job? = null
-    /** shadow 已点亮但快照还没拉：等旧管线首屏（load）完成后再拉，对比才有意义。 */
-    private var shadowPendingSnapshot = false
-    /** 已见到的最大服务端 seq（断线重放游标）。 */
-    private var shadowSeq = 0L
-    private var shadowSnapshot: TimelineSnapshot? = null
-    private var shadowSessionId: String? = null
-    /** 行缓冲（key → row）；上限对齐设计 §3 的 ~600 行环形，超出丢最旧。 */
-    private val shadowRows = LinkedHashMap<String, TimelineRow>()
-    private val shadowComparator = TimelineShadowComparator()
-    // endregion
-
-    // region ---- timeline 主管线（Phase 1b/1c：parity 开启时 entries 的唯一来源）----
-    // entries = timeline 快照 + feed timeline 增量 + 本地乐观 echo，经 TimelineRowMapping
-    // 映射成 ChatEntry（TimelineRowMapping.kt）。旧管线的 load/feed message/follow 全部
-    // 保留为回滚路径，parity 关闭（kill-switch）或能力缺席时接管。
-    private var parityActive = false
+    // region ---- timeline 行管线（唯一管线：快照 + feed 增量 + 本地乐观 echo）----
+    // entries 经 TimelineRowMapping 从行缓冲映射而来（TimelineRowMapping.kt）。
+    // 旧管线五路拼装（load/feed message/follow/事件行拼装/历史缓存）已于 2026-11-14 删除。
     private var parityTimelineJob: Job? = null
     /** 已见到的最大服务端 seq（feed 断线重连的 since 重放游标）。 */
     private var paritySeq = 0L
     private var paritySnapshot: TimelineSnapshot? = null
     private var paritySessionId: String? = null
-    /** 服务端投影的行缓冲（key → row）；earlier 分页的行按 seq 排序自然插前。 */
+    /** 服务端投影的行缓冲（key → row）；群聊保持宿主位置序，单聊按 seq 归位。 */
     private val parityRows = LinkedHashMap<String, TimelineRow>()
     /** earlier 分页游标（timeline 响应的 cursor），null = 没有更早的了。 */
     private var parityCursor: JSONObject? = null
@@ -445,34 +418,14 @@ class BotChatViewModel internal constructor(
     private val pendingEchoAttachments = HashMap<String, List<ChatAttachmentItem>>()
     /** 群聊帧的上一帧 running（true→false 边沿触发快照重拉收群产物卡）。 */
     private var parityRoundRunning = false
+    /** 诊断日志限频：同一会话两次「行应用」日志的最小间隔。 */
+    private var lastParityLogAt = 0L
     // endregion
 
-    private val toolEvents = LinkedHashMap<Long, ChatEntry>()
-    /**
-     * 会话事件记录（seq → event）。
-     *
-     * 产物卡是**从它推导**出来的（对齐 dsh-Go 的 `deriveArtifacts`）：
-     * 交付声明 / 新建文件 / 回复里的链接 / 输出目录，四个来源都在事件里，
-     * 边流边攒容易丢，重算不会。
-     */
-    private val sessionEvents = LinkedHashMap<Long, JSONObject>()
-    private val eventsCache = appContext?.let { ChatEventsCache(it, botId) }
-    private var eventsSaveJob: Job? = null
-    /**
-     * DSH 的会话运行状态（mux 的 `api-session/status`）：会话 id → 这一轮还在跑吗。
-     *
-     * 这是「回合结束」的权威信号：DS Bot 网页端的活动行同样读它
-     * （`useSessionStatus(map.get(sessionId)?.running)`）。只看 DS Bot 的 `state.work`
-     * 会在它没清干净时把停止键和活动行一直挂在界面上。
-     */
     private val sessionRunningById = HashMap<String, Boolean>()
-    /** 群聊这一轮：有活跃 round 吗、当前谁在发言（`room-chat` 的 `running` / `speaking`）。 */
+    /** 群聊这一轮：有活跃 round 吗、当前谁在发言（帧 `running`/`speaking` + room-progress 兜底）。 */
     private var groupRoundRunning = false
     private var groupSpeakingId: String? = null
-    /** 这一轮是什么时候开始的：群产物只收这之后声明的（`room-artifacts`）。 */
-    private var groupRoundStartedAt = 0L
-    /** 群里交付过的文件（成员会话里的 `present` + 本轮被改动的文件）。 */
-    private val roomArtifacts = mutableListOf<ChatArtifact>()
     /** `room-progress` 连续读失败的次数（读不到时别一直抱着上一次的「在跑」）。 */
     private var groupProgressMisses = 0
     /**
@@ -485,125 +438,43 @@ class BotChatViewModel internal constructor(
     private var optimisticRun = false
     /** 这一轮是不是用户按了停止：结束通知要算「被停下」，不是「回复好了」。 */
     private var userStoppedRun = false
-    /** 会话事件里最近一次 `turn/start` / `turn/end` 的 seq：最后的边界是哪一边。 */
-    private var lastTurnStartSeq = 0L
-    private var lastTurnEndSeq = 0L
-    /**
-     * 见过的最大会话 seq。
-     *
-     * 乐观用户气泡的占位 seq 取 `max(maxSeenSeq, maxLocalSeq) + 1`：比「已加载的
-     * 历史」大一档，于是本轮的新事件（seq 更大）会被插到它**后面**，更早的事件
-     * 插到它前面。**不能**再往上加（曾经写成 `maxSeenSeq + ++optimisticSeq`）：
-     * 占位 seq 一旦高过本轮的真实 seq，`mergeTimeline` 就会把本轮事件插到用户
-     * 气泡上面 —— 表现成「流式期间用户气泡错位」。
-     *
-     * [maxLocalSeq] 防连发碰撞：HTTP 一回来 `sending` 就放行下一条，此时第一条的
-     * 回显可能还没到（maxSeenSeq 没动），两条会拿到同一个占位 seq —— 用本地已占位
-     * 的最大值错开，谁也不撞谁；回显认领真 seq 时同步抬升它。
-     *
-     * follow 帧已通过 [followDeliveries] 切回主线程处理，这里本来只在主线程读写；
-     * volatile 是防回归的兜底（万一哪条新路径又从别的线程碰到它）。
-     */
-    @Volatile
-    private var maxSeenSeq = 0L
-    @Volatile
-    private var maxLocalSeq = 0L
-    private val pendingTools = LinkedHashMap<String, PendingTool>()
 
-    private data class PendingTool(
-        val name: String,
-        val args: JSONObject,
-        val callId: String,
-        val time: Long,
-        /** `tool/call` 事件的 seq：present 的「正在交付」行挂在这里，结果一到就撤。 */
-        val callSeq: Long = -1L,
-    )
-    /**
-     * follow 流的一次投递：一帧，或流结束。
-     *
-     * 帧来自 WebSocket 读线程（`DshWebSocketMuxLink` 的 onMessage），而
-     * [toolEvents] / [sessionEvents] / [pendingTools] 这些会话事件集合都在主线程
-     * 被 `mergeSessionEvents` / `load` / `adoptLocalSeq` 读写 —— 直接在回调里动它们
-     * 就是跨线程竞态（ConcurrentModificationException / LinkedHashMap 撕裂）。
-     * 所以 WS 线程只把投递入队，由主线程的单一消费者按到达顺序处理。
-     */
-    private sealed interface FollowDelivery {
-        data class Frame(val frame: JSONObject) : FollowDelivery
-        data class StreamEnded(val error: String?) : FollowDelivery
-    }
-
-    private val followDeliveries = Channel<FollowDelivery>(Channel.UNLIMITED)
-
-    /** follow 断流重订：退避任务与当前退避档位（帧一到达就归零）。 */
-    private var followRetryJob: Job? = null
-    private var followRetryAttempt = 0
-
-    /** 更早历史的游标；null 表示没有更早的了。 */
-    private var cursor: ChatCursor? = null
     private var feedJob: Job? = null
-    private var reloadJob: Job? = null
     private var statusJob: Job? = null
     private var runningWatchJob: Job? = null
-    /** 去抖后的「重拉一次会话」（中转结果 / 通知触发）。 */
-    private var chatRefreshJob: Job? = null
     private var memoryNoticeJob: Job? = null
     private var streamingAttempt: String? = null
     private var streamBuffer = ""
-    private var loadedOnce = false
     /** 这一轮浏览器操作结束后贴的缩略图卡（只活在本次对话里）。 */
     private val browserShots = mutableListOf<ChatEntry>()
     private val browserShotStore = appContext?.let { BrowserShotStore(it, botId) }
     private var browserShotSessionId: String? = null
-    /** 本屏发出的用户气泡；服务端回显用 `requestId` 认出同一条，不画第二条。 */
-    private val localUserEntries = LinkedHashMap<String, ChatEntry>()
 
     /**
-     * 发出了但还没等到服务端回显的 requestId。
+     * 发出了但还没等到行流认领的 requestId。
      *
-     * 回显认领（[adoptLocalSeq]）或历史重载认出正主（[load]）时摘掉；一轮结束时
-     * 还有剩，说明回显漏投了 —— 重拉一次历史把正主换上来，别让占位气泡挂着
-     * 错误的占位 seq 过夜。
+     * user 行（带 requestId）认领时摘掉；一轮结束时还有剩，说明行流漏投了 ——
+     * 重放一次快照把正主换上来。
      */
     private val unclaimedRequests = LinkedHashSet<String>()
 
     init {
-        cachedHistory?.let { restoreHistory(it) }
-        // 上次的事件记录先灌进来：首帧就能把产物卡推导出来，不用等 follow 快照。
-        eventsCache?.load()?.forEach { event ->
-            val seq = event.optLong("seq", -1L)
-            if (seq >= 0L) sessionEvents[seq] = event
-        }
-        // 用落盘的事件先推导一次：产物卡和第一条消息同一帧出现，不用等 follow 快照。
-        if (sessionEvents.isNotEmpty()) mergeSessionEvents()
         if (client != null) {
-            // follow 帧的单一消费者：会话事件的处理按到达顺序串行在主线程跑。
-            // UNLIMITED 缓冲让 WS 线程 trySend 永不失败、不阻塞读线程。
-            viewModelScope.launch {
-                for (delivery in followDeliveries) {
-                    when (delivery) {
-                        is FollowDelivery.Frame -> handleFollowFrame(delivery.frame)
-                        is FollowDelivery.StreamEnded -> handleFollowStreamEnd(delivery.error)
-                    }
-                }
-            }
-            // timeline 模式开关先算：parity 决定 load 是否短路（主路径不发旧历史请求）。
-            applyTimelineMode()
-            viewModelScope.launch { DsBotCapabilities.hello.collect { applyTimelineMode() } }
-            // 先读历史（parity 下短路）；shadow 的首拉也挂在它完成之后（旧侧先就位）。
-            load(initial = true)
+            // 宿主投影是唯一管线：hello 的 StateFlow 会先发一次当前值（通常 null），
+            // 这一发就是首屏快照；之后 hello 变化（换会话/引擎重启）时重拉一次。
+            viewModelScope.launch { DsBotCapabilities.hello.collect { startTimelinePipeline() } }
             viewModelScope.launch { repairModelIfNeeded() }
             refreshBotStatus()
             feedJob = viewModelScope.launch {
                 client.feed().collect { event -> handleFeed(event) }
             }
-            // 主机事件流（`$events`）只用来显示 Bot 反问用户；审批已归 DS Bot。
-            // 注入的 mux（JVM 单测）优先；生产仍按端点走 DshMuxHub。
+            // 主机事件流（`$events`）只用来显示审批/提问/密钥卡（宿主级交互状态，
+            // 不走会话行流，设计 §5）。注入的 mux（JVM 单测）优先；生产走 DshMuxHub。
             val injectedMux = dependencies.mux
             if (injectedMux != null) {
                 viewModelScope.launch {
                     injectedMux.start()
                     mux = injectedMux
-                    sessionId?.let { ensureFollow(it) }
                     injectedMux.hostEvents.collect { event -> handleHostEvent(event) }
                 }
             } else {
@@ -611,305 +482,10 @@ class BotChatViewModel internal constructor(
                     viewModelScope.launch {
                         val hub = DshMuxHub.start(runtime)
                         mux = hub
-                        sessionId?.let { ensureFollow(it) }
                         hub.hostEvents.collect { event -> handleHostEvent(event) }
                     }
                 }
             }
-        }
-    }
-
-    /** 热启动：先把上次的历史放回时间线，再向引擎静默对齐。 */
-    private fun restoreHistory(snapshot: HistoryMemory.Snapshot) {
-        sessionId = snapshot.sessionId
-        val scope = sessionId ?: botId
-        val entries = buildList {
-            for (index in 0 until snapshot.items.length()) {
-                val item = snapshot.items.optJSONObject(index) ?: continue
-                parseItem(item, scope, "cache:$index")?.let(::add)
-            }
-        }
-        seen.clear()
-        entries.forEach { seen.add(it.id) }
-        _uiState.update { state ->
-            state.copy(entries = entries, loading = false, engineOff = endpoint == null)
-        }
-    }
-
-    /** 单聊订阅会话事件，把 DS Bot 网页端画在消息流里的 tool/call 事件补回来。 */
-    private fun ensureFollow(session: String) {
-        if (isGroup) return
-        // parity 主路径：tool/event 行由宿主投影承担，不再订阅 session/follow
-        // （回滚路径：kill-switch 关掉 parity 后这里恢复订阅）。
-        if (parityActive) return
-        if (followSessionId == session && followStreamId != null) return
-        followStreamId?.let { mux?.closeStream(it) }
-        followSessionId = session
-        toolEvents.clear()
-        pendingTools.clear()
-        lastTurnStartSeq = 0L
-        lastTurnEndSeq = 0L
-        val args = JSONObject()
-            .put(
-                // 网关的 `session/follow` 只认 `{request: {...}}`（dsh-Go 的
-                // `SessionEventStream.follow` 也是这么包的）；平铺会把整条流打回
-                // `gateway/arguments-invalid`，工具事件和产物卡就全都收不到。
-                "request",
-                JSONObject()
-                    .put("address", JSONObject().put("kind", "session").put("sessionId", session))
-                    // 快照窗口要够长：交付声明（`present`）只活在会话事件里，DS Bot 的 `chat`
-                    // 历史不带它。窗口太短会让几轮之前的产物卡查不到（dsh-Go 的对话窗口也是 200 起）。
-                    .put("maxMessages", 200),
-            )
-        followStreamId = mux?.openStream(
-            endpoint = "session/follow",
-            args = args,
-            // WS 线程只入队：真正的帧处理在主线程的消费者里（见 init 的 pump）。
-            onFrame = { frame -> followDeliveries.trySend(FollowDelivery.Frame(frame)) },
-            onEnd = { error -> followDeliveries.trySend(FollowDelivery.StreamEnded(error)) },
-        )
-    }
-
-    /**
-     * follow 流结束（主线程）：清掉流 id 并安排退避重订。
-     *
-     * 以前这里只清 streamId，没人重订 —— WS 抖一次之后 `turn/end`、
-     * `deliverables/presented` 就再也收不到，产物卡要等重进对话才补回来。
-     */
-    private fun handleFollowStreamEnd(error: String?) {
-        DshMuxLog.log("session/follow 结束：${error ?: "closed"}")
-        followStreamId = null
-        scheduleFollowRetry(error)
-    }
-
-    /**
-     * follow 断流后按指数退避重开（1s 起步、封顶 32s）。
-     *
-     * 快照/事件帧一到达就把退避归零；会话已归档、流参数被网关拒了这类永久失败
-     * 不重试（重试也不会好），等下一次 `load()` 换会话时自然重开。
-     */
-    private fun scheduleFollowRetry(error: String?) {
-        val session = followSessionId ?: return
-        if (error != null && FOLLOW_STREAM_GIVE_UP.containsMatchIn(error)) {
-            DshMuxLog.log("session/follow 不再重订：$error")
-            return
-        }
-        if (followRetryJob?.isActive == true) return
-        val attempt = followRetryAttempt.coerceAtMost(FOLLOW_RETRY_MAX_SHIFT)
-        followRetryAttempt += 1
-        followRetryJob = viewModelScope.launch {
-            delay(FOLLOW_RETRY_BASE_MS * (1L shl attempt))
-            // 会话已切换（load 订了新的）或者已经有人重开过：这次退避作废。
-            if (followSessionId != session || followStreamId != null) return@launch
-            ensureFollow(session)
-        }
-    }
-
-    private fun handleFollowFrame(frame: JSONObject) {
-        // 流活着：退避归零（重连成功的第一帧就把档位清掉）。
-        followRetryAttempt = 0
-        when (frame.optString("type")) {
-            "snapshot" -> {
-                toolEvents.clear()
-                pendingTools.clear()
-                lastTurnStartSeq = 0L
-                lastTurnEndSeq = 0L
-                frame.optJSONArray("records")?.let { records ->
-                    for (index in 0 until records.length()) {
-                        val record = records.optJSONObject(index) ?: continue
-                        if (record.optString("type") == "event") {
-                            handleSessionEvent(record.optJSONObject("event"))
-                        }
-                    }
-                }
-                // 快照窗口边缘的 present 调用（结果落在窗口外）别把「正在交付」挂一辈子；
-                // 结果稍后从实时流到达时会再画「已交付」行。
-                pendingTools.values.filter { it.name == "present" && it.callSeq >= 0 }.forEach {
-                    toolEvents.remove(it.callSeq)
-                }
-                mergeSessionEvents()
-            }
-            "event" -> {
-                handleSessionEvent(frame.optJSONObject("event"))
-                mergeSessionEvents()
-            }
-        }
-    }
-
-    private fun handleSessionEvent(event: JSONObject?) {
-        event ?: return
-        val type = event.optString("type")
-        val data = event.optJSONObject("data") ?: return
-        val seq = event.optLong("seq", -1L).takeIf { it >= 0L } ?: return
-        if (seq > maxSeenSeq) maxSeenSeq = seq
-        recordSessionEvent(seq, event)
-        val time = event.optLong("time", 0L)
-        when (type) {
-            "tool/call" -> {
-                val name = data.optString("name")
-                val callId = data.optString("callId").ifEmpty {
-                    data.optJSONObject("message")?.optString("toolCallId").orEmpty()
-                }
-                if (callId.isEmpty()) return
-                val turn = data.optInt("turn", -1)
-                if (name !in FOLLOW_TOOLS) return
-                pendingTools[callId] = PendingTool(name, toolArguments(data), callId, time, seq)
-                // 交付中的行先挂出来（官方 Delivering）：结果一到就被「已交付」行换下。
-                if (name == "present") {
-                    val count = toolArguments(data).optJSONArray("files")?.length() ?: 0
-                    toolEvents[seq] = ChatEntry(
-                        id = "tool:$seq",
-                        kind = ChatEntryKind.EVENT,
-                        text = if (count > 0) "正在交付 $count 个文件…" else "正在交付文件…",
-                        seq = seq,
-                        timeMs = time,
-                        tool = name,
-                    )
-                }
-            }
-            "tool/result" -> {
-                val message = data.optJSONObject("message")
-                val callId = message?.optString("toolCallId").orEmpty().ifEmpty {
-                    data.optString("toolCallId").ifEmpty { data.optString("callId") }
-                }
-                val isError = data.optBoolean("isError") ||
-                    message?.optBoolean("isError") == true ||
-                    data.optBoolean("error")
-                val pending = pendingTools.remove(callId) ?: return
-                // present 的「正在交付」行挂在 call 的 seq 上：结果行一到就把它撤掉，
-                // 不然交付完对话里还留着一根「正在交付」。
-                if (pending.callSeq != seq) toolEvents.remove(pending.callSeq)
-                val resultText = textContent(message?.opt("content"))
-                val line = toolEventLine(pending.name, pending.args, resultText, isError, botName) ?: return
-                toolEvents[seq] = ChatEntry(
-                    id = "tool:$seq",
-                    kind = ChatEntryKind.EVENT,
-                    text = line.label,
-                    seq = seq,
-                    timeMs = time,
-                    target = line.target,
-                    tool = pending.name,
-                )
-                // 中转类工具：结果里带着「谁没能回答 / 谁被中途打断」这些行，
-                // 它们只在 `chat` / `room-chat` 的 items 里，得重拉一次才会出现在界面上。
-                if (pending.name in RELAY_TOOLS) refreshChatSoon()
-            }
-            // 交付声明（`deliverables/presented`）不用在这里攒：产物卡统一由
-            // `artifactEntries()` 从会话事件记录推导（对齐 dsh-Go）。
-            DELIVERABLES_PRESENTED_EVENT -> Unit
-            // 轮的边界：浏览器缩略图之类要贴着这一轮放。
-            "turn/start" -> lastTurnStartSeq = maxOf(lastTurnStartSeq, seq)
-            "turn/end" -> {
-                lastTurnEndSeq = maxOf(lastTurnEndSeq, seq)
-                // 模型请求最终失败（重试耗尽或不可重试的错误码）：引擎只在这里
-                // 记 `reason.kind == "error"`，之前不渲染就是整条静默 —— 用户看到的
-                // 是「转完圈什么都没有」。画成一条红色事件行（同群聊的「没能回答」）。
-                val failure = turnEndError(data.optJSONObject("reason")) ?: return
-                val (code, message) = failure
-                toolEvents[seq] = ChatEntry(
-                    id = "turnfail:$seq",
-                    kind = ChatEntryKind.EVENT,
-                    // code 认识就翻成人话；不认识用引擎的原文。
-                    text = message.orEmpty(),
-                    author = botName,
-                    botId = botId,
-                    eventKind = "failed",
-                    eventCode = code,
-                    seq = seq,
-                    timeMs = time,
-                )
-            }
-
-            // dsh-Go 把 `llm/retry` 渲染成一条 `kind: 'retry'` 的普通事件行：
-            // 「模型请求失败，正在重试 (n/max)：原因」。这里对齐成同一行。
-            "llm/retry" -> {
-                val retry = data.optInt("retry", 0).coerceAtLeast(1)
-                val max = data.optInt("maxRetries", 0).takeIf { it > 0 }
-                val failure = data.optJSONObject("failure")
-                val reason = failure?.optString("message")?.takeIf { it.isNotBlank() }
-                    ?: failure?.optString("code")?.takeIf { it.isNotBlank() }
-                val retrySuffix = max?.let { "（$retry/$it）" } ?: "（$retry）"
-                val reasonSuffix = reason?.let { it -> "：$it" } ?: ""
-                toolEvents[seq] = ChatEntry(
-                    id = "retry:$seq",
-                    kind = ChatEntryKind.EVENT,
-                    text = "模型请求失败，正在重试$retrySuffix$reasonSuffix",
-                    author = botName,
-                    botId = botId,
-                    eventKind = "retry",
-                    eventCode = failure?.optString("code")?.takeIf { it.isNotBlank() },
-                    seq = seq,
-                    timeMs = time,
-                )
-            }
-        }
-    }
-
-    private fun toolArguments(data: JSONObject): JSONObject {
-        data.optJSONObject("arguments")?.let { return it }
-        val raw = data.optString("arguments")
-        return runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
-    }
-
-    private fun textContent(value: Any?): String {
-        val array = value as? JSONArray ?: return (value as? String).orEmpty()
-        return buildString {
-            for (index in 0 until array.length()) {
-                val block = array.optJSONObject(index) ?: continue
-                if (block.optString("type") == "text") append(block.optString("text"))
-            }
-        }.trim()
-    }
-
-    /**
-     * 记一条会话事件（产物推导的输入），并按上限裁剪后落盘。
-     *
-     * 落盘是去抖的：一轮里几百条事件，不能每条都写一次 SharedPreferences。
-     */
-    private fun recordSessionEvent(seq: Long, event: JSONObject) {
-        sessionEvents[seq] = event
-        while (sessionEvents.size > MAX_SESSION_EVENTS) {
-            sessionEvents.remove(sessionEvents.keys.first())
-        }
-        val cache = eventsCache ?: return
-        eventsSaveJob?.cancel()
-        eventsSaveJob = viewModelScope.launch {
-            delay(800)
-            // 快照在主线程取（sessionEvents 只在主线程动），序列化 + 写盘挪到 IO ——
-            // 上限 1MB 的事件表整表 toString 不该占着主线程。
-            val snapshot = sessionEvents.values.toList()
-            withContext(Dispatchers.IO) { cache.save(snapshot) }
-        }
-    }
-
-    /**
-     * 每一轮完成的产物卡。
-     *
-     * 对齐 dsh-Go：**从会话事件记录重新推导**（交付声明 / 本轮新建的文件 /
-     * 回复里链接的文件），卡贴在这一轮 `turn/end` 处、出卡后不再移动。
-     * 以前是边流边攒，事件一旦不在 follow 快照窗口里就永久丢失
-     * （比如 `present` 发生在几轮之前，或者当时对话页没开着）。
-     */
-    private fun artifactEntries(): List<ChatEntry> {
-        if (sessionEvents.isEmpty()) return emptyList()
-        val events = sessionEvents.values.toList()
-        val turns = turnTraces(events)
-        val derived = deriveArtifacts(
-            events = events,
-            turns = turns,
-            cwd = _uiState.value.botWorkDir,
-        )
-        return derived.map { group ->
-            ChatEntry(
-                id = "present:${group.turn}",
-                kind = ChatEntryKind.ARTIFACTS,
-                text = "",
-                seq = group.seq,
-                artifacts = group.files.map { file ->
-                    ChatArtifact(path = file.path, description = file.description)
-                },
-                artifactsDelivered = group.delivered,
-            )
         }
     }
 
@@ -919,23 +495,17 @@ class BotChatViewModel internal constructor(
      * 只在内存里留最近 [MAX_BROWSER_SHOTS] 张：它不是历史内容，重新进对话就不该再出现。
      */
     fun addBrowserShot(shot: ChatBrowserShot) {
-        val seq = lastTurnEndSeq.takeIf { it > 0L } ?: lastTurnStartSeq.takeIf { it > 0L }
         browserShots += ChatEntry(
             id = "shot:${shot.timeMs}:${shot.url.hashCode()}",
             kind = ChatEntryKind.BROWSER_SHOT,
             text = "",
             timeMs = shot.timeMs,
-            seq = seq,
             shot = shot,
         )
-        browserShotStore?.add(browserShotSessionId ?: sessionId ?: botId, shot, seq)
+        browserShotStore?.add(browserShotSessionId ?: sessionId ?: botId, shot, null)
         while (browserShots.size > MAX_BROWSER_SHOTS) browserShots.removeAt(0)
-        // parity 主路径：缩略图拼在行管线 entries 的尾部（1c 换贴 turntail 行 seq）。
-        if (parityActive) {
-            rebuildParityEntries()
-            return
-        }
-        mergeSessionEvents()
+        // 缩略图拼在行管线 entries 的尾部（1c 换贴 turntail 行 seq）。
+        rebuildParityEntries()
     }
 
     private fun loadBrowserShots(currentSession: String) {
@@ -951,79 +521,6 @@ class BotChatViewModel internal constructor(
                 seq = stored.seq,
                 shot = stored.shot,
             )
-        }
-        browserShots.sortBy { it.seq ?: Long.MAX_VALUE }
-    }
-
-    /**
-     * 服务端回显带来的**真实 seq** 认领回本地乐观气泡。
-     *
-     * 本地气泡只有占位 seq（`max(maxSeenSeq, maxLocalSeq) + 1`）；回显一到就改写成
-     * 真 seq —— **向下也认**（排队/steer 的消息落日志晚，占位通常偏低，但连发窗口里
-     * 也可能偏高，拒绝向下会让错位永远停在那）。
-     *
-     * 认领后按 seq 做一次稳定重排：连发、steer 与排队混发时「发送序 ≠ 日志序」，
-     * 之前以占位 seq 定位的气泡之间/与先到的 feed 消息之间会有相对裂缝，`mergeTimeline`
-     * 只插事件行、从不动 base —— 这里是唯一的收口时机。重排规则见 [resortBySeq]。
-     */
-    private fun adoptLocalSeq(id: String, seq: Long?) {
-        if (seq == null) return
-        val key = localUserEntries.entries.firstOrNull { it.value.id == id }?.key ?: return
-        val current = localUserEntries.getValue(key)
-        unclaimedRequests.remove(key)
-        if (seq == current.seq) return
-        val updated = current.copy(seq = seq)
-        localUserEntries[key] = updated
-        if (seq > maxLocalSeq) maxLocalSeq = seq
-        _uiState.update { state ->
-            state.copy(
-                entries = resortBySeq(
-                    state.entries.map { entry -> if (entry.id == id) updated else entry },
-                ),
-            )
-        }
-        mergeSessionEvents()
-    }
-
-    /**
-     * 按 seq 的稳定重排：**无 seq 的条目原地不动**（`mergeTimeline`「不动无 seq 段」的
-     * 约束——分隔线、旧问答这些历史里没有 seq 的行不参与），有 seq 的按 seq 升序归位，
-     * 同 seq 保持原相对顺序（稳定排序）。
-     */
-    private fun resortBySeq(entries: List<ChatEntry>): List<ChatEntry> {
-        val ordered = entries.withIndex().filter { it.value.seq != null }.sortedBy { it.value.seq }
-        if (ordered.size < 2) return entries
-        var cursor = 0
-        return entries.map { entry ->
-            if (entry.seq != null) ordered[cursor++].value else entry
-        }
-    }
-
-    private fun mergeSessionEvents() {
-        // parity 主路径：tool/event/产物行由宿主投影的行流承担，旧拼装不跑（回滚路径）。
-        if (parityActive) return
-        if (toolEvents.isEmpty() && browserShots.isEmpty() && sessionEvents.isEmpty()) return
-        _uiState.update { state ->
-            // 事件行都由下面的 incoming 重新灌入，base 里要把旧的同 id 行剥掉，
-            // 否则每次合并都会再插一份（`retry:` / `turnfail:` 行会越叠越多）。
-            val base = state.entries.filterNot {
-                it.id.startsWith("tool:") ||
-                    it.id.startsWith("present:") ||
-                    it.id.startsWith("shot:") ||
-                    it.id.startsWith("retry:") ||
-                    it.id.startsWith("turnfail:") ||
-                    it.id.startsWith("diag:")
-            }
-            // follow 的快照覆盖整个会话；只把「已经加载出来的这段历史」里的事件并进去，
-            // 否则列表顶部会堆一堆比最早一条消息还老的事件行。
-            val oldest = base.mapNotNull { it.seq }.minOrNull()
-            fun loaded(entry: ChatEntry) = oldest == null || (entry.seq ?: Long.MIN_VALUE) >= oldest
-            // 不能整表排序：本地刚发出的用户气泡还没有 seq（服务端回显会被 `seen` 去重，
-            // 要等下一次重载才有真 seq），按 seq 排序会把它甩到列表最后 ——
-            // 倒序列表里就是最下面，表现成「大模型的回复跑到了问题上面」。
-            // 所以只把事件插进「有 seq 的那段历史」的正确位置，插不进去就放末尾。
-            val incoming = (toolEvents.values + artifactEntries() + browserShots).filter(::loaded)
-            state.copy(entries = mergeTimeline(base, incoming))
         }
     }
 
@@ -1219,7 +716,7 @@ class BotChatViewModel internal constructor(
                 client.feed().collect { event -> handleFeed(event) }
             }
         }
-        load(initial = false)
+        refreshTimelineSnapshot(reset = false)
     }
 
     /** 发一条消息：用户气泡立刻上屏，服务端回显按 requestId 跳过。 */
@@ -1242,53 +739,22 @@ class BotChatViewModel internal constructor(
         val requestId = UUID.randomUUID().toString()
         optimisticRun = true
         userStoppedRun = false
-        // 占位 seq：比「已见过的最大 seq / 本地已占位的最大 seq」大一档。
-        // 连发时（HTTP 一回、回显未到就发下一条）maxSeenSeq 还停在原值，两条会拿到
-        // 同一个占位 —— 用 maxLocalSeq 错开；回显认领真 seq 时它会跟着抬升。
-        val placeholderSeq = maxOf(maxSeenSeq, maxLocalSeq) + 1
-        maxLocalSeq = placeholderSeq
         unclaimedRequests.add(requestId)
-        val bubble = ChatEntry(
-            id = "user:$requestId",
-            kind = ChatEntryKind.USER,
-            text = text,
-            attachments = attachments.map { it.name },
-            // 本轮事件 seq 更大 → 插在气泡后面；更早的事件 → 插在气泡前面。
-            // 服务端回显到达后用 `adoptLocalSeq()` 认领真实 seq，进一步对齐。
-            seq = placeholderSeq,
-            attachmentItems = attachments.mapNotNull { draft ->
-                draft.cachePath?.let { path ->
-                    ChatAttachmentItem(draft.name, path, draft.isImage)
-                }
-            },
-        )
-        localUserEntries[requestId] = bubble
-        // 记下来：历史重载后引擎只给「N 张图片」，靠这张表才能把缩略图贴回去。
-        if (bubble.attachmentItems.isNotEmpty()) {
-            sentAttachments[requestId] = bubble.attachmentItems
+        // 乐观 echo 行：数据键 `p:<requestId>`（设计 §4），本地附件字节预览留在
+        // echo 行上（官方「本地字节直到回显」）。认领由 user 行的 requestId 完成
+        // （渲染键保留 p: 前缀，元素原地过渡）。
+        val attachmentItems = attachments.mapNotNull { draft ->
+            draft.cachePath?.let { path -> ChatAttachmentItem(draft.name, path, draft.isImage) }
+        }
+        if (attachmentItems.isNotEmpty()) {
+            // 引擎历史只给「N 张附件」，靠这张表才能把缩略图贴回去（认领后仍生效）。
+            sentAttachments[requestId] = attachmentItems
             attachmentCache?.save(sentAttachments)
         }
-        seen.add(bubble.id)
-        if (parityActive) {
-            // parity 主路径：乐观行数据键 `p:<requestId>`（设计 §4），本地附件字节
-            // 预览留在 echo 行上（官方「本地字节直到回显」）。认领由 user 行的
-            // requestId 完成（渲染键保留 p: 前缀，元素原地过渡）。
-            pendingEchoRows[echoKeyOf(requestId)] = echoRowOf(requestId, text, bubble.attachmentItems, attachments)
-            pendingEchoAttachments[requestId] = bubble.attachmentItems
-            _uiState.update { state ->
-                state.copy(sending = true, error = null)
-            }
-            rebuildParityEntries()
-        } else {
-            // 点击那一帧就画出来，不等 HTTP / SSE 回显。
-            _uiState.update { state ->
-                state.copy(
-                    sending = true,
-                    error = null,
-                    entries = state.entries + bubble,
-                )
-            }
-        }
+        pendingEchoRows[echoKeyOf(requestId)] = echoRowOf(requestId, text, attachmentItems, attachments)
+        pendingEchoAttachments[requestId] = attachmentItems
+        _uiState.update { state -> state.copy(sending = true, error = null) }
+        rebuildParityEntries()
         viewModelScope.launch {
             runCatching {
                 if (attachments.isEmpty()) {
@@ -1324,20 +790,15 @@ class BotChatViewModel internal constructor(
                 }
                 watchForRunEnd()
             }.onFailure { failure ->
-                localUserEntries.remove(requestId)
                 unclaimedRequests.remove(requestId)
-                seen.remove(bubble.id)
-                if (parityActive) {
-                    pendingEchoRows.remove(echoKeyOf(requestId))
-                    pendingEchoAttachments.remove(requestId)
-                    rebuildParityEntries()
-                }
+                pendingEchoRows.remove(echoKeyOf(requestId))
+                pendingEchoAttachments.remove(requestId)
+                rebuildParityEntries()
                 _uiState.update { state ->
                     state.copy(
                         sending = false,
                         waitingForReply = state.waitingForReply,
                         running = state.running,
-                        entries = state.entries.filterNot { it.id == bubble.id },
                         error = describeChatError(failure),
                     )
                 }
@@ -1345,198 +806,66 @@ class BotChatViewModel internal constructor(
         }
     }
 
-    private fun load(initial: Boolean) {
+    /**
+     * 往前翻一页更早的历史：timeline cursor（`beforeSeq`）分页。单聊行按 seq 排序
+     * 自然插前；群聊是位置序，新页的行前插进行缓冲（key=身份，重放幂等）。
+     */
+    fun loadEarlier() {
         val connection = client ?: return
-        // parity 主路径：历史行走 timeline 快照/增量（applyTimelineMode 已拉过首屏快照）；
-        // notice/relay 触发的静默刷新也由行流承担。旧管线整个保留为回滚路径。
-        if (parityActive) return
-        _uiState.update { state ->
-            state.copy(
-                // 已有缓存或已加载内容时静默刷新，不回骨架屏。
-                loading = state.entries.isEmpty(),
-                error = if (initial) state.error else null,
-            )
-        }
-        // `room-chat` 只存在于 mobile-api 分支；协商没成功（旧版插件）时别发注定
-        // `bot/not-found` 的请求，退回 `chat`（用 roomId 当 botId），至少能出历史。
-        val roomChat = isGroup && DsBotCapabilities.supports("room-chat")
+        val cursor = parityCursor ?: return
+        if (parityLoadingEarlier) return
+        parityLoadingEarlier = true
+        rebuildParityEntries()
         viewModelScope.launch {
-            runCatching {
-                connection.bot(
-                    endpoint = if (roomChat) "room-chat" else "chat",
-                    payload = JSONObject().put(if (roomChat) "roomId" else "botId", botId),
-                )
-            }.onSuccess { value ->
-                historyCache?.save(value)
-                value.optString("sessionId").takeIf { it.isNotEmpty() }?.let { currentSession ->
-                    sessionId = currentSession
-                    ensureFollow(currentSession)
-                    loadBrowserShots(currentSession)
-                    // shadow 双跑：会话 id 到手后补拉 timeline 快照（Phase 1a）。
-                    refreshShadowSnapshotIfNeeded()
-                }
-                // 群聊的 `room-chat` 直接给这一轮的状态：在跑吗、谁在发言
-                // （`mobile.js roomChat`：`running` 有活跃 round，`speaking` 是当前发言人）。
-                if (isGroup) {
-                    applyGroupRound(value)
-                    // 打开时这一轮在跑：开启轮询，round 结束后停止键和状态行要自己收。
-                    if (groupRoundRunning) watchForRunEnd()
-                }
-                val items = value.optJSONArray("items")
-                val scope = sessionId ?: botId
-                val entries = buildList {
-                    if (items != null) {
-                        for (index in 0 until items.length()) {
-                            val item = items.optJSONObject(index) ?: continue
-                            parseItem(item, scope, "history:$index")?.let(::add)
-                        }
+            val request = TimelineRequest(
+                botId = botId.takeIf { !isGroup },
+                roomId = botId.takeIf { isGroup },
+                cursor = cursor,
+            )
+            runCatching { connection.timeline(request) }
+                .onSuccess { snapshot ->
+                    if (snapshot == null) {
+                        parityLoadingEarlier = false
+                        rebuildParityEntries()
+                        return@onSuccess
                     }
+                    parityCursor = snapshot.cursor
+                    if (isGroup) {
+                        // 位置序：更早的页插在前面。
+                        val rebuilt = LinkedHashMap<String, TimelineRow>()
+                        snapshot.rows.forEach { row ->
+                            rebuilt[row.key] = row
+                            absorbEchoRelationsOf(row)
+                        }
+                        parityRows.forEach { (key, row) -> rebuilt[key] = row }
+                        parityRows.clear()
+                        parityRows.putAll(rebuilt)
+                    } else {
+                        snapshot.rows.forEach { row -> absorbParityRow(row) }
+                    }
+                    parityLoadingEarlier = false
+                    rebuildParityEntries(hasEarlier = snapshot.cursor != null)
+                    logRowApplication("earlier", snapshot.rows)
                 }
-                // 历史还没追上这次发送时，本地气泡也不能被刷新弄丢。
-                // 历史里已经出现正主（id 同为 user:$rpcId）的本地气泡就此认领：
-                // 从未回显清单里摘掉，轮末的自愈重拉不再为它白跑。
-                localUserEntries.forEach { (requestId, local) ->
-                    if (entries.any { it.id == local.id }) unclaimedRequests.remove(requestId)
+                .onFailure {
+                    parityLoadingEarlier = false
+                    rebuildParityEntries()
                 }
-                val withLocal = entries + localUserEntries.values.filterNot { local ->
-                    entries.any { it.id == local.id }
-                }
-                seen.clear()
-                withLocal.forEach { seen.add(it.id) }
-                cursor = parseChatPage(value).cursor
-                _uiState.update { state ->
-                    state.copy(
-                        loading = false,
-                        engineOff = false,
-                        error = null,
-                        entries = withLocal,
-                        hasEarlier = cursor?.hasMore == true,
-                    )
-                }
-                clearStreaming()
-                loadedOnce = true
-                mergeSessionEvents()
-                // 群产物不属于 `room-chat` 的历史（它在成员会话里），重载后补回末尾。
-                if (isGroup) showRoomArtifacts()
-                // 刚学到这个 Bot 当前用的 DSH 会话 id：事件流里的请求靠它认领。
-                recomputeApprovals()
-                refreshBotStatus()
-            }.onFailure { failure ->
-                _uiState.update { state ->
-                    state.copy(
-                        loading = false,
-                        error = if (!initial && loadedOnce) state.error else describeChatError(failure),
-                    )
-                }
-            }
         }
     }
 
     /**
-     * 往前翻一页更早的历史。
-     *
-     * 引擎的 `chat` 只给最新 60 条（`EARLIER_PAGE`），要看到更早的得带游标再问一次；
-     * 新的一页插到列表**前面**（对齐 dsh-Go 的 `loadEarlier`）。
+     * feed 的 room/hello/revision 触发的重拉 = seq 游标重放：断线重连丢的增量
+     * 由宿主行缓冲按 since 补齐（设计 §3 的断线重连协议）。
      */
-    fun loadEarlier() {
-        val connection = client ?: return
-        // parity 主路径：timeline cursor 翻页（行按 seq 排序自然插前）。
-        if (parityActive) {
-            parityLoadEarlier()
-            return
-        }
-        val current = cursor ?: return
-        if (_uiState.value.loadingEarlier) return
-        _uiState.update { it.copy(loadingEarlier = true, error = null) }
-        val roomChat = isGroup && DsBotCapabilities.supports("room-chat")
-        viewModelScope.launch {
-            val payload = JSONObject().put(if (roomChat) "roomId" else "botId", botId)
-            current.toJson()?.let { payload.put("cursor", it) }
-            runCatching { connection.bot(endpoint = if (roomChat) "room-chat" else "chat", payload = payload) }
-                .onSuccess { value ->
-                    val items = value.optJSONArray("items")
-                    val scope = sessionId ?: botId
-                    val earlier = buildList {
-                        if (items != null) {
-                            for (index in 0 until items.length()) {
-                                val item = items.optJSONObject(index) ?: continue
-                                parseItem(item, scope, "earlier:$index")?.let(::add)
-                            }
-                        }
-                    }
-                    cursor = parseChatPage(value).cursor
-                    _uiState.update { state ->
-                        state.copy(
-                            loadingEarlier = false,
-                            // 更早的插在前面；已经见过的不要重复。
-                            entries = earlier.filterNot { it.id in seen } + state.entries,
-                            hasEarlier = cursor?.hasMore == true,
-                        )
-                    }
-                    earlier.forEach { seen.add(it.id) }
-                    // 翻到更早的一页后，那一页对应的事件行（工具调用/产物卡）也要补进来。
-                    mergeSessionEvents()
-                }
-                .onFailure { failure ->
-                    _uiState.update { it.copy(loadingEarlier = false, error = describeChatError(failure)) }
-                }
-        }
-    }
-
     private fun scheduleReload() {
         if (client == null) return
-        // parity 主路径：feed 的 room/hello/revision 触发的重拉 = seq 游标重放
-        // （断线重连丢的增量由宿主行缓冲按 since 补齐，设计 §3）。
-        if (parityActive) {
-            refreshTimelineSnapshot(reset = false)
-            return
-        }
-        reloadJob?.cancel()
-        reloadJob = viewModelScope.launch {
-            delay(400)
-            load(initial = false)
-        }
+        refreshTimelineSnapshot(reset = false)
     }
 
     private fun handleFeed(event: BotFeedEvent) {
         val data = runCatching { JSONObject(event.data) }.getOrNull() ?: return
         when (event.event) {
-            "message" -> {
-                // parity 主路径：消息行走 feed `timeline` 增量，这里只留给回滚路径。
-                if (parityActive) return
-                val belongs = data.optString("botId") == botId || data.optString("sessionId") == sessionId
-                if (!belongs) return
-                val item = data.optJSONObject("item") ?: return
-                val scope = data.optString("sessionId").ifEmpty { sessionId ?: botId }
-                val entry = parseItem(item, scope, "feed:${System.nanoTime()}") ?: return
-                // 快照跟上：新消息落地就写进磁盘缓存。以前只在完整重拉时写，
-                // 导致「回复完就退 App、冷启动」读到的还是旧快照，要再进一次才变新。
-                //
-                // ⚠️ 必须放在 `seen` 去重**之前**：自己刚发的那条在 `send()` 时就已经
-                // 记进 `seen` 了，去重会把它挡掉 —— 表现是「助手消息冷启动能立刻看到、
-                // 自己发的却要等一会儿」。`appendItem` 自带 id/seq 去重，不会写重。
-                historyCache?.appendItem(item)
-                // 自己刚发的那条回显虽然会被 `seen` 去重，但它带着**真实 seq**：
-                // 认领回本地气泡，mergeTimeline 才能把本轮事件插到正确位置。
-                adoptLocalSeq(entry.id, entry.seq)
-                if (!seen.add(entry.id)) return
-                // 最终消息已经进列表，立即撤掉流式临时气泡，避免同一段回复出现两遍。
-                // 但一条 bot 文字 / 一个 stream 段不等于整回合结束：DS Bot 还能继续
-                // 调工具、换目录、等待审批。running/activity 只信 state.work。
-                if (entry.kind == ChatEntryKind.BOT) {
-                    clearStreaming()
-                }
-                // 不再无条件追加：占位气泡挂在末尾、排队/steer 的消息落日志又晚，
-                // 直接 `+ entry` 会把「比占位气泡更早落日志」的收尾文字/回复排到它
-                // 后面（表现成回复跑到了新消息下面）。按 seq 找真位置插进去。
-                _uiState.update { state ->
-                    state.copy(
-                        entries = mergeTimelineEntry(state.entries, entry),
-                        waitingForReply = if (entry.kind == ChatEntryKind.USER) state.waitingForReply else false,
-                    )
-                }
-            }
-
             "stream" -> {
                 if (data.optString("botId") != botId) return
                 when (data.optString("phase")) {
@@ -1595,10 +924,10 @@ class BotChatViewModel internal constructor(
                 if (!belongs) return
                 when (kind) {
                     "approval" -> refreshBotStatus()
-                    // 后台完成 / 新卡片：状态与这一轮的行都刷一下，别静默。
+                    // 后台完成 / 新卡片：状态与行流都刷一下，别静默。
                     "done", "question", "view", "group" -> {
                         refreshBotStatus()
-                        refreshChatSoon(400)
+                        refreshTimelineSnapshot(reset = false)
                     }
                     else -> Unit
                 }
@@ -1608,119 +937,22 @@ class BotChatViewModel internal constructor(
                 if (isGroup && data.optString("roomId") == botId) scheduleReload()
             }
 
-            // 宿主投影的增量帧（Phase 1a）：只有 shadow 开着才解析进对比器。
-            "timeline" -> handleTimelineFeed(data)
+            // 宿主投影的增量帧：行管线的第二路输入（快照之外的所有新行）。
+            "timeline" -> handleParityTimelineFeed(data)
 
             "hello", "revision" -> scheduleReload()
             "live" -> refreshBotStatus()
         }
     }
 
-    // region ---- timeline shadow 接线（Phase 1a；主管线不读这些状态）----
+    // region ---- timeline 主管线（Phase 1b/1c：parity）----
 
-    /**
-     * 偏好/能力变化时开关 shadow 双跑。
-     *
-     * 生效条件（设计 §6）：偏好或测试注入位请求 + 私聊先行（1a 不做群聊）+ 宿主 hello
-     * 声明了 `timeline` 能力 + **parity 没开**（Phase 1b 起行管线切主，两路合一后
-     * shadow 无意义；关掉 parity 回旧管线后它才重新有对比价值）。
-     * 任一不满足 → 关（默认态），主管线照旧。
-     */
-    private fun applyTimelineShadowPref(prefOn: Boolean) {
-        val want = (prefOn || dependencies.timelineShadow) &&
-            !isGroup &&
-            !parityActive &&
-            client != null &&
-            DsBotCapabilities.timelineSupported()
-        if (want == shadowEnabled) return
-        shadowEnabled = want
-        if (!want) {
-            shadowJob?.cancel()
-            shadowJob = null
-            shadowPendingSnapshot = false
-            shadowRows.clear()
-            shadowSnapshot = null
-            shadowSeq = 0L
-            shadowSessionId = null
-            return
-        }
-        // 首拉延后：等旧管线首屏（load）把 entries 就位，shadow 对比才有意义
-        // （拉取点在 load onSuccess 的 refreshShadowSnapshotIfNeeded）。
-        shadowPendingSnapshot = true
-    }
-
-    /**
-     * 拉一次 timeline 快照：`reset` 全量重建行缓冲；否则带 `since` 做断线重放
-     * （设计 §3 的 seq 游标重连重放）。失败静默——shadow 不许打扰主管线。
-     */
-    private fun refreshShadowSnapshot(reset: Boolean) {
-        val connection = client ?: return
-        shadowJob?.cancel()
-        shadowJob = viewModelScope.launch {
-            val since = if (reset) null else shadowSeq.takeIf { it > 0L }
-            val snapshot = runCatching {
-                connection.timeline(TimelineRequest(botId = botId, since = since))
-            }.getOrNull() ?: return@launch
-            shadowSnapshot = snapshot
-            snapshot.sessionId?.let { shadowSessionId = it }
-            snapshot.seq?.let { if (it > shadowSeq) shadowSeq = it }
-            if (reset) shadowRows.clear()
-            snapshot.rows.forEach { row -> shadowRows[row.key] = row }
-            compareShadow()
-        }
-    }
-
-    /** load 学到会话 id 后补一次快照（shadow 开着且这个会话还没对齐过）。 */
-    private fun refreshShadowSnapshotIfNeeded() {
-        if (!shadowEnabled) return
-        val pending = shadowPendingSnapshot
-        val current = sessionId ?: return
-        if (!pending && current == shadowSessionId) return
-        shadowPendingSnapshot = false
-        refreshShadowSnapshot(reset = true)
-    }
-
-    /** feed `timeline` 增量：追行缓冲（按 key 去重）+ 对比；行流断档时重拉快照。 */
-    private fun handleTimelineFeed(data: JSONObject) {
-        if (parityActive) {
-            handleParityTimelineFeed(data)
-            return
-        }
-        if (!shadowEnabled) return
-        val frame = parseTimelineFeedFrame(data) ?: return
-        if (!frameBelongsToSession(frame)) return
-        if (frame.reset) {
-            refreshShadowSnapshot(reset = true)
-            return
-        }
-        frame.seq?.let { if (it > shadowSeq) shadowSeq = it }
-        frame.rows.forEach { row -> shadowRows[row.key] = row }
-        while (shadowRows.size > SHADOW_ROW_BUFFER_MAX) {
-            shadowRows.remove(shadowRows.keys.first())
-        }
-        compareShadow()
-    }
-
-    /** 增量帧的会话归属：单聊按 botId、群聊按 roomId（群聊行管线 1c 同构）。 */
-    private fun frameBelongsToSession(frame: com.dshm.bot.data.remote.TimelineFeedFrame): Boolean {
+    /** 增量帧的会话归属：单聊按 botId、群聊按 roomId。 */
+    private fun frameBelongsToSession(frame: TimelineFeedFrame): Boolean {
         frame.botId?.takeIf { it != botId }?.let { return false }
         frame.roomId?.takeIf { it != botId }?.let { return false }
         return true
     }
-
-    /** 跑一次对比：旧管线当前 entries vs 行管线当前序列（均为只读快照）。 */
-    private fun compareShadow() {
-        shadowComparator.compare(
-            sessionKey = botId,
-            oldEntries = _uiState.value.entries,
-            newRows = shadowRows.values.sortedBy { it.seq ?: Long.MAX_VALUE },
-            newSnapshot = shadowSnapshot,
-        )
-    }
-
-    // endregion
-
-    // region ---- timeline 主管线（Phase 1b/1c：parity）----
 
     /** 本地 echo 行的数据键（设计 §4：`p:<requestId>`）。 */
     private fun echoKeyOf(requestId: String): String = "p:$requestId"
@@ -1749,49 +981,14 @@ class BotChatViewModel internal constructor(
     )
 
     /**
-     * 重算 timeline 模式开关（parity 主开关 + shadow 对比开关）。
+     * 启动/重放行管线（唯一管线，无开关）。
      *
-     * parity 生效条件（设计 §6）：`DshGoPreferences.timelineParity`（默认 true）或测试
-     * 注入位 + 宿主 hello 声明 `timeline` 能力。任一不满足 → 旧管线（回滚路径）。
-     * 切换即互相停开：parity 开 → 停 follow、拉快照；parity 关 → 清行缓冲、
-     * 恢复旧管线（load + ensureFollow），历史缓存照常重建，回滚数据无损。
+     * 宿主投影（`timeline` 快照 + feed 增量）就是 entries 的来源；旧管线已于
+     * 2026-11-14 删除。hello 变化（换会话）时重拉一次快照。
      */
-    private fun applyTimelineMode() {
-        // prefs 只在有设置存储时生效（JVM 测试无 appContext → 恒旧管线，
-        // 回滚路径的既有测试不被动）；测试用依赖注入位显式点亮。
-        val want = (dependencies.timelineParity ||
-            (settingsRepository != null && notifyPrefs.timelineParity)) &&
-            client != null &&
-            DsBotCapabilities.timelineSupported()
-        if (want != parityActive) {
-            parityActive = want
-            if (want) {
-                // 旧管线的输入停掉：follow 不再订阅（行流承担 tool/event 行）。
-                followStreamId?.let { mux?.closeStream(it) }
-                followStreamId = null
-                refreshTimelineSnapshot(reset = true)
-            } else {
-                parityTimelineJob?.cancel()
-                parityTimelineJob = null
-                parityRows.clear()
-                parityRenderKeys.clear()
-                pendingEchoRows.clear()
-                pendingEchoAttachments.clear()
-                paritySeq = 0L
-                parityCursor = null
-                paritySnapshot = null
-                paritySessionId = null
-                parityRoundRunning = false
-                // 回旧管线：重拉一次历史 + 重订 follow（回滚路径，代码保留）。
-                if (client != null) {
-                    load(initial = false)
-                    sessionId?.let { ensureFollow(it) }
-                }
-            }
-        }
-        // shadow 依赖 parity 的反面：无论 parity 是否翻转都重算一次
-        // （依赖注入位/hello 首次到达也要点亮 shadow）。
-        applyTimelineShadowPref(notifyPrefs.timelineShadow)
+    private fun startTimelinePipeline() {
+        if (client == null) return
+        refreshTimelineSnapshot(reset = true)
     }
 
     /**
@@ -1823,6 +1020,7 @@ class BotChatViewModel internal constructor(
                 hasEarlier = snapshot.cursor != null,
             )
             if (reset) recomputeApprovals()
+            logRowApplication(if (reset) "snapshot" else "replay", snapshot.rows)
         }
     }
 
@@ -1857,6 +1055,22 @@ class BotChatViewModel internal constructor(
                 unclaimedRequests.remove(requestId)
             }
         }
+    }
+
+    /**
+     * 行应用诊断日志（限频）：每次快照/增量应用时记 rows 数量与 key 摘要。
+     *
+     * 真机追「产物卡/行不即时」时配合宿主侧的 delta 日志一起看（DshMuxLog 出口，
+     * 每 [PARITY_LOG_MIN_INTERVAL_MS] 最多一条，避免行流高频刷屏）。
+     */
+    private fun logRowApplication(source: String, rows: List<TimelineRow>) {
+        if (rows.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (now - lastParityLogAt < PARITY_LOG_MIN_INTERVAL_MS) return
+        lastParityLogAt = now
+        val keys = rows.take(6).joinToString(",") { it.key }
+        val more = if (rows.size > 6) "…+${rows.size - 6}" else ""
+        DshMuxLog.log("timeline $source：${rows.size} 行 [$keys$more] seq=$paritySeq 缓冲=${parityRows.size}")
     }
 
     /** 摘掉同 requestId 的排队/插话行（认领或撤回后它们就没有意义了）。 */
@@ -1925,6 +1139,7 @@ class BotChatViewModel internal constructor(
             parityRows.remove(parityRows.keys.first())
         }
         rebuildParityEntries()
+        logRowApplication("increment", frame.rows)
         // 群聊帧带 round 状态：活动状态行实时刷新（旧 room-progress 轮询保留为兜底，
         // 设计 §5）。running 的 true→false 边沿 = 本轮收口：群产物卡只在 snapshot 里
         // 聚合（宿主 room-artifacts 异步聚合不进帧），全量重拉快照拿新卡。
@@ -2066,14 +1281,7 @@ class BotChatViewModel internal constructor(
 
     /** 记下这一轮什么时候开始的：群产物只收这之后声明的文件。 */
     private fun noteGroupRound(running: Boolean) {
-        val started = running && !groupRoundRunning
         groupRoundRunning = running
-        if (started) {
-            // 刚打开界面时这一轮可能早就在跑了：第一次往前多收一分钟，
-            // 免得声明刚好落在我们打开之前。
-            val warm = if (groupRoundStartedAt == 0L) 60_000L else 0L
-            groupRoundStartedAt = System.currentTimeMillis() - warm
-        }
     }
 
     /**
@@ -2212,8 +1420,9 @@ class BotChatViewModel internal constructor(
             optimistic = optimisticRun,
             // 群聊没有单独的 sessionId（群的会话 id 就是 room id）。
             sessionStatus = sessionRunningById[key],
-            // 会话事件里最后一条回合边界是 turn/end → 这一轮已经结束。
-            lastTurnEnded = lastTurnEndSeq > lastTurnStartSeq,
+            // turn 边界由宿主的行流/状态行承担（旧 follow 的 turn/end 记录已随旧
+            // 管线删除）；mux 的 `api-session/status`（sessionStatus）才是权威信号。
+            lastTurnEnded = false,
             workRunning = workRunning,
         )
     }
@@ -2420,7 +1629,7 @@ class BotChatViewModel internal constructor(
             _uiState.update { it.copy(roomContinuing = false) }
             if (failure == null) {
                 refreshBotStatus()
-                refreshChatSoon(200)
+                refreshTimelineSnapshot(reset = false)
             }
             onDone(failure)
         }
@@ -2524,32 +1733,20 @@ class BotChatViewModel internal constructor(
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
             // 本轮结束了还有没等到回显的本地气泡（feed 漏投、SSE 断流）：重拉一次历史，
             // 让正主把它换下来。自愈窗口从「下次任意重载」缩到「本轮结束」。
-            // 轮末自愈：还有没等到认领的本地气泡（echo 漏认领）→ parity 下重放游标
-            // 快照，旧管线走 scheduleReload。
-            if (unclaimedRequests.isNotEmpty()) {
-                if (parityActive) refreshTimelineSnapshot(reset = false) else scheduleReload()
-            }
+            // 轮末自愈：还有没等到认领的本地气泡（行流漏投）→ 重放游标快照。
+            if (unclaimedRequests.isNotEmpty()) refreshTimelineSnapshot(reset = false)
             val phoneTaskDone = PhoneControlSession.consumeFor(botId)
-            // 群成员跑在自己会话里，产物（`present`）也就落在那边：这一轮结束后
-            // 去插件收一次，没人 `present` 时就退回「本轮被改动的文件」。
-            // parity 主路径：群产物卡在 running→false 边沿的快照重拉里（宿主聚合）。
-            if (isGroup && !parityActive) {
-                refreshGroupArtifacts(connection, groupRoundStartedAt.takeIf { it > 0 } ?: watchStartedAt)
-            }
-            // 这一轮有没有产出都要判失败：DS Bot 的模型调用失败只写诊断不写 chat，
-            // 若只在「零产出」时查，模型吐了半段再失败就会静默，和「正常做完」长得一样。
+            // 这一轮有没有产出：失败行由宿主投影的 `event` 行承担（eventKind=failed），
+            // 从本轮的行里取，和「正常做完」区分开（不再另查诊断）。
             val produced = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT } > botEntriesAtStart
             val context = notifyContext
             val last = _uiState.value.entries.lastOrNull { it.kind == ChatEntryKind.BOT }?.text.orEmpty()
             val showPhoneResult = phoneTaskDone && context != null &&
                 DshmAccessibilityService.current != null
-            // 对齐 dsh-Go：无论这一轮有没有产出都查一次失败诊断（模型中途失败也
-            // 不算「正常做完」，必须补一条错误行，不让失败静默）。已按 time 去重。
-            // parity 主路径：turnfail 行由宿主投影的 event 行承担，诊断行只留给回滚路径。
-            var turnFailure: String? = null
-            if (!userStoppedRun && !parityActive) {
-                turnFailure = reportTurnFailure(connection, watchStartedAt)
-            }
+            val turnFailure = _uiState.value.entries.lastOrNull { entry ->
+                entry.kind == ChatEntryKind.EVENT && entry.eventKind == "failed" &&
+                    (entry.timeMs ?: 0L) >= watchStartedAt
+            }?.text
             if (context != null && !showPhoneResult && turnFailure != null) {
                 pushNotification(
                     ChatNotifier.Kind.ERROR,
@@ -2576,65 +1773,6 @@ class BotChatViewModel internal constructor(
                 }
             }
             userStoppedRun = false
-        }
-    }
-
-    /**
-     * 群聊这一轮的产物：插件从成员会话里翻 `deliverables/presented`，
-     * 没有声明时退回本轮被改动过的文件（`room-artifacts`）。
-     */
-    private suspend fun refreshGroupArtifacts(connection: DshRemoteApi, since: Long) {
-        val value = runCatching {
-            connection.bot(
-                "room-artifacts",
-                JSONObject().put("roomId", botId).put("since", since),
-            )
-        }.getOrNull() ?: return
-        val found = buildList {
-            value.optJSONArray("files")?.let { array ->
-                for (index in 0 until array.length()) {
-                    val item = array.optJSONObject(index) ?: continue
-                    val path = item.optString("path").takeIf { it.isNotEmpty() } ?: continue
-                    add(ChatArtifact(path = path, description = item.optString("description").takeIf { it.isNotEmpty() }))
-                }
-            }
-            value.optJSONArray("changed")?.let { array ->
-                for (index in 0 until array.length()) {
-                    val item = array.optJSONObject(index) ?: continue
-                    val path = item.optString("path").takeIf { it.isNotEmpty() } ?: continue
-                    add(ChatArtifact(path = path, description = null))
-                }
-            }
-        }
-        if (found.isEmpty()) return
-        var added = false
-        found.forEach { artifact ->
-            if (roomArtifacts.none { it.path == artifact.path }) {
-                roomArtifacts += artifact
-                added = true
-            }
-        }
-        if (added) showRoomArtifacts()
-    }
-
-    /** 把群里收上来的产物贴成一张卡（贴在时间线末尾，重载后也补回来）。 */
-    private fun showRoomArtifacts() {
-        if (roomArtifacts.isEmpty()) return
-        val entry = ChatEntry(
-            id = ROOM_ARTIFACTS_ID,
-            kind = ChatEntryKind.ARTIFACTS,
-            text = "",
-            seq = Long.MAX_VALUE,
-            artifacts = roomArtifacts.toList(),
-        )
-        _uiState.update { state ->
-            state.copy(
-                entries = if (state.entries.any { it.id == ROOM_ARTIFACTS_ID }) {
-                    state.entries.map { if (it.id == ROOM_ARTIFACTS_ID) entry else it }
-                } else {
-                    state.entries + entry
-                },
-            )
         }
     }
 
@@ -2694,234 +1832,6 @@ class BotChatViewModel internal constructor(
                 }
             }
         }
-    }
-
-    /**
-     * 稍后重拉一次会话（同一小段时间内只做一次）。
-     *
-     * 中转结果 / 通知类事件到达时用：那些「谁没能回答、谁被重启打断」的行只存在于
-     * `chat` / `room-chat` 的 items 里，不重拉就一直看不到（等于静默）。
-     */
-    private fun refreshChatSoon(delayMs: Long = 300) {
-        if (client == null) return
-        chatRefreshJob?.cancel()
-        chatRefreshJob = viewModelScope.launch {
-            delay(delayMs)
-            load(initial = false)
-        }
-    }
-
-    /**
-     * 一轮结束了却没有任何输出：去插件的诊断里找这一轮的错误。
-     *
-     * DS Bot 的 `turns.js noteTurnFailure` 只把模型调用失败写进 diagnostics（不写 chat 行），
-     * 所以界面上「失败」跟「正常做完」长得一样。这里补一条错误事件行。
-     */
-    private suspend fun reportTurnFailure(connection: DshRemoteApi, sinceMs: Long): String? {
-        val report = runCatching { connection.bot("diagnostics") }.getOrNull() ?: return null
-        val entries = report.optJSONArray("entries") ?: return null
-        val mine = sessionId?.takeIf { it.isNotEmpty() } ?: botId
-        for (index in 0 until entries.length()) {
-            val entry = entries.optJSONObject(index) ?: continue
-            if (entry.optString("source") != "turn") continue
-            val entrySession = entry.optString("sessionId")
-            if (entrySession.isNotEmpty() && entrySession != mine) continue
-            val time = entry.optLong("time", 0L)
-            if (time in 1 until sinceMs) continue
-            // follow 的 `turn/end` 已经把这一轮的失败画成 `turnfail:$seq`（code 同源）：
-            // 这一轮里已有失败行就不再补诊断行，避免双份。
-            val alreadyReported = toolEvents.values.any { existing ->
-                existing.id.startsWith("turnfail:") &&
-                    existing.eventKind == "failed" &&
-                    (existing.timeMs ?: 0L) >= sinceMs
-            }
-            if (alreadyReported) return null
-            val code = entry.optString("code").takeIf { it.isNotEmpty() }
-            val id = "diag:$time"
-            if (toolEvents.values.any { it.id == id }) return null
-            val label = "$botName 没能回答：${failureLabel(code, entry.optString("text"))}"
-            // 诊断条目没有会话 seq：键取负数（真实事件 seq 恒 ≥ 0，永不冲突）。
-            // 放进 toolEvents 让 mergeSessionEvents 每次重灌，不再被 base 剥除后弄丢。
-            toolEvents[-(time.takeIf { it > 0L } ?: 1L)] = ChatEntry(
-                id = id,
-                kind = ChatEntryKind.EVENT,
-                text = label,
-                author = botName,
-                botId = botId,
-                eventKind = "failed",
-                eventCode = code,
-                // 贴在刚结束的这轮边界上；follow 没连上时退到乐观占位 seq（列表末尾）。
-                seq = lastTurnEndSeq.takeIf { it > 0L } ?: (maxSeenSeq + 1),
-                timeMs = time.takeIf { it > 0L },
-            )
-            mergeSessionEvents()
-            return label
-        }
-        return null
-    }
-
-    private fun parseItem(item: JSONObject, scope: String, fallbackId: String): ChatEntry? {
-        val seq = item.optLong("seq", -1L)
-        if (seq > maxSeenSeq) maxSeenSeq = seq
-        val id = item.optString("id").ifEmpty {
-            if (seq >= 0L) "$scope:$seq" else fallbackId
-        }
-        val text = item.optString("text")
-        val rpcId = item.optString("rpcId").takeIf { it.isNotEmpty() }
-        val time = item.optLong("time", -1L).takeIf { it > 0L }
-        val duration = item.optLong("duration", -1L).takeIf { it > 0L }
-        val seqValue = item.optLong("seq", -1L).takeIf { it >= 0L }
-        return when (item.optString("kind")) {
-            "user" -> {
-                // 引擎历史只给图片数量；自己发过的按 rpcId 把本地附件贴回来。
-                val sent = rpcId?.let { key -> sentAttachments[key] }.orEmpty()
-                val imageCount = item.optInt("images", 0)
-                // 只有图片、没有文字的消息也要画（以前 `text` 为空就被整条丢掉了）。
-                if (text.isBlank() && sent.isEmpty() && imageCount == 0) {
-                    null
-                } else {
-                    ChatEntry(
-                        id = if (rpcId != null) "user:$rpcId" else id,
-                        kind = ChatEntryKind.USER,
-                        text = text,
-                        timeMs = time,
-                        seq = seqValue,
-                        images = imageCount,
-                        attachments = sent.map { attachment -> attachment.name },
-                        attachmentItems = sent,
-                    )
-                }
-            }
-
-            "bot" -> text.takeIf { it.isNotBlank() }
-                ?.let {
-                    ChatEntry(
-                        id = id,
-                        kind = ChatEntryKind.BOT,
-                        text = it,
-                        author = item.optString("name").ifEmpty { botName },
-                        botId = item.optString("botId").takeIf { value -> value.isNotEmpty() },
-                        timeMs = time,
-                        durationMs = duration,
-                        seq = seqValue,
-                        whole = wholePost(item),
-                    )
-                }
-
-            // 用户回答过的提问：网页版画成 `AnsweredCell`（问题 + 选了哪些），
-            // 不是一条普通气泡 —— 这里保留问答对，交给界面画卡片。
-            "answer" -> {
-                val answeredView = answeredView(item)
-                val answered = if (answeredView == null) answeredQuestions(item) else emptyList()
-                when {
-                    answeredView != null -> ChatEntry(
-                        id = id,
-                        kind = ChatEntryKind.ANSWERED,
-                        text = "",
-                        timeMs = time,
-                        seq = seqValue,
-                        answeredView = answeredView,
-                    )
-
-                    answered.isNotEmpty() -> ChatEntry(
-                        id = id,
-                        kind = ChatEntryKind.ANSWERED,
-                        text = "",
-                        timeMs = time,
-                        seq = seqValue,
-                        answered = answered,
-                    )
-
-                    else -> text.takeIf { it.isNotBlank() }
-                        ?.let { ChatEntry(id, ChatEntryKind.BOT, it, botName, timeMs = time, seq = seqValue) }
-                }
-            }
-
-            // 一段会话的起点：网页版画一条时间分隔线（`PartLine`）。
-            "divider" -> ChatEntry(
-                id = id,
-                kind = ChatEntryKind.DIVIDER,
-                text = "",
-                timeMs = time,
-                seq = seqValue,
-            )
-
-            // 只读视图卡：网页版用 `WidgetCell` 回放这张卡。
-            "view" -> item.optJSONObject("view")?.let { view ->
-                ChatEntry(
-                    id = id,
-                    kind = ChatEntryKind.VIEW,
-                    text = item.optString("title"),
-                    timeMs = time,
-                    seq = seqValue,
-                    view = ChatViewCard(
-                        id = item.optString("callId").ifEmpty { id },
-                        title = item.optString("title").takeIf { it.isNotBlank() },
-                        view = view,
-                    ),
-                )
-            }
-
-            "event" -> {
-                val eventKind = item.optString("event").ifEmpty { item.optString("role") }
-                val name = item.optString("name").ifEmpty { botName }
-                ChatEntry(
-                    id = id,
-                    kind = ChatEntryKind.EVENT,
-                    text = text,
-                    author = name,
-                    botId = item.optString("botId").takeIf { value -> value.isNotEmpty() },
-                    timeMs = time,
-                    eventKind = eventKind.takeIf { it.isNotEmpty() },
-                    eventCode = item.optString("code").takeIf { it.isNotEmpty() },
-                    seq = seqValue,
-                )
-            }
-
-            else -> null
-        }
-    }
-
-    /**
-     * `answer` item 里的问答对。
-     *
-     * 形状来自插件（`parts.js`）：`questions: [asked]` / `answers: [given]`，
-     * 作答里 `selected` 是选中的选项文案，`custom` 是自定义输入（对齐网页版 `SettledQuestion`）。
-     */
-    private fun answeredQuestions(item: JSONObject): List<ChatAnsweredQuestion> {
-        val questions = item.optJSONArray("questions") ?: return emptyList()
-        if (questions.length() == 0) return emptyList()
-        val answers = item.optJSONArray("answers")
-        return buildList {
-            for (index in 0 until questions.length()) {
-                val question = questions.optJSONObject(index) ?: continue
-                val prompt = question.optString("question")
-                    .ifBlank { question.optString("prompt") }
-                    .ifBlank { question.optString("title") }
-                val id = question.optString("id")
-                val given = (0 until (answers?.length() ?: 0))
-                    .mapNotNull { answers?.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == id }
-                val picked = buildList {
-                    given?.optJSONArray("selected")?.let { selected ->
-                        for (at in 0 until selected.length()) add(selected.optString(at))
-                    }
-                    given?.optString("custom")?.takeIf { it.isNotBlank() }?.let(::add)
-                }
-                add(ChatAnsweredQuestion(question = prompt, answers = picked))
-            }
-        }
-    }
-
-    /** 长文消息的附件（`whole.file`）：网页版「显示全部」按它调 `file-text`。 */
-    private fun wholePost(item: JSONObject): ChatWholePost? {
-        val whole = item.optJSONObject("whole") ?: return null
-        val file = whole.optJSONObject("file") ?: return null
-        return ChatWholePost(
-            name = file.optString("name").takeIf { it.isNotBlank() } ?: "长文",
-            length = whole.optInt("length", 0),
-            file = file,
-        )
     }
 
     /** `state.rooms[roomId].paused` → 等待放行的中转（DS Bot `room.paused`）。 */
@@ -2995,45 +1905,16 @@ class BotChatViewModel internal constructor(
         }
     }
 
-    /**
-     * `answer` item 里回答过的视图卡（网页版 `AnsweredView`）。
-     *
-     * `views[0]` 是当时展示的那张卡，`answers` 里同 id 的那条带 `action` 与 `values`。
-     */
-    private fun answeredView(item: JSONObject): ChatAnsweredView? {
-        val views = item.optJSONArray("views") ?: return null
-        val shown = (0 until views.length())
-            .mapNotNull { views.optJSONObject(it) }
-            .firstOrNull { it.optJSONObject("view") != null }
-            ?: return null
-        val id = shown.optString("id")
-        val answers = item.optJSONArray("answers")
-        val given = (0 until (answers?.length() ?: 0))
-            .mapNotNull { answers?.optJSONObject(it) }
-            .let { list -> list.firstOrNull { it.optString("id") == id } ?: list.firstOrNull() }
-        return ChatAnsweredView(
-            card = ChatViewCard(
-                id = id,
-                title = shown.optString("title").takeIf { it.isNotBlank() },
-                view = requireNotNull(shown.optJSONObject("view")),
-            ),
-            action = given?.optString("action").orEmpty(),
-            values = given?.optJSONObject("values") ?: JSONObject(),
-        )
-    }
-
     override fun onCleared() {
         feedJob?.cancel()
-        reloadJob?.cancel()
-        followDeliveries.close()
-        followStreamId?.let { mux?.closeStream(it) }
+        statusJob?.cancel()
+        runningWatchJob?.cancel()
+        parityTimelineJob?.cancel()
     }
 
     companion object {
         /** 事件流缓存的上限：同时等应答的提问一般就一个对话，多出来的一定是漏掉的 cancel。 */
         private const val HOST_PENDING_CAP = 32
-        /** 这些工具的结果里会带「谁没能回答 / 谁被打断」的行，跑完要重拉一次会话。 */
-        private val RELAY_TOOLS = setOf("group_relay", "message_bot", "post_to_group", "stop_bot")
         /** 对话里最多留几张浏览器缩略图卡（只活在本次对话）。 */
         private const val MAX_BROWSER_SHOTS = 30
         /** 流式刷新间隔：短回答贴帧、长回答逐级放宽（对齐 DeepSearch `streamingThrottleMs`）。 */
@@ -3053,17 +1934,10 @@ class BotChatViewModel internal constructor(
         private const val SINGLE_CHAT_STATE_MIN_MS = 3_000L
         /** 回合监视连续拿不到 `state` 的上限：超过就按「没在跑」收尾，不再空转。 */
         private const val RUN_WATCH_MAX_FAILURES = 5
-        /** 会话事件记录的内存上限（够覆盖最近若干轮；产物推导只看完成的轮）。 */
-        private const val MAX_SESSION_EVENTS = 4_000
-        /** timeline shadow 行缓冲上限（对齐设计 §3 宿主侧 ~600 行的环形）。 */
-        private const val SHADOW_ROW_BUFFER_MAX = 600
-        /** follow 断流重订的退避：1s 起步、指数左移封顶 32s。 */
-        private const val FOLLOW_RETRY_BASE_MS = 1_000L
-        private const val FOLLOW_RETRY_MAX_SHIFT = 5
-        /** 这些失败重试也没用（会话归档/不存在、流参数被网关拒）：不再重订。 */
-        private val FOLLOW_STREAM_GIVE_UP = Regex("not-found|archived|arguments-invalid")
-        /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
-        /** 群聊里刚发出消息后，等 round 建起来的最长时间（超过就不再乐观显示）。 */
+        /** 行缓冲上限（对齐设计 §3 宿主侧 ~600 行的环形，1 200 行留一倍余量）。 */
+        private const val SHADOW_ROW_BUFFER_MAX = 1_200
+        /** 行应用诊断日志的限频：同一会话两次日志的最小间隔。 */
+        private const val PARITY_LOG_MIN_INTERVAL_MS = 3_000L
 
         fun factory(
             botId: String,

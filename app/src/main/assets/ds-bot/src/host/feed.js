@@ -84,6 +84,7 @@ export function install(rt) {
         const delta = rt.timelineDelta(session.id)
         if (delta.rows.length > 0 || delta.reset === true) {
           publish('timeline', { roomId: session.id, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows, running: delta.running === true, speaking: delta.speaking ?? null })
+          rt.timelineLog?.(session.id, `room publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from} running=${delta.running === true}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}`)
         }
       }
       return
@@ -98,6 +99,10 @@ export function install(rt) {
       const delta = rt.timelineDelta(session.id)
       if (delta.rows.length > 0 || delta.reset === true) {
         publish('timeline', { botId, sessionId: session.id, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows })
+        // Delta-path diagnostics (a phone saw cards only after a restart): one
+        // rate-limited line per Session — the row keys this frame carries, cards
+        // flagged. `timelineLog` lives in projection.js; its absence is fine.
+        rt.timelineLog?.(session.id, `publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}${delta.rows.some(row => row.kind === 'artifact') ? ' · has artifact card' : ''}`)
       }
     }
   })

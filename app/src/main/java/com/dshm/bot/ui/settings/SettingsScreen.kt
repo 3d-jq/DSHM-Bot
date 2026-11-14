@@ -326,12 +326,6 @@ fun SettingsScreen(
                     icon = R.drawable.ic_lucide_shield,
                     onClick = { onOpenPage(SettingsPageId.PRIVACY) },
                 )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = stringResource(R.string.settings_timeline),
-                    icon = R.drawable.ic_lucide_gauge,
-                    onClick = { onOpenPage(SettingsPageId.TIMELINE) },
-                )
             }
         }
 

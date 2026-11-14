@@ -823,6 +823,10 @@ private fun logLineColor(line: String): Color {
     val lower = line.lowercase()
     return when {
         line.startsWith("[dsh-app]") || line.startsWith("[dshm]") -> Dshm.colors.accent
+        // 已自愈的告警：模型目录拉取失败后退回引擎内置目录（`model listing ... failed ...
+        // using the bundled catalog`），引擎自己给出了兜底、对话照常可用 —— 不是故障，
+        // 降到 warning 档，别和真错误一样通篇标红。
+        "catalog" in lower && ("failed" in lower || "error" in lower) -> Dshm.colors.warning
         "error" in lower || "fatal" in lower || "exception" in lower -> Dshm.colors.danger
         else -> Dshm.colors.terminalText
     }

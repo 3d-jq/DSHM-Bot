@@ -25,7 +25,6 @@ enum class SettingsPageId {
     NOTIFICATIONS,
     BACKGROUND,
     PRIVACY,
-    TIMELINE,
     APP_VERSION,
     DSH_VERSION,
     LICENSES,

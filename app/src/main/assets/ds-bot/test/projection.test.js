@@ -90,22 +90,24 @@ test('a plain file write makes no tool row (the activity row shows it); mutation
   assert.deepEqual(toolRowsOf(events, { botName: '小助手' }), [])
 })
 
-test('present reads Delivering at the call and Delivered at the result, the key swapping to the result seq', () => {
+test('present makes no tool row in any state — the deliverable card is its one surface (2026-11-14)', () => {
   reset()
   const callOnly = [
     turnStart(3),
     toolCall(3, 'p1', 'present', { files: [{ path: '/root/w/a.docx' }, { path: '/root/w/b.png' }] }),
   ]
-  const running = toolRowsOf(callOnly)
-  assert.deepEqual(keysOf(running), ['tool:2'])
-  assert.equal(running[0].payload.state, 'running')
-  assert.equal(running[0].payload.label, '正在交付 2 个文件…')
+  assert.deepEqual(toolRowsOf(callOnly), [], '「正在交付」行已按用户要求移除')
 
   const settled = [...callOnly.slice(0, 2), toolResult(3, 'p1', { text: 'Presented /root/w/a.docx' })]
-  const done = toolRowsOf(settled)
-  assert.deepEqual(keysOf(done), ['tool:3'])
-  assert.equal(done[0].payload.state, 'ok')
-  assert.equal(done[0].payload.label, '已交付 2 个文件')
+  assert.deepEqual(toolRowsOf(settled), [], '「已交付」行已按用户要求移除')
+
+  // The card still carries the delivery (accumulator口径不变).
+  const events = [...callOnly, toolResult(3, 'p1', { text: 'Presented' }), presented(3, 'p1', [{ path: '/root/w/a.docx' }, { path: '/root/w/b.png' }]), assistant(3, '交付完成'), turnEnd(3)]
+  const rows = composeTimelineRows({ events, baseItems: [base('bot', '交付完成', events[5].seq)] })
+  const cards = rows.filter(row => row.kind === 'artifact')
+  assert.equal(cards.length, 1)
+  assert.deepEqual(cards[0].payload.files.map(file => file.path), ['/root/w/a.docx', '/root/w/b.png'])
+  assert.equal(cards[0].payload.delivered, true)
 })
 
 test('message_bot names its target; a failed relay carries none', () => {

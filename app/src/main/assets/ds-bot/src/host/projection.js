@@ -2,12 +2,13 @@
 //
 //   timeline rows  = official `displayItems` rows (user/bot/answer/view/event/divider,
 //                    wrapped as-is) + the rows the official web client draws in the
-//                    browser: tool rows (ToolCell/renderCall semantics, present's
-//                    Delivering→Delivered pair), deliverable cards (the
-//                    `dsh-client-ui-deliverables` accumulator: presentedForClosing,
-//                    produced, first-seen order) and failure rows (llm/retry, a turn
-//                    that ended in error) + inbox rows (what sits in the agent inbox:
-//                    queued or steered input, read straight off `agent.inbox`).
+//                    browser: tool rows (ToolCell/renderCall semantics — `present`
+//                    makes none: its deliverable card is the one surface),
+//                    deliverable cards (the `dsh-client-ui-deliverables`
+//                    accumulator: presentedForClosing, produced, first-seen order)
+//                    and failure rows (llm/retry, a turn that ended in error) +
+//                    inbox rows (what sits in the agent inbox: queued or steered
+//                    input, read straight off `agent.inbox`).
 //
 // A row is `{ key, kind, seq, turn, timeMs, payload }`:
 //   - `key` is the durable identity (`user:<seq>`, `bot:<seq>`, `tool:<seq>`,
@@ -34,8 +35,10 @@ export const COLLAPSED_ARTIFACTS = 4
 
 // The tools whose calls become rows (the client's FOLLOW set; `remember`/`forget`
 // stay out as it does — the activity row shows them). `group_relay` is absent too:
-// its replies are rows of their own (room items), not a tool row.
-const TOOL_ROWS = new Set(['message_bot', 'stop_bot', 'create_bot', 'update_bot', 'create_group', 'update_group', 'delete_group', 'post_to_group', 'read_group_chat', 'present'])
+// its replies are rows of their own (room items), not a tool row. `present` is
+// absent by the user's call: no Delivering/Delivered row — the deliverable card is
+// its one surface (2026-11-14).
+const TOOL_ROWS = new Set(['message_bot', 'stop_bot', 'create_bot', 'update_bot', 'create_group', 'update_group', 'delete_group', 'post_to_group', 'read_group_chat'])
 
 // Group results quote the group's name; the web client parses it with this regex.
 const GROUP_RESULT_NAME = /^(?:Created group|Updated|Nothing changed in|Deleted|Posted in) "([^"]+)"/
@@ -237,9 +240,10 @@ function itemToRow(item, index, viewSeqOf, userAttachments) {
   }
 }
 
-/** Tool rows for one event list: a running call holds its row (present reads
- * 「正在交付…」), the result replaces it at the result's seq. A call whose result is
- * not in this list keeps its `running` row — a live snapshot's edge. */
+/** Tool rows for one event list: a running call holds its row, the result replaces
+ * it at the result's seq. A call whose result is not in this list keeps its
+ * `running` row — a live snapshot's edge. `present` makes no row at all: the
+ * deliverable card is the one surface for it (2026-11-14, user's call). */
 export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } = {}) {
   const hidden = new Set(exchangeTurns)
   const calls = new Map()
@@ -253,14 +257,7 @@ export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } =
       const callId = String(event.data?.callId ?? '')
       if (callId === '') continue
       if (typeof event.data?.turn === 'number' && hidden.has(event.data.turn)) continue
-      const args = isRecord(event.data?.arguments) ? event.data.arguments : undefined
-      calls.set(callId, { name, args, seq: event.seq, turn: event.data?.turn })
-      if (name !== 'present') continue
-      const count = Array.isArray(args?.files) ? args.files.length : 0
-      rows.push(row(`tool:${event.seq}`, 'tool', event.seq, event.data?.turn, event.time, {
-        tool: name, state: 'running', callId, filesCount: count,
-        label: count > 0 ? `正在交付 ${count} 个文件…` : '正在交付文件…',
-      }))
+      calls.set(callId, { name, args: isRecord(event.data?.arguments) ? event.data.arguments : undefined, seq: event.seq, turn: event.data?.turn })
       continue
     }
     if (event.type !== 'tool/result') continue
@@ -276,7 +273,6 @@ export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } =
     const result = textContentOf(message?.content)
     let label
     let target = raw
-    const count = Array.isArray(args?.files) ? args.files.length : 0
     switch (pending.name) {
       case 'message_bot':
         label = isError ? (raw !== '' ? `没能给 ${raw} 发消息` : '没能给其他 Bot 发消息') : (raw !== '' ? `消息发给了 ${nameOf(raw)}` : '消息发给了其他 Bot')
@@ -316,16 +312,12 @@ export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } =
         label = isError ? '没能读群聊' : (raw !== '' ? `阅读了群聊「${raw}」` : '阅读了群聊')
         target = raw
         break
-      case 'present':
-        label = isError ? '没能交付文件' : (count > 0 ? `已交付 ${count} 个文件` : '已交付文件')
-        break
       default:
         continue
     }
     rows.push(row(`tool:${event.seq}`, 'tool', event.seq, pending.turn, event.time, {
       tool: pending.name, state: isError ? 'error' : 'ok', callId,
       ...(typeof target === 'string' && target !== '' && !isError ? { target } : {}),
-      ...(pending.name === 'present' ? { filesCount: count } : {}),
       label,
     }))
   }
@@ -599,6 +591,8 @@ export function install(rt) {
    * delta and of a `since` replay; older reads page the Session log instead. */
   const buffers = new Map()
   const published = new Map()
+  /** One diagnostic line per Session and turn, at the moment a declared turn closes. */
+  const cardsLogged = new Set()
 
   const bufferOf = sessionId => {
     let buffer = buffers.get(sessionId)
@@ -625,6 +619,25 @@ export function install(rt) {
   })
 
   const eventsOf = buffer => [...buffer.events.values()]
+
+  // Diagnostic logging while the delta path is under observation (a phone saw a
+  // deliverable card only after a restart): engine.log through the host logger,
+  // at most one line per Session per TIMELINE_LOG_MS so a burst of events stays
+  // one line. `rt.timelineLog(sessionId, message)`.
+  const TIMELINE_LOG_MS = 5_000
+  const logStamps = new Map()
+  const logLine = (sessionId, message) => {
+    try {
+      rt.ctx.logger?.info?.('%s', `[ds-bot:timeline] ${sessionId} ${message}`)
+      console.info(`[ds-bot:timeline] ${sessionId} ${message}`)
+    } catch { /* a logging host is optional */ }
+  }
+  rt.timelineLog = (sessionId, message) => {
+    const now = Date.now()
+    if (now - (logStamps.get(sessionId) ?? 0) < TIMELINE_LOG_MS) return
+    logStamps.set(sessionId, now)
+    logLine(sessionId, message)
+  }
 
   /** A running round's replies so far, spliced at their relay call exactly the way
    * `mobile.js roomChat` places them (same item ids, so a client swaps the live
@@ -682,12 +695,33 @@ export function install(rt) {
       const base = { rows: [], seq, from: last.seq, bufferFrom, reset: true }
       return rt.roomOf(sessionId) !== undefined ? { ...base, ...roomStateOf(sessionId) } : base
     }
-    const rows = rowsOf(sessionId, events, undefined).filter(entry => {
+    const rows = rowsOf(sessionId, events, undefined, {
+      // The delta path is sync, so the Session header's cwd is out of reach here —
+      // the Bot's configured working folder is the same resolution the client makes.
+      cwd: rt.workDirOf?.({ botId: rt.chatOwners.get(sessionId) }),
+    }).filter(entry => {
       if (typeof entry.seq === 'number') return entry.seq > last.seq
       if (last.keys.has(entry.key)) return false
       last.keys.add(entry.key)
       return true
     })
+    // The moment a declared turn closes: did the card make it into the delta? One
+    // line per Session and turn — the evidence for (or against) the "card only
+    // after a restart" report, straight at the scene.
+    if (rt.roomOf(sessionId) === undefined) {
+      for (const event of events) {
+        if (event.type !== 'deliverables/presented' || !isPresentedData(event.data)) continue
+        const turn = event.data.turn
+        const logged = `${sessionId}:${turn}`
+        if (cardsLogged.has(logged)) continue
+        // "刚落": the turn's own turn/end is part of this delta's new span.
+        const justEnded = events.some(item => item.type === 'turn/end' && item.data?.turn === turn && typeof item.seq === 'number' && item.seq > last.seq)
+        if (!justEnded) continue
+        cardsLogged.add(logged)
+        const card = rows.find(entry => entry.kind === 'artifact' && entry.turn === turn)
+        logLine(sessionId, `turn ${turn} closed with a declaration: card ${card ? `generated (${card.key}, ${card.payload.files.length} files, delivered=${card.payload.delivered})` : 'NOT generated'}; delta rows=${rows.length} seq=${seq}`)
+      }
+    }
     if (rt.roomOf(sessionId) !== undefined) return { rows, seq, from: last.seq, bufferFrom, ...roomStateOf(sessionId) }
     return { rows, seq, from: last.seq, bufferFrom }
   }

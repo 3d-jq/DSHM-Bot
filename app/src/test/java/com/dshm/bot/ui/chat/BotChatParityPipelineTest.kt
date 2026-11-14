@@ -2,11 +2,8 @@ package com.dshm.bot.ui.chat
 
 import com.dshm.bot.MainDispatcherRule
 import com.dshm.bot.data.remote.BotFeedEvent
-import com.dshm.bot.data.remote.DshClient
 import com.dshm.bot.data.remote.DshMuxLog
 import com.dshm.bot.data.remote.DshRemoteApi
-import com.dshm.bot.data.remote.DsBotCapabilities
-import com.dshm.bot.data.remote.FakeDshServer
 import com.dshm.bot.data.remote.TimelineRequest
 import com.dshm.bot.data.remote.TimelineRow
 import com.dshm.bot.data.remote.TimelineRowPayload
@@ -14,12 +11,12 @@ import com.dshm.bot.data.remote.TimelineSnapshot
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -27,9 +24,9 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Phase 1b/1c 主管线切换的 VM 级测试：快照 + feed 增量 → entries、
- * 发送中→排队→插话→认领的三态流转、群聊 roomId 寻址与 running→false 收口、
- * kill-switch 回旧管线。
+ * Phase 1b/1c 行管线的 VM 级测试（唯一管线）：快照 + feed 增量 → entries、
+ * 发送中→排队→插话→认领的三态流转、撤回动作、群聊 roomId 寻址与 running→false 收口、
+ * earlier 游标分页。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class BotChatParityPipelineTest {
@@ -42,44 +39,11 @@ class BotChatParityPipelineTest {
     @Before
     fun setUp() {
         DshMuxLog.sink = { }
-        DsBotCapabilities.clear()
     }
 
     @After
     fun tearDown() {
         DshMuxLog.sink = defaultSink
-        DsBotCapabilities.clear()
-    }
-
-    /** 用 FakeDshServer 协商一份声明了 `timeline` 能力的 hello（进程级单例）。 */
-    private fun negotiateTimelineCapability() {
-        val hello = JSONObject()
-            .put("api", 1)
-            .put("apiMin", 1)
-            .put("apiMax", 1)
-            .put("plugin", JSONObject().put("name", "ds-bot").put("version", "test"))
-            .put("capabilities", JSONArray(listOf("state", "chat", "timeline")))
-            .put("boot", "boot-1")
-            .put("seq", 1)
-        FakeDshServer().use { server ->
-            server.responder = { request ->
-                when {
-                    request.path.startsWith(FakeDshServer.LOGIN_PATH_PREFIX) ->
-                        FakeDshServer.cookie("abc")
-
-                    request.path == "/api/bot" -> {
-                        val requested = JSONObject(request.body).optString("endpoint")
-                        val value = if (requested == "hello") hello.toString() else "{}"
-                        FakeDshServer.Response(200, body = """{"ok":true,"value":$value}""")
-                    }
-
-                    else -> FakeDshServer.Response(404)
-                }
-            }
-            server.start()
-            runBlocking { DsBotCapabilities.refresh(server.endpoint, DshClient(server.endpoint)) }
-        }
-        assertTrue(DsBotCapabilities.timelineSupported())
     }
 
     private class FakeApi : DshRemoteApi {
@@ -88,10 +52,16 @@ class BotChatParityPipelineTest {
         val chatEndpoints = mutableListOf<String>()
         val rpcCalls = mutableListOf<Pair<String, JSONObject>>()
         val sendRequestIds = mutableListOf<String>()
+
+        /** 首屏快照（reset）与翻页（cursor）分别给的行。 */
         var snapshotRows: List<TimelineRow> = emptyList()
+        var earlierRows: List<TimelineRow> = emptyList()
+        var snapshotCursor: JSONObject? = null
+        var earlierCursor: JSONObject? = null
         var snapshotSeq: Long = 40
 
         override suspend fun bot(endpoint: String, payload: JSONObject): JSONObject = when (endpoint) {
+            // 旧管线端点：行管线不该再调用（调用就记下来，测试断言为空）。
             "chat", "room-chat" -> {
                 chatEndpoints += endpoint
                 JSONObject().put("sessionId", "s-1").put("items", JSONArray())
@@ -107,12 +77,13 @@ class BotChatParityPipelineTest {
 
         override suspend fun timeline(request: TimelineRequest): TimelineSnapshot {
             timelineRequests += request
+            val paging = request.cursor != null
             return TimelineSnapshot(
                 sessionId = "s-1",
                 roomId = null,
                 seq = snapshotSeq,
-                rows = snapshotRows,
-                cursor = null,
+                rows = if (paging) earlierRows else snapshotRows,
+                cursor = if (paging) earlierCursor else snapshotCursor,
                 running = null,
                 speaking = null,
             )
@@ -139,7 +110,7 @@ class BotChatParityPipelineTest {
                 },
             )
 
-        /** feed `timeline` 增量帧（走真实 SSE 数据形状：JSON → 解析器）。 */
+        /** feed `timeline` 增量帧（走真实数据形状：JSON → 解析器）。 */
         fun emitTimeline(vararg rows: TimelineRow, isGroup: Boolean = false, running: Boolean? = null) {
             val data = JSONObject()
             if (isGroup) data.put("roomId", "room-1") else data.put("botId", "bot-1")
@@ -181,7 +152,6 @@ class BotChatParityPipelineTest {
     private fun viewModel(
         api: FakeApi,
         scheduler: TestCoroutineScheduler,
-        parity: Boolean = true,
         isGroup: Boolean = false,
     ): BotChatViewModel {
         val viewModel = BotChatViewModel(
@@ -190,10 +160,7 @@ class BotChatParityPipelineTest {
             isGroup = isGroup,
             endpoint = null,
             appContext = null,
-            dependencies = BotChatDependencies(
-                remote = api, transport = null, speech = null, mux = null,
-                timelineParity = parity,
-            ),
+            dependencies = BotChatDependencies(remote = api, transport = null, speech = null, mux = null),
         )
         scheduler.runCurrent()
         return viewModel
@@ -201,7 +168,6 @@ class BotChatParityPipelineTest {
 
     @Test
     fun snapshotAndIncrementDriveEntriesWithoutTheLegacyPipeline() {
-        negotiateTimelineCapability()
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
         api.snapshotRows = listOf(api.row("user:1", "user", 1L), api.row("bot:2", "bot", 2L))
@@ -214,8 +180,8 @@ class BotChatParityPipelineTest {
             viewModel.uiState.value.entries.map { it.id },
         )
         assertEquals(false, viewModel.uiState.value.loading)
-        assertTrue("快照走 timeline 端点", api.timelineRequests.size == 1)
-        assertTrue("parity 下不拉旧历史", api.chatEndpoints.isEmpty())
+        assertEquals("快照走 timeline 端点", 1, api.timelineRequests.size)
+        assertTrue("行管线不该再调旧历史端点", api.chatEndpoints.isEmpty())
 
         // feed 增量 → 追行。
         api.emitTimeline(api.row("bot:3", "bot", 3L))
@@ -228,7 +194,6 @@ class BotChatParityPipelineTest {
 
     @Test
     fun echoTransitionsThroughQueuedSteeringAndClaimed() {
-        negotiateTimelineCapability()
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
         api.snapshotRows = emptyList()
@@ -266,7 +231,6 @@ class BotChatParityPipelineTest {
 
     @Test
     fun recallPendingSendsUpdateQueueRemoveAndDropsTheRow() {
-        negotiateTimelineCapability()
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
         api.snapshotRows = listOf(api.row("inbox:i-1", "inbox", null, requestId = "req-1", slot = "next-turn"))
@@ -287,7 +251,6 @@ class BotChatParityPipelineTest {
 
     @Test
     fun groupChatUsesRoomIdAndRefetchesSnapshotWhenRoundCloses() {
-        negotiateTimelineCapability()
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
         api.snapshotRows = listOf(api.row("user:relay-9:0", "user", null), api.row("bot:relay-9:1", "bot", null))
@@ -316,30 +279,36 @@ class BotChatParityPipelineTest {
         assertNull("收口重拉是全量（不带 since）", api.timelineRequests.last().since)
     }
 
+    /**
+     * earlier 分页走 timeline cursor：翻页请求带 cursor（beforeSeq），更早的一页
+     * 按 key=身份**前插**进列表，游标推进到 null 时 `hasEarlier` 收掉。
+     */
     @Test
-    fun killSwitchFallsBackToTheLegacyPipeline() {
-        negotiateTimelineCapability()
+    fun earlierPageLoadsWithCursorAndPrependsRows() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
-        // 注入位不点 parity：kill-switch 关 → 整条旧管线。
-        val viewModel = viewModel(api, scheduler, parity = false)
+        // 首屏（最新）：user@10 + bot@11，游标 beforeSeq=10（还有更早的）。
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L), api.row("bot:11", "bot", 11L))
+        api.snapshotCursor = JSONObject().put("beforeSeq", 10)
+
+        val viewModel = viewModel(api, scheduler)
+        assertEquals(listOf("user:10", "bot:11"), viewModel.uiState.value.entries.map { it.id })
+        assertTrue("游标说还有更早的历史", viewModel.uiState.value.hasEarlier)
+
+        // 翻一页：older@5 插在前面，游标收口。
+        api.earlierRows = listOf(api.row("bot:5", "bot", 5L))
+        api.earlierCursor = null
+        viewModel.loadEarlier()
         scheduler.runCurrent()
 
-        assertTrue("回退路径要拉旧历史", api.chatEndpoints.isNotEmpty())
-        assertEquals("回退路径不发 timeline 请求", 0, api.timelineRequests.size)
-
-        // 旧管线的 feed message 继续驱动 entries。
-        api.feedEvents.tryEmit(
-            BotFeedEvent(
-                event = "message",
-                data = JSONObject()
-                    .put("botId", "bot-1")
-                    .put("item", JSONObject().put("kind", "bot").put("text", "旧管线回复").put("seq", 5))
-                    .toString(),
-            ),
+        val pagingRequest = api.timelineRequests.last()
+        assertEquals("翻页请求带游标", 10L, pagingRequest.cursor?.optLong("beforeSeq"))
+        assertEquals(
+            "更早的一页应插在前面",
+            listOf("bot:5", "user:10", "bot:11"),
+            viewModel.uiState.value.entries.map { it.id },
         )
-        scheduler.runCurrent()
-        assertTrue(viewModel.uiState.value.entries.any { it.text == "旧管线回复" })
+        assertFalse("最后一页之后 hasEarlier 应收掉", viewModel.uiState.value.hasEarlier)
     }
 
     private fun lastRequestId(api: FakeApi): String =

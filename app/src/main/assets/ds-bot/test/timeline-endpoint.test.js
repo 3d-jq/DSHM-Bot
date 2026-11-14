@@ -34,10 +34,12 @@ const EVENTS = [
 
 function fakeRt() {
   const sessionListeners = []
+  const logLines = []
   const ctx = {
     on(name, handler) { if (name === 'session/event') sessionListeners.push(handler) },
     effect() {},
     get() { return undefined },
+    logger: { info: (template, ...args) => logLines.push(String(template).replace('%s', args.join(' '))), warn() {} },
     sessionController: {
       page: async (request) => {
         const through = request.throughSeq ?? Infinity
@@ -78,7 +80,7 @@ function fakeRt() {
   installParts(rt)
   installProjection(rt)
   installFeed(rt)
-  return { rt, sessionListeners }
+  return { rt, sessionListeners, logLines }
 }
 
 test('the endpoint answers with ascending wrapped rows: official displayItems plus tool/artifact/failure/inbox', async () => {
@@ -91,9 +93,9 @@ test('the endpoint answers with ascending wrapped rows: official displayItems pl
   // Official rows (real displayItems): user bubbles and the closing texts…
   assert.ok(keys.includes('user:2') && keys.includes('user:9'), `缺官方 user 行：${keys}`)
   assert.ok(keys.includes('bot:6') && keys.includes('bot:13'), `缺官方 bot 行：${keys}`)
-  // …plus the rows the web client draws in the browser:
-  assert.ok(keys.includes('tool:4'), `缺 present 已交付行：${keys}`) // call 行已被 result 行换下
-  assert.ok(!keys.includes('tool:3'), '结果到了「正在交付」行还应撤下')
+  // …plus the rows the web client draws in the browser. `present` draws NO tool
+  // row (user's call, 2026-11-14): the deliverable card is its one surface.
+  assert.ok(!keys.includes('tool:3') && !keys.includes('tool:4'), `present 不该再发工具行：${keys}`)
   assert.ok(keys.includes('present:1'), '缺第一轮交付卡')
   assert.ok(keys.includes('retry:10'), '缺重试行')
   assert.ok(keys.includes('turnfail:14'), '缺轮失败行')
@@ -111,21 +113,18 @@ test('the endpoint answers with ascending wrapped rows: official displayItems pl
   const card2 = answer.rows.find(row => row.key === 'present:2')
   assert.deepEqual(card2.payload.files.map(file => file.path), ['/root/w/纪要.md'])
   assert.equal(card2.payload.delivered, false)
-  const deliveredRow = answer.rows.find(row => row.key === 'tool:4')
-  assert.equal(deliveredRow.payload.state, 'ok')
-  assert.equal(deliveredRow.payload.label, '已交付 1 个文件')
+  assert.ok(!answer.rows.some(row => row.kind === 'tool' && row.payload.tool === 'present'), 'present 不得以任何工具行形态出现')
 })
 
-test('the running row of a present survives only when its result is outside the window', async () => {
+test('a present whose result is outside the window makes no row at all (no pending row to hang)', async () => {
   const { rt } = fakeRt()
-  // A page that stops before the result: the snapshot edge keeps 「正在交付」.
+  // A page that stops before the result: with the two-state rows gone, there is
+  // nothing to hang and nothing to clean — the card waits for turn/end.
   const events = EVENTS.slice(0, 3)
   rt.ctx.sessionController.page = async () => ({ records: events.map(event => ({ event })), hasMore: true })
   const answer = await rt.timelineEndpoint({ botId: 'bot-1' })
-  const pendingRow = answer.rows.find(row => row.key === 'tool:3')
-  assert.ok(pendingRow, '窗口边缘的「正在交付」行应在')
-  assert.equal(pendingRow.payload.state, 'running')
-  assert.equal(pendingRow.payload.label, '正在交付 1 个文件…')
+  assert.ok(answer.rows.every(row => row.kind !== 'tool'), '窗口边缘不该有 present 工具行')
+  assert.ok(answer.rows.every(row => row.kind !== 'artifact'), '轮没闭合不该有产物卡')
 })
 
 test(`since replay bridges from the event buffer; a gap falls back to the log with a partial hint`, async () => {
@@ -221,6 +220,47 @@ test('a room feed delta carries the live rows plus the round state', async () =>
   // carries that state alongside the rows.
   assert.equal(last.running, true)
   assert.equal(last.speaking, 'b2')
+})
+
+test('the delta path delivers the deliverable card live: cursor walking over turn/start → presented → turn/end', async () => {
+  // 对抗用例（用户报「产物卡要重启才出现」）：事件逐条进缓冲、timelineDelta 逐次
+  // 调用模拟客户端游标推进——turn/end 落盘的那一次 delta 必须带着 present:<turn> 卡。
+  const { rt, sessionListeners, logLines } = fakeRt()
+  const sequence = [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 9 } },
+    { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '做一份 PPT' }] } },
+    { type: 'tool/call', seq: 3, time: 1200, data: { turn: 9, callId: 'p9', name: 'present', arguments: { files: [{ path: '报告.pptx', description: '定稿' }] } } },
+    { type: 'tool/result', seq: 4, time: 1300, data: { turn: 9, message: { toolCallId: 'p9', content: [{ type: 'text', text: 'Presented /root/w/报告.pptx' }] } } },
+    { type: 'deliverables/presented', seq: 5, time: 1400, data: { turn: 9, callId: 'p9', files: [{ path: '报告.pptx', description: '定稿' }] } },
+    { type: 'assistant/message', seq: 6, time: 1500, data: { turn: 9, message: { content: [{ type: 'text', text: '做好了。' }] } } },
+    { type: 'turn/end', seq: 7, time: 1600, data: { turn: 9, reason: { kind: 'completed' } } },
+  ]
+  let cardDelta = false
+  for (const item of sequence) {
+    for (const handler of sessionListeners) handler({ id: 'sess-1' }, item)
+    const delta = rt.timelineDelta('sess-1')
+    const card = delta.rows.find(row => row.key === 'present:9')
+    if (item.type === 'turn/end') {
+      assert.ok(card, `turn/end 那次 delta 必须带产物卡（实收：${delta.rows.map(row => row.key).join(', ') || '无'}）`)
+      assert.equal(card.seq, 7, '卡贴在该轮 turn/end')
+      assert.deepEqual(card.payload.files.map(file => file.path), ['/root/w/报告.pptx'])
+      assert.equal(card.payload.delivered, true)
+      cardDelta = true
+    } else {
+      assert.equal(card, undefined, 'turn/end 之前不出卡（轮闭合才出）')
+    }
+  }
+  assert.ok(cardDelta, '整个序列跑完没见到卡')
+
+  // The turn-close diagnostic fired once, at the turn/end delta, and says the card
+  // was generated — the on-device evidence line for the delay report.
+  const diagnostics = logLines.filter(line => line.includes('turn 9 closed with a declaration'))
+  assert.equal(diagnostics.length, 1, `出卡定点日志应恰好一条：${logLines.join(' | ')}`)
+  assert.ok(diagnostics[0].includes('card generated'), `日志应说卡已生成：${diagnostics[0]}`)
+
+  // A repeat walk does not log the turn again (one line per Session and turn).
+  rt.timelineDelta('sess-1')
+  assert.equal(logLines.filter(line => line.includes('turn 9 closed')).length, 1, '定点日志不该重复')
 })
 
 test('channel wiring: timeline is a READ endpoint answered by case timeline', () => {
