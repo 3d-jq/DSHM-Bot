@@ -1,7 +1,6 @@
 package com.dshm.bot.domain.model
 
 import java.time.Instant
-import com.dshm.bot.ui.home.RoomMemberUi
 
 /** 头像占位图形。真实 Bot 头像（DS Bot 的 3D 角色或用户照片）接入后由服务端下发。 */
 enum class AvatarGlyph {

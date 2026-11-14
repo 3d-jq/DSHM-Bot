@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文流量只放行本机引擎：proot + node 只监听 127.0.0.1（见 ProotCommand 的
+  `dsh web: http://127.0.0.1:port/?token=...`），HTTP/WS 明文是对它的最低要求；
+  其余域名一律要求 TLS，不再像 usesCleartextTraffic="true" 那样全局放行。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

@@ -11,7 +11,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import com.dshm.bot.MainActivity
 import com.dshm.bot.R
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 对话通知：回复完成 / 出错、等待审批、等待回答。
@@ -22,7 +21,12 @@ import java.util.concurrent.ConcurrentHashMap
 object ChatNotifier {
     private const val CHANNEL_CHAT = "chat"
     private const val CHANNEL_ATTENTION = "chat_attention"
-    private val recent = ConcurrentHashMap<String, Long>()
+
+    /** 每种 `bot:kind` 只留最近一次通知时间；有上限，超限淘汰最旧，常驻进程不吃内存。 */
+    private const val MAX_RECENT = 64
+    private val recent = object : LinkedHashMap<String, Long>(16, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>): Boolean = size > MAX_RECENT
+    }
 
     enum class Kind { DONE, ERROR, APPROVAL, QUESTION }
 
@@ -66,13 +70,13 @@ object ChatNotifier {
             .setAutoCancel(true)
             .build()
         manager.notify(notificationId(botId, kind), notification)
-        recent["$botId:${kind.name}"] = System.currentTimeMillis()
+        synchronized(recent) { recent["$botId:${kind.name}"] = System.currentTimeMillis() }
     }
 
     /** per-chat 的错误/完成通知与全局 tracker 共用：全局不要重复补一条。 */
     fun wasNotifiedRecently(botId: String, kind: Kind, withinMs: Long = 20_000L): Boolean {
-        val at = recent["$botId:${kind.name}"] ?: return false
-        return System.currentTimeMillis() - at < withinMs
+        val at = synchronized(recent) { recent["$botId:${kind.name}"] }
+        return at != null && System.currentTimeMillis() - at < withinMs
     }
 
     /** 用户打开这个 Bot 的对话：它的通知都不再需要。 */

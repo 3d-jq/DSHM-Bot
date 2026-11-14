@@ -25,14 +25,9 @@ data class ChatRowUi(
     val isMain: Boolean = false,
 )
 
-data class RoomMemberUi(
-    val id: String,
-    val name: String,
-    val inkId: String?,
-    val avatarImage: String?,
-    val avatarShape: String?,
-    val role: String? = null,
-)
+/** 真值已下沉到 `domain/model/RoomMemberUi.kt`（domain 反向依赖 UI 的层次倒置）。
+ *  旧 import 路径（`data/remote` 等仍在用）经这里再导出，迁移完即可删除。 */
+typealias RoomMemberUi = com.dshm.bot.domain.model.RoomMemberUi
 
 /** 团队里的一个群聊（事件行认群用：`阅读群聊` 要画成员头像堆叠）。 */
 data class TeamRoomUi(

@@ -35,6 +35,9 @@ __pycache__/
 # 构建日志
 build-log.txt
 
+# 本地检查输出（曾误提交过一次，见 git rm --cached 记录）
+final-check.txt
+
 # 本地构建/检查日志
 *.log
 

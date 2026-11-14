@@ -15,6 +15,7 @@ import com.dshm.bot.data.remote.RemoteDshApi
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
 import com.dshm.bot.domain.model.DshGoPreferences
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -28,15 +29,20 @@ import org.json.JSONObject
  *
  * 只负责后台系统通知；App 在前台时由各对话页自己的界面提示，不打扰。
  * 全局和页面内可能同时看到同一次事件，[ChatNotifier] 会用最近通知时间去重。
+ *
+ * 端点变化走 [setEndpoint]：之前按端点 key 各建一个 VM，但 ViewModelStore 不会
+ * 清理旧 key，引擎每重启一次就多留一个死端点的订阅；现在收敛成单实例。
  */
 class ChatAlertViewModel(
     context: Context,
-    private val endpoint: RuntimeEndpoint?,
+    endpoint: RuntimeEndpoint? = null,
 ) : ViewModel() {
 
     private val appContext = context.applicationContext
-    private val repository = SharedPrefsSettingsRepository(appContext)
-    private val api = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
+    private val repository = SharedPrefsSettingsRepository.getInstance(appContext)
+    private var endpoint: RuntimeEndpoint? = endpoint
+    private var api: RemoteDshApi? = endpoint?.let { RemoteDshApi(DshClients.of(it)) }
+    private var connectionJob: Job? = null
     private var notifyEnabled = true
     private var prefs = DshGoPreferences()
 
@@ -56,19 +62,36 @@ class ChatAlertViewModel(
                     prefs = value
                 }
         }
-        if (endpoint != null) {
-            viewModelScope.launch {
-                val mux = DshMuxHub.start(endpoint)
-                launch {
-                    mux.generations.collect {
-                        mux.pendingRequests().forEach { pending ->
-                            pending.approval?.let(::notifyApproval)
-                            pending.question?.let(::notifyQuestion)
-                        }
+        endpoint?.let(::connect)
+    }
+
+    /** 引擎启动 / 重启 / 停止时更新端点：换端点重连，语义与「每个端点一个新 VM」一致。 */
+    fun setEndpoint(newEndpoint: RuntimeEndpoint?) {
+        if (endpoint?.baseUrl == newEndpoint?.baseUrl && endpoint?.token == newEndpoint?.token) return
+        endpoint = newEndpoint
+        connectionJob?.cancel()
+        connectionJob = null
+        // 旧引擎的会话状态（在跑 / 提醒过）对新引擎没有意义，全部重来。
+        running.clear()
+        runningSince.clear()
+        names.clear()
+        notifiedEvents.clear()
+        api = newEndpoint?.let { RemoteDshApi(DshClients.of(it)) }
+        newEndpoint?.let(::connect)
+    }
+
+    private fun connect(endpoint: RuntimeEndpoint) {
+        connectionJob = viewModelScope.launch {
+            val mux = DshMuxHub.start(endpoint)
+            launch {
+                mux.generations.collect {
+                    mux.pendingRequests().forEach { pending ->
+                        pending.approval?.let(::notifyApproval)
+                        pending.question?.let(::notifyQuestion)
                     }
                 }
-                mux.hostEvents.collect(::handleEvent)
             }
+            mux.hostEvents.collect(::handleEvent)
         }
     }
 
@@ -197,8 +220,9 @@ class ChatAlertViewModel(
     }
 
     companion object {
-        fun factory(context: Context, endpoint: RuntimeEndpoint?): ViewModelProvider.Factory = viewModelFactory {
-            initializer { ChatAlertViewModel(context, endpoint) }
+        /** 端点不进工厂：VM 是单实例，端点变化由 [ChatAlertViewModel.setEndpoint] 处理。 */
+        fun factory(context: Context): ViewModelProvider.Factory = viewModelFactory {
+            initializer { ChatAlertViewModel(context) }
         }
     }
 }

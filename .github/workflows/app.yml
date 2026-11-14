@@ -1,0 +1,47 @@
+name: app
+
+# App 质量流水线：单元测试 + lint。与 README「全绿才提交」的约定对齐 ——
+# lint 的「零 warning 才构建通过」（dshm.lintWarningsAsErrors=true）只在
+# 本机跑没有约束力，得由 CI 兜底。
+#
+# 触发：push 与 PR。rootfs 构建（runtime.yml）是独立流水线，互不阻塞。
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # JDK 17+ 即可，对齐本机用的 temurin 21；cache: gradle 复用依赖与 wrapper 分发。
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # runner 自带 Android SDK（ANDROID_HOME 已设），无需额外装。
+      - name: Unit tests
+        run: ./gradlew --console=plain :app:testDebugUnitTest
+
+      # abortOnError=true（见 app/build.gradle.kts 的 lint 配置），有 error 直接红。
+      - name: Lint
+        run: ./gradlew --console=plain :app:lintDebug
+
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-debug.*
+          retention-days: 14

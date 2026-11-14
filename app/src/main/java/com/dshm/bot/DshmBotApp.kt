@@ -188,16 +188,16 @@ fun DshmBotApp(
         key = "bot-prefs:${(engineState as? RuntimeState.Running)?.endpoint?.baseUrl.orEmpty()}",
         factory = BotPrefsViewModel.factory((engineState as? RuntimeState.Running)?.endpoint),
     )
-    val chatAlertEndpoint = (engineState as? RuntimeState.Running)?.endpoint
-    @Suppress("UNUSED_VARIABLE")
+    // 对话告警不按端点 key 建 VM：ViewModelStore 不会清理旧 key，引擎每重启一次
+    // 就多留一个死端点的订阅。单实例 + setEndpoint，与下面几个 ViewModel 的模式一致。
     val chatAlertViewModel: ChatAlertViewModel = viewModel(
-        key = "chat-alerts:${chatAlertEndpoint?.baseUrl.orEmpty()}:${chatAlertEndpoint?.token.orEmpty()}",
-        factory = ChatAlertViewModel.factory(appContext, chatAlertEndpoint),
+        factory = ChatAlertViewModel.factory(appContext),
     )
     // 「引擎就绪」不再单独弹通知：引擎常驻前台服务自己有一条
     // （`RuntimeForegroundService`），再来一条只是重复打扰。
     LaunchedEffect((engineState as? RuntimeState.Running)?.endpoint) {
         val endpoint = (engineState as? RuntimeState.Running)?.endpoint
+        chatAlertViewModel.setEndpoint(endpoint)
         accountViewModel.setEndpoint(endpoint)
         scheduledTasksViewModel.setEndpoint(endpoint)
         pluginMarketViewModel.setEndpoint(endpoint)
@@ -259,16 +259,28 @@ fun DshmBotApp(
     }
 
     // 点对话通知回到对应 Bot：通知栏把 botId 带进来，这里消费掉并打开聊天。
+    // 注意 screenKey 的优先级里 web / 诊断 / 账号 / 新建 Bot 等页都排在对话前面，
+    // 所以这些全屏页必须一并关掉，否则停在那些页面时点通知等于没点。
     LaunchedEffect(Unit) {
         while (true) {
             MainActivity.consumePendingOpenBot()?.let { id ->
-                openBotId = id
-                botDetailsOpen = false
-                botBrowserOpen = false
-                settingsOpen = false
+                navForward = true
+                newBotOpen = false
+                newGroupOpen = false
+                webOpen = false
+                diagnosticsOpen = false
                 engineOpen = false
+                appearanceOpen = false
+                chatFontOpen = false
+                languageOpen = false
+                accountOpen = false
+                botBrowserOpen = false
+                botDetailsOpen = false
+                botSubPage = null
+                settingsOpen = false
                 searchOpen = false
                 settingsStack = emptyList()
+                openBotId = id
             }
             kotlinx.coroutines.delay(400)
         }

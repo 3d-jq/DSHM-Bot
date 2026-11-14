@@ -1,6 +1,7 @@
 package com.dshm.bot.data.settings
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.domain.model.ChatFontSize
@@ -13,10 +14,15 @@ import com.dshm.bot.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 
-/** 用 SharedPreferences 持久化 App 设置与 dsh-Go 细分偏好。 */
-class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
+/**
+ * 用 SharedPreferences 持久化 App 设置与 dsh-Go 细分偏好。
+ *
+ * **进程内单例**（[getInstance]）：偏好值缓存在各实例自己的 `MutableStateFlow` 里，
+ * 构造函数不再对外暴露 —— 如果设置页（写端）和通知/对话（读端）各 new 一个实例，
+ * 读端的快照永远不会跟着写端刷新（表现为「关掉通知还在响」），所以必须共用一个。
+ */
+class SharedPrefsSettingsRepository private constructor(private val prefs: SharedPreferences) : SettingsRepository {
 
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val themeMode = MutableStateFlow(readEnum(KEY_THEME_MODE, ThemeMode.SYSTEM))
     private val chatFontSize = MutableStateFlow(readEnum(KEY_CHAT_FONT, ChatFontSize.STANDARD))
     private val language = MutableStateFlow(readEnum(KEY_LANGUAGE, AppLanguage.SYSTEM))
@@ -122,8 +128,23 @@ class SharedPrefsSettingsRepository(context: Context) : SettingsRepository {
         return runCatching { enumValueOf<T>(raw) }.getOrDefault(default)
     }
 
-    private companion object {
-        const val PREFS_NAME = "dshm_settings"
+    companion object {
+        @Volatile
+        private var instance: SharedPrefsSettingsRepository? = null
+
+        /** 进程内唯一实例：写端（设置页）与读端（通知 / 对话）必须共用，偏好改动才即时互通。 */
+        fun getInstance(context: Context): SharedPrefsSettingsRepository =
+            instance ?: synchronized(this) {
+                instance ?: SharedPrefsSettingsRepository(
+                    context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
+                ).also { instance = it }
+            }
+
+        /** 仅 JVM 单测用：直接注入 prefs（生产路径一律走 [getInstance]）。 */
+        internal fun forPrefs(prefs: SharedPreferences): SharedPrefsSettingsRepository =
+            SharedPrefsSettingsRepository(prefs)
+
+        private const val PREFS_NAME = "dshm_settings"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_CHAT_FONT = "chat_font_size"
         const val KEY_LANGUAGE = "language"
