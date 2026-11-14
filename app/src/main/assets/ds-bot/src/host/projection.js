@@ -660,6 +660,10 @@ export function install(rt) {
     if (id === undefined) return
     if (!rt.isBotSession(id) && rt.roomOf(id) === undefined) return
     record(id, event)
+    // 诊断：声明到达引擎的时刻，用来量「present → 卡出现」的延迟。
+    if (event?.type === 'deliverables/presented' && typeof event.seq === 'number') {
+      logLine(id, `PRESENT arrived t=${Date.now()} seq=${event.seq} turn=${event.data?.turn}`)
+    }
   })
 
   const eventsOf = buffer => [...buffer.events.values()]
@@ -680,6 +684,11 @@ export function install(rt) {
     const now = Date.now()
     if (now - (logStamps.get(sessionId) ?? 0) < TIMELINE_LOG_MS) return
     logStamps.set(sessionId, now)
+    logLine(sessionId, message)
+  }
+  // 关键事件（卡帧）绕过限频：诊断「卡不及时」时不能把证据吞掉。
+  rt.timelineLog.force = (sessionId, message) => {
+    logStamps.set(sessionId, Date.now())
     logLine(sessionId, message)
   }
 
@@ -764,7 +773,7 @@ export function install(rt) {
         if (!justEnded) continue
         cardsLogged.add(logged)
         const card = rows.find(entry => entry.kind === 'artifact' && entry.turn === turn)
-        logLine(sessionId, `turn ${turn} closed with a declaration: card ${card ? `generated (${card.key}, ${card.payload.files.length} files, delivered=${card.payload.delivered})` : 'NOT generated'}; delta rows=${rows.length} seq=${seq}`)
+        logLine(sessionId, `CARD t=${Date.now()} turn ${turn} closed: card ${card ? `generated (${card.key}, ${card.payload.files.length} files)` : 'NOT generated'}; delta rows=${rows.length} seq=${seq}`)
       }
     }
     if (rt.roomOf(sessionId) !== undefined) return { rows, seq, from: last.seq, bufferFrom, ...roomStateOf(sessionId) }

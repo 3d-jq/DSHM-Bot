@@ -45,12 +45,10 @@ import androidx.compose.foundation.verticalScroll
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.ui.settings.SettingsAnchoredMenu
-import com.dshm.bot.ui.settings.SettingsInput
 import com.dshm.bot.ui.settings.SettingsMenuItem
-import com.dshm.bot.ui.settings.SettingsSheet
-import com.dshm.bot.ui.settings.ScheduleTimePickerField
-import com.dshm.bot.ui.components.rememberWindowHeightDp
 import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSheet
+import com.dshm.bot.ui.components.rememberWindowHeightDp
 import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /**
@@ -903,100 +901,6 @@ internal fun FolderRow(
                 .size(Dshm.spacing.statusDot)
                 .clip(RoundedCornerShape(Dshm.radius.pill))
                 .background(if (picked) Dshm.colors.accent else Dshm.colors.divider),
-        )
-    }
-}
-
-/** 定时任务列表：底部面板，行内直接删除；可选一个「新增」入口。 */
-@Composable
-internal fun SchedulesSheet(
-    tasks: List<BotScheduleTask>,
-    onDelete: (BotScheduleTask) -> Unit,
-    onDismiss: () -> Unit,
-    onNew: (() -> Unit)? = null,
-) {
-    SettingsSheet(title = stringResource(R.string.bot_settings_schedules), onDismiss = onDismiss) {
-        if (tasks.isEmpty()) {
-            Text(
-                text = stringResource(R.string.bot_settings_schedule_none),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textTertiary,
-            )
-        } else {
-            Column {
-                tasks.forEachIndexed { index, task ->
-                    if (index > 0) {
-                        androidx.compose.material3.HorizontalDivider(color = Dshm.colors.divider)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = Dshm.spacing.sm),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // 与密钥 / 能力列表同款首字母方块：底部面板和 Bot 设置共用这个列表。
-                        Box(
-                            modifier = Modifier
-                                .size(Dshm.spacing.avatar)
-                                .clip(RoundedCornerShape(Dshm.radius.sm))
-                                .background(Dshm.colors.surfaceMuted),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = task.title.trim().take(1).uppercase().ifEmpty { "?" },
-                                style = Dshm.typography.rowTitle,
-                                color = Dshm.colors.textSecondary,
-                            )
-                        }
-                        Spacer(Modifier.width(Dshm.spacing.md))
-                        Column(Modifier.weight(1f)) {
-                            Text(task.title, style = Dshm.typography.rowTitle, color = Dshm.colors.textPrimary)
-                            Text(task.prompt, style = Dshm.typography.rowPreview, color = Dshm.colors.textSecondary)
-                        }
-                        TextButton(onClick = { onDelete(task) }) {
-                            Text(stringResource(R.string.bot_settings_schedule_delete), color = Dshm.colors.danger)
-                        }
-                    }
-                }
-            }
-        }
-        if (onNew != null) {
-            Spacer(Modifier.height(Dshm.spacing.md))
-            TextButton(onClick = onNew) { Text(stringResource(R.string.bot_settings_schedule_new)) }
-        }
-    }
-}
-
-/** 新建定时任务：底部面板。 */
-@Composable
-internal fun NewScheduleSheet(
-    onDismiss: () -> Unit,
-    onSave: (String, String, String) -> Unit,
-) {
-    var title by remember { mutableStateOf("") }
-    var prompt by remember { mutableStateOf("") }
-    var time by remember { mutableStateOf("09:00") }
-    SettingsSheet(title = stringResource(R.string.bot_settings_schedule_new), onDismiss = onDismiss) {
-        SettingsInput(
-            value = title,
-            onValueChange = { title = it },
-            placeholder = stringResource(R.string.bot_settings_schedule_title),
-        )
-        Spacer(Modifier.height(Dshm.spacing.sm))
-        SettingsInput(
-            value = prompt,
-            onValueChange = { prompt = it },
-            placeholder = stringResource(R.string.bot_settings_schedule_prompt),
-            singleLine = false,
-        )
-        Spacer(Modifier.height(Dshm.spacing.sm))
-        ScheduleTimePickerField(
-            value = time,
-            onValueChange = { time = it },
-        )
-        Spacer(Modifier.height(Dshm.spacing.lg))
-        SettingsPrimaryButton(
-            text = stringResource(android.R.string.ok),
-            onClick = { onSave(title.trim(), prompt.trim(), time.trim()) },
-            enabled = title.isNotBlank() && prompt.isNotBlank(),
         )
     }
 }

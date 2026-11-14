@@ -102,7 +102,10 @@ export function install(rt) {
         // Delta-path diagnostics (a phone saw cards only after a restart): one
         // rate-limited line per Session — the row keys this frame carries, cards
         // flagged. `timelineLog` lives in projection.js; its absence is fine.
-        rt.timelineLog?.(session.id, `publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}${delta.rows.some(row => row.kind === 'artifact') ? ' · has artifact card' : ''}`)
+        const hasCard = delta.rows.some(row => row.kind === 'artifact')
+        rt.timelineLog?.(session.id, `FRAME t=${Date.now()} publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}${hasCard ? ' · HAS ARTIFACT CARD' : ''}`)
+        // 有卡就绕过限频单独打一行，保证「卡到底发了没」一定有证据。
+        if (hasCard) rt.timelineLog?.force?.(session.id, `CARD-FRAME t=${Date.now()} keys=[${delta.rows.filter(row => row.kind === 'artifact').map(row => row.key).join(', ')}]`)
       }
     }
   })

@@ -294,7 +294,7 @@ test('the delta path delivers the deliverable card live: cursor walking over tur
 
   // The turn-close diagnostic fired once, at the turn/end delta, and says the card
   // was generated — the on-device evidence line for the delay report.
-  const diagnostics = logLines.filter(line => line.includes('turn 9 closed with a declaration'))
+  const diagnostics = logLines.filter(line => line.includes('CARD t=') && line.includes('turn 9 closed'))
   assert.equal(diagnostics.length, 1, `出卡定点日志应恰好一条：${logLines.join(' | ')}`)
   assert.ok(diagnostics[0].includes('card generated'), `日志应说卡已生成：${diagnostics[0]}`)
 

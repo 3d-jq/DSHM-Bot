@@ -1085,7 +1085,13 @@ class BotChatViewModel internal constructor(
         lastParityLogAt = now
         val keys = rows.take(6).joinToString(",") { it.key }
         val more = if (rows.size > 6) "…+${rows.size - 6}" else ""
-        DshMuxLog.log("timeline $source：${rows.size} 行 [$keys$more] seq=$paritySeq 缓冲=${parityRows.size}")
+        val cardKeys = rows.filter { it.kind == TimelineRow.KIND_ARTIFACT }.joinToString(",") { it.key }
+        // 卡帧绕过限频：诊断「产物卡不及时」时，客户端应用的时刻必须有证据。
+        val cardLog = cardKeys.isNotEmpty()
+        val throttled = now - lastParityLogAt < PARITY_LOG_MIN_INTERVAL_MS
+        if (!cardLog && throttled) return
+        lastParityLogAt = now
+        DshMuxLog.log("timeline $source t=$now：${rows.size} 行 [$keys$more] seq=$paritySeq 缓冲=${parityRows.size}${if (cardLog) " CARDS=[$cardKeys]" else ""}")
     }
 
     /** 摘掉同 requestId 的排队/插话行（认领或撤回后它们就没有意义了）。 */
