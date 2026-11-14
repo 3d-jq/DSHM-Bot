@@ -207,6 +207,27 @@ test('a running room splices its live replies, queues roomInbox rows, and parks 
   }
 })
 
+test('the room artifacts window defaults to the round start, keeping private-chat files out', async () => {
+  const { rt } = fakeRt()
+  // Two rounds in the page; the card sits at the latest one (turn 5, from 5000ms).
+  const roomEvents = [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 4 } },
+    { type: 'turn/end', seq: 5, time: 1500, data: { turn: 4 } },
+    { type: 'turn/start', seq: 6, time: 5000, data: { turn: 5 } },
+  ]
+  rt.ctx.sessionController.page = async () => ({ records: roomEvents.map(event => ({ event })), hasMore: false })
+  const seen = []
+  rt.roomArtifacts = async (roomId, since) => { seen.push(since); return { files: [], changed: [] } }
+  try {
+    await rt.timelineEndpoint({ roomId: 'room-1' })
+    assert.deepEqual(seen, [5000], '窗口应默认成最新轮的 turn/start：0 会把私聊产物（共用工作区里更早的文件）也捞进来')
+    await rt.timelineEndpoint({ roomId: 'room-1', artifactSince: 2000 })
+    assert.equal(seen[1], 2000, '显式给的窗口优先')
+  } finally {
+    delete rt.roomArtifacts
+  }
+})
+
 test('a room feed delta carries the live rows plus the round state', async () => {
   const { rt, sessionListeners } = fakeRt()
   const seen = []

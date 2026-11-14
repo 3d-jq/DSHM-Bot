@@ -326,6 +326,18 @@ export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } =
   return rows.filter(entry => !(entry.payload.state === 'running' && settled.has(entry.payload.callId)))
 }
 
+/** When the page's latest round began (the newest `turn/start` time), for
+    scoping the room artifacts window. 0 when the page holds no turn (callers
+    treat 0 as "no window", the old unbounded behaviour). */
+function roundStartMs(events) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'turn/start') continue
+    if (typeof event.time === 'number') return event.time
+  }
+  return 0
+}
+
 /** Rows a finished turn's deliverables make (official `deliverablesDefinition`
  * accumulator + `presentedForClosing`): declarations win over produced files;
  * within a turn each path appears once at its first declaration, carrying the
@@ -762,9 +774,17 @@ export function install(rt) {
       // The round's deliverables: members' `present` declarations (they live in the
       // member Sessions) plus the files the round wrote without presenting — the
       // `room-artifacts` aggregation, as one card at the latest room turn.
+      //
+      // The window matters: with `since = 0` both feeders go unbounded — member
+      // Sessions contribute *every* `deliverables/presented` in their newest page,
+      // and `recentFiles` walks the whole working folder, which is the shared team
+      // workspace (exactly where a Bot's private work lands). The card then lists the
+      // Bot's private-chat artifacts. Default the window to this round's start (the
+      // latest `turn/start`), the same scoping the official group window uses.
       if (cursor === undefined && typeof rt.roomArtifacts === 'function') {
         try {
-          const artifacts = await rt.roomArtifacts(room.id, Number.isInteger(body.artifactSince) ? body.artifactSince : 0)
+          const declared = Number.isInteger(body.artifactSince) && body.artifactSince > 0 ? body.artifactSince : undefined
+          const artifacts = await rt.roomArtifacts(room.id, declared ?? roundStartMs(events))
           const card = roomArtifactRow({ roomId: room.id, events, artifacts })
           if (card !== null) rows.push(card)
         } catch (error) {
