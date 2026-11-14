@@ -71,6 +71,8 @@ fun PendingDock(
     onAnswerApproval: (ChatApproval, Boolean) -> Unit,
     onAnswerQuestionApproval: (ChatApproval, List<String>) -> Unit,
     onAnswerQuestion: (ChatQuestionCard, List<String>, String) -> Unit,
+    /** 忽略整张提问卡（`dismiss-question`，按会话关掉，不是只关一条）。 */
+    onDismissQuestion: (ChatQuestionCard) -> Unit,
     onAnswerView: (ChatViewCard, String, JSONObject) -> Unit,
     onDismissView: (ChatViewCard) -> Unit,
     onSecretSubmit: (ChatSecretRequest, String, Boolean) -> Unit,
@@ -93,6 +95,7 @@ fun PendingDock(
                 card = card,
                 busy = busy,
                 onAnswer = { selected, custom -> onAnswerQuestion(card, selected, custom) },
+                onDismiss = { onDismissQuestion(card) },
             )
         }
         views.forEach { card ->
@@ -128,17 +131,90 @@ fun PendingDock(
     }
 }
 
+/**
+ * 输入框上方的队列条：已经进了宿主队列、还没被认领的消息（`inbox` 行）。
+ *
+ * 官方 web 的时间线里**不出现**排队行（队列只体现在输入框的「新输入」态），
+ * conversation 包把 QueueDock 放在输入框上方 —— 这里照这个位置和 [PendingDock]
+ * 的卡片外观（白底圆角 + 细描边）做一条紧凑的队列表。
+ *
+ * 操作：群聊只有自己排的项（`sourceKind == "user"`）给「撤回」；单聊给
+ * 「撤回 + 改为插话」。群队列要等下一个 relay 才 drain，没有插话语义。
+ */
+@Composable
+fun PendingQueueStrip(
+    items: List<ChatEntry>,
+    isGroup: Boolean,
+    busy: Boolean,
+    onRecall: (ChatEntry) -> Unit,
+    onSteer: (ChatEntry) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (items.isEmpty()) return
+    DockCard(title = stringResource(R.string.chat_queue_title, items.size), modifier = modifier) {
+        items.forEachIndexed { index, entry ->
+            if (index > 0) {
+                androidx.compose.material3.HorizontalDivider(
+                    color = Dshm.colors.divider,
+                    modifier = Modifier.padding(vertical = Dshm.spacing.xxs),
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = entry.text.ifBlank {
+                            entry.attachments.joinToString("、")
+                        },
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.textPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (entry.pendingSlot == "next-step") {
+                            stringResource(R.string.chat_pending_steering)
+                        } else {
+                            stringResource(R.string.chat_pending_queued)
+                        },
+                        style = Dshm.typography.rowTime,
+                        color = Dshm.colors.textTertiary,
+                    )
+                }
+                val canRecall = if (isGroup) entry.pendingSourceKind == "user" else true
+                if (!isGroup) {
+                    TextButton(enabled = !busy, onClick = { onSteer(entry) }) {
+                        Text(stringResource(R.string.chat_pending_steer), style = Dshm.typography.rowPreview)
+                    }
+                }
+                if (canRecall) {
+                    TextButton(enabled = !busy, onClick = { onRecall(entry) }) {
+                        Text(
+                            stringResource(R.string.chat_pending_recall),
+                            style = Dshm.typography.rowPreview,
+                            color = Dshm.colors.danger,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** dock 卡的共同外壳：白底圆角 + 细描边（DS Bot `.bt-q`）。 */
 @Composable
 private fun DockCard(
     title: String?,
+    modifier: Modifier = Modifier,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(Dshm.radius.md)
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(Dshm.colors.surface)
@@ -189,6 +265,7 @@ private fun QuestionDockCard(
     card: ChatQuestionCard,
     busy: Boolean,
     onAnswer: (List<String>, String) -> Unit,
+    onDismiss: () -> Unit = {},
 ) {
     var selected by remember(card.id) { mutableStateOf(emptyList<String>()) }
     var custom by remember(card.id) { mutableStateOf("") }
@@ -229,6 +306,13 @@ private fun QuestionDockCard(
         }
         Spacer(Modifier.size(Dshm.spacing.sm))
         DockFoot {
+            // 「忽略」= 按会话关掉整张提问卡（官方 `dismiss-question`），不是只关这一条。
+            TextButton(enabled = !busy, onClick = onDismiss) {
+                Text(
+                    stringResource(R.string.pending_dismiss),
+                    color = Dshm.colors.textSecondary,
+                )
+            }
             TextButton(
                 enabled = !busy && (selected.isNotEmpty() || custom.isNotBlank()),
                 onClick = { onAnswer(selected, custom) },

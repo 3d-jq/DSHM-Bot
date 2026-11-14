@@ -537,6 +537,7 @@ fun BotChatScreen(
                         if (error != null) chatError = error
                     }
                 },
+                onDismissQuestion = viewModel::dismissChatQuestion,
                 onAnswerView = { card, action, values ->
                     viewModel.answerChatView(card, action, values) { error ->
                         if (error != null) chatError = error
@@ -580,6 +581,7 @@ fun BotChatScreen(
                     members = bot.roomMembers,
                     status = state.memberStatus,
                     onOpen = { quickSettings = true },
+                    onStopMember = { member -> viewModel.stopMemberWork(member) },
                 )
             }
             // 群聊跑到中转上限会停下等用户：这一行 + 「继续」走 `room-continue`。
@@ -590,6 +592,23 @@ fun BotChatScreen(
                     viewModel.continueRoom { error -> if (error != null) chatError = error }
                 },
             )
+            // 已进宿主队列的消息：输入框上方的队列条（时间线里不画排队行）。
+            PendingQueueStrip(
+                items = state.pendingQueue,
+                isGroup = bot.isGroup,
+                busy = state.sending,
+                onRecall = viewModel::recallPending,
+                onSteer = viewModel::steerPending,
+            )
+            // 一次性轻提示（如「已让 X 停下」）。
+            state.actionNotice?.let { notice ->
+                Text(
+                    text = notice,
+                    style = Dshm.typography.rowTime,
+                    color = Dshm.colors.textSecondary,
+                    modifier = Modifier.padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.xxs),
+                )
+            }
             ChatComposer(
                 value = draft,
                 onValueChange = { draft = it },
@@ -926,7 +945,9 @@ private fun ChatMessages(
             // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
             if (typing) {
                 item(key = "typing") {
-                    Box(Modifier.padding(top = pendingSpacing.top)) {
+                    // 活动行单独固定 12dp 上间距（官方 `[data-chat-running] > .bt-typing`），
+                    // 不跟气泡/事件行的间距规则走。
+                    Box(Modifier.padding(top = Dshm.spacing.md)) {
                         ChatActivityRow(
                             bot = bot,
                             activity = requireNotNull(activity),
@@ -1022,33 +1043,23 @@ private fun ChatMessages(
                             )
                         },
                     )
-                    ChatEntryKind.BOT -> Column {
-                        // 群聊 live 行（round 进行中的回复占位，settled 后同 key 原位替换）：
-                        // 画「发言中」小徽标，正文照常显示。
-                        if (entry.live) {
-                            Text(
-                                text = stringResource(R.string.chat_live_speaking),
-                                style = Dshm.typography.rowPreview,
-                                color = Dshm.colors.textTertiary,
-                                modifier = Modifier.padding(bottom = Dshm.spacing.xs),
-                            )
-                        }
-                        BotBubble(
-                            text = entry.text,
-                            author = entry.author,
-                            fontScale = fontScale,
-                            isGroup = bot.isGroup,
-                            showName = spacing.groupStart,
-                            botId = entry.botId,
-                            members = bot.roomMembers,
-                            adminId = bot.roomAdmin,
-                            onOpenMember = onOpenMember,
-                            timeMs = null,
-                            durationMs = null,
-                            whole = entry.whole,
-                            endpoint = endpoint,
-                        )
-                    }
+                    // live 行（round 进行中的回复占位）与 settled 行画得一样：同 key
+                    // 原位替换，不额外加「发言中」徽标（官方只有活动行，没有逐条徽标）。
+                    ChatEntryKind.BOT -> BotBubble(
+                        text = entry.text,
+                        author = entry.author,
+                        fontScale = fontScale,
+                        isGroup = bot.isGroup,
+                        showName = spacing.groupStart,
+                        botId = entry.botId,
+                        members = bot.roomMembers,
+                        adminId = bot.roomAdmin,
+                        onOpenMember = onOpenMember,
+                        timeMs = null,
+                        durationMs = null,
+                        whole = entry.whole,
+                        endpoint = endpoint,
+                    )
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
                         // 点开的是目标（`openExchange`）。relay 事件的目标是发件人（`botId`）。
@@ -1066,13 +1077,18 @@ private fun ChatMessages(
                         } else {
                             null
                         }
+                        // 头像归属 = 「谁做的这行」（官方 `.bt-event` 的 BotMark）：群成员
+                        // 相关行（relay / 轮内的 done、failed、missed、lookup…）都按
+                        // `entry.botId` 解析成员头像；retry/turnfail 这类没有 botId 的行
+                        // 官方也只有文本，不强行补头像。
+                        val avatarId = entry.botId ?: targetMember?.id
                         EventLine(
                             text = entry.text,
                             kind = entry.eventKind,
                             name = entry.author,
                             code = entry.eventCode,
                             timeMs = null,
-                            botId = clickId,
+                            botId = avatarId,
                             repeatCount = display.repeatCount,
                             // 工具事件行画的是「目标」，不套本对话 Bot 自己的头像。
                             bot = if (bot.isGroup || entry.tool != null) null else bot,
@@ -1899,7 +1915,9 @@ private fun EventLine(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier)
-            .padding(vertical = Dshm.spacing.xs),
+            // 事件行本体上下各 2dp（官方 `.bt-event{margin:2px 0}`）+ 条目间距同为
+            // 2dp，合起来上下对称的 4dp。
+            .padding(vertical = Dshm.spacing.xxs),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {

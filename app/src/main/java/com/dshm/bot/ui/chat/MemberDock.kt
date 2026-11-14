@@ -26,6 +26,13 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.ui.components.BotAvatar
 import com.dshm.bot.ui.home.RoomMemberUi
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
 
 private val FACE = 20.dp
 private val FACE_OVERLAP = 14.dp
@@ -45,6 +52,14 @@ fun MemberDockCard(
     status: Map<String, RoomMemberStatus>,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 单独停下某个成员在群里的工作（`stop-member-work`）。
+     *
+     * 入口选了「**长按忙成员的头像**」：dock 本身就是群成员面板（谁在忙一眼可见），
+     * 头像是最直接的对象；长按不抢点击（点仍打开群详情），且只对 `work` 状态的成员
+     * 弹菜单，避免误停正在等你批准的成员。
+     */
+    onStopMember: (RoomMemberUi) -> Unit = {},
 ) {
     val busy = remember(members, status) {
         members.mapNotNull { member ->
@@ -98,28 +113,50 @@ fun MemberDockCard(
             horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
         ) {
             Row {
+                // 长按菜单的锚点：哪个成员的头像被长按（只对 work 状态开菜单）。
+                var menuFor by remember { mutableStateOf<String?>(null) }
                 busy.take(4).forEachIndexed { index, (member, state) ->
                     val ask = state.state == "ask"
-                    Box(
-                        modifier = Modifier
-                            .offset(x = if (index == 0) 0.dp else FACE_OVERLAP)
-                            .size(FACE)
-                            .clip(CircleShape)
-                            .background(Dshm.colors.surface)
-                            .border(
-                                width = 1.5.dp,
-                                color = if (ask) Dshm.colors.warning else Dshm.colors.surface,
-                                shape = CircleShape,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        BotAvatar(
-                            inkId = member.inkId,
-                            glyph = AvatarGlyph.BOT,
-                            avatarImage = member.avatarImage,
-                            avatarShape = member.avatarShape,
-                            size = FACE - 5.dp,
-                        )
+                    val working = state.state == "work"
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .offset(x = if (index == 0) 0.dp else FACE_OVERLAP)
+                                .size(FACE)
+                                .clip(CircleShape)
+                                .background(Dshm.colors.surface)
+                                .border(
+                                    width = 1.5.dp,
+                                    color = if (ask) Dshm.colors.warning else Dshm.colors.surface,
+                                    shape = CircleShape,
+                                )
+                                // 只挂长按、不消费单击：点仍落到外层胶囊（打开群详情）。
+                                .pointerInput(member.id, working) {
+                                    if (!working) return@pointerInput
+                                    detectTapGestures(onLongPress = { menuFor = member.id })
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BotAvatar(
+                                inkId = member.inkId,
+                                glyph = AvatarGlyph.BOT,
+                                avatarImage = member.avatarImage,
+                                avatarShape = member.avatarShape,
+                                size = FACE - 5.dp,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuFor == member.id,
+                            onDismissRequest = { menuFor = null },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.chat_member_stop, member.name)) },
+                                onClick = {
+                                    menuFor = null
+                                    onStopMember(member)
+                                },
+                            )
+                        }
                     }
                 }
             }

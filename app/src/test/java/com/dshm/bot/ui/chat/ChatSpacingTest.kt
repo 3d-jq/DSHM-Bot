@@ -67,6 +67,26 @@ class ChatSpacingTest {
         assertEquals(spacing.turnGap, otherBot.top)
     }
 
+    /**
+     * 事件行 / 分隔线固定上下对称 2dp（官方 `.bt-event{margin:2px 0}`）：
+     * 事件行自己 2dp；紧跟事件行的那条也只留 2dp（让它下侧和上侧一样宽）。
+     */
+    @Test
+    fun eventsUseASymmetricTwoDpGap() {
+        // 事件行本身（上面是气泡 / 事件，都一样）。
+        assertEquals(spacing.xxs, top(ChatEntryKind.EVENT, null, ChatEntryKind.BOT, "w1"))
+        assertEquals(spacing.xxs, top(ChatEntryKind.EVENT, null, ChatEntryKind.EVENT, null))
+        assertEquals(spacing.xxs, top(ChatEntryKind.DIVIDER, null, ChatEntryKind.BOT, "w1"))
+        // 事件行下面那条：不论它是气泡、产物卡还是用户消息，都压到 2dp。
+        assertEquals(spacing.xxs, top(ChatEntryKind.BOT, "w1", ChatEntryKind.EVENT, null))
+        assertEquals(spacing.xxs, top(ChatEntryKind.ARTIFACTS, null, ChatEntryKind.EVENT, null))
+        assertEquals(spacing.xxs, top(ChatEntryKind.USER, null, ChatEntryKind.DIVIDER, null))
+        // 群聊的组首规则也不能把事件行下侧撑开。
+        val afterEvent = chatItemSpacing(spacing, ChatEntryKind.BOT, "w1", ChatEntryKind.EVENT, null, true)
+        assertTrue(afterEvent.groupStart)
+        assertEquals(spacing.xxs, afterEvent.top)
+    }
+
     @Test
     fun theFirstMessageInAChatHasNothingAboveIt() {
         // 单聊第一条：上面没有东西，按「同人接着说」的紧间距处理（和改动前一致）。

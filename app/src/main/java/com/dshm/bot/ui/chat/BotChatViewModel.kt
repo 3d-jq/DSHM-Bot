@@ -306,6 +306,13 @@ data class BotChatUiState(
     val roomContinuing: Boolean = false,
     /** 需要用户先选模型（`ModelChoiceDock`）；不需要时为 null。 */
     val modelPrompt: ChatModelPrompt? = null,
+    /**
+     * 已进入宿主队列、还没被认领的消息（`inbox` 行）：排在输入框上方的队列条里，
+     * **不进时间线**（官方 web 的时间线也不出现排队行）。
+     */
+    val pendingQueue: List<ChatEntry> = emptyList(),
+    /** 一次性的轻提示（例如「已让 X 停下」）：几秒后自动消失。 */
+    val actionNotice: String? = null,
 )
 
 /**
@@ -447,6 +454,8 @@ class BotChatViewModel internal constructor(
     private var statusJob: Job? = null
     private var runningWatchJob: Job? = null
     private var memoryNoticeJob: Job? = null
+    /** 一次性轻提示（[BotChatUiState.actionNotice]）的自动收回任务。 */
+    private var actionNoticeJob: Job? = null
     private var streamingAttempt: String? = null
     private var streamBuffer = ""
     /** 这一轮浏览器操作结束后贴的缩略图卡（只活在本次对话里）。 */
@@ -1101,6 +1110,8 @@ class BotChatViewModel internal constructor(
      * 按 seq 排序会在跨 part 时把老 part 的行插错位置。
      *
      * 本地 echo（`p:<requestId>`）与浏览器缩略图排在尾部（乐观位置 / 客户端本地功能）。
+     * `inbox` 行（已进宿主队列、还没被认领）**不进时间线**，单独进 [BotChatUiState.pendingQueue]
+     * 交给输入框上方的队列条（官方 web 的时间线也不出现排队行）。
      */
     private fun rebuildParityEntries(loading: Boolean? = null, hasEarlier: Boolean? = null) {
         val mapped = ArrayList<ChatEntry>(parityRows.size + pendingEchoRows.size + browserShots.size)
@@ -1121,9 +1132,13 @@ class BotChatViewModel internal constructor(
         }
         // 浏览器缩略图：客户端本地功能，拼在最后（1c 换贴 turntail 行 seq）。
         for (shotEntry in browserShots) mapped.add(shotEntry)
+        // 队列行与时间线分开：inbox 行只进队列条，不画进对话。
+        val queue = mapped.filter { it.kind == ChatEntryKind.PENDING }
+        val timeline = mapped.filterNot { it.kind == ChatEntryKind.PENDING }
         _uiState.update { state ->
             state.copy(
-                entries = mapped,
+                entries = timeline,
+                pendingQueue = queue,
                 loading = loading ?: state.loading,
                 engineOff = false,
                 hasEarlier = hasEarlier ?: state.hasEarlier,
@@ -1387,7 +1402,16 @@ class BotChatViewModel internal constructor(
                 // `work.rooms` 曾经没清干净，会把停止键钉在界面上。
                 groupRoundRunning
             } else {
-                work?.optJSONObject("bots")?.has(botId) == true
+                // 单聊只认「自己会话」的工作：宿主的 `work.bots[botId]` 会把群回合的
+                // 工作也挂在同一个 botId 上（带 `roomId`）。带 roomId 的条目属于群，
+                // 不能把私聊的头像圈/停止键点亮（官方也是按会话判 running）。
+                val entry = work?.optJSONObject("bots")?.opt(botId)
+                when (entry) {
+                    null -> false
+                    is JSONObject -> entry.optString("roomId").isEmpty()
+                    // 旧形状（布尔等）：没有 roomId 信息，按「自己在跑」处理。
+                    else -> true
+                }
             }
             val running = runningNow(workRunning)
             // 审批：DS Bot 的 state 就是卡片身份；引擎事件流只补提问。
@@ -1541,6 +1565,27 @@ class BotChatViewModel internal constructor(
         _uiState.update { it.copy(pendingViews = it.pendingViews.filterNot { v -> v.id == card.id }) }
     }
 
+    /**
+     * 忽略一张提问卡（DS Bot `dismiss-question {sessionId}`）。
+     *
+     * 官方语义是**按会话关掉整张提问卡**（宿主 `delete state.questions[sessionId]`），
+     * 不是只关某一条 —— 所以请求里只带 sessionId，和 [dismissChatView] 同款：
+     * 先本地摘卡，再让 `refreshBotStatus` 对齐。
+     */
+    fun dismissChatQuestion(card: ChatQuestionCard) {
+        val connection = client ?: return
+        _uiState.update { it.copy(pendingQuestions = it.pendingQuestions.filterNot { q -> q.id == card.id }) }
+        viewModelScope.launch {
+            runCatching {
+                connection.bot(
+                    "dismiss-question",
+                    JSONObject().put("sessionId", sessionId ?: botId),
+                )
+            }
+            refreshBotStatus()
+        }
+    }
+
     /** 关掉一张不用答的视图卡（DS Bot `dismiss-view`）。 */
     fun dismissChatView(card: ChatViewCard) {
         val connection = client ?: return
@@ -1692,6 +1737,42 @@ class BotChatViewModel internal constructor(
             }.exceptionOrNull()?.let { describeChatError(it) }
             if (failure == null) refreshBotStatus()
             onDone(failure)
+        }
+    }
+
+    /**
+     * 群聊里单独停下某个成员的工作：`stop-member-work {roomId, botId}`。
+     *
+     * 整轮 stop（[stopRunning]）保持不变；这个只停一个成员在群里的那一份工作。
+     * 成功后刷状态并给一句轻提示。
+     */
+    fun stopMemberWork(member: RoomMemberUi, onDone: (String?) -> Unit = {}) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            val error = runCatching {
+                connection.botValue(
+                    "stop-member-work",
+                    JSONObject().put("roomId", botId).put("botId", member.id),
+                )
+            }.exceptionOrNull()?.let { describeChatError(it) }
+            if (error == null) {
+                showActionNotice(
+                    notifyContext?.getString(R.string.chat_member_stopped, member.name)
+                        ?: "已让 ${member.name} 停下",
+                )
+                refreshBotStatus()
+            }
+            onDone(error)
+        }
+    }
+
+    /** 一次性轻提示（几秒后自动消失）；同类提示连续触发只重置计时。 */
+    private fun showActionNotice(text: String) {
+        _uiState.update { it.copy(actionNotice = text) }
+        actionNoticeJob?.cancel()
+        actionNoticeJob = viewModelScope.launch {
+            delay(2_500)
+            _uiState.update { it.copy(actionNotice = null) }
         }
     }
 

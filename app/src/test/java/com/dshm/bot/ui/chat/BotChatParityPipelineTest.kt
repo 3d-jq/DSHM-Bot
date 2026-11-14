@@ -8,6 +8,7 @@ import com.dshm.bot.data.remote.TimelineRequest
 import com.dshm.bot.data.remote.TimelineRow
 import com.dshm.bot.data.remote.TimelineRowPayload
 import com.dshm.bot.data.remote.TimelineSnapshot
+import com.dshm.bot.domain.model.RoomMemberUi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -52,6 +53,7 @@ class BotChatParityPipelineTest {
         val chatEndpoints = mutableListOf<String>()
         val rpcCalls = mutableListOf<Pair<String, JSONObject>>()
         val botValueCalls = mutableListOf<Pair<String, JSONObject>>()
+        val botCalls = mutableListOf<Pair<String, JSONObject>>()
         val sendRequestIds = mutableListOf<String>()
 
         /** 首屏快照（reset）与翻页（cursor）分别给的行。 */
@@ -62,6 +64,8 @@ class BotChatParityPipelineTest {
         /** 多页翻页脚本（非空时优先，按顺序弹出；用尽后回落到 earlierRows/earlierCursor）。 */
         val earlierPages = ArrayDeque<Pair<List<TimelineRow>, JSONObject?>>()
         var snapshotSeq: Long = 40
+        /** `state` 端点的回执（#3 的 running 判定用）。 */
+        var stateResponse: JSONObject = JSONObject()
 
         /**
          * 带 `since` 的增量重放（宿主行缓冲快路径）回的行与游标。
@@ -70,7 +74,9 @@ class BotChatParityPipelineTest {
         var replayRows: List<TimelineRow> = emptyList()
         var replayCursor: JSONObject? = null
 
-        override suspend fun bot(endpoint: String, payload: JSONObject): JSONObject = when (endpoint) {
+        override suspend fun bot(endpoint: String, payload: JSONObject): JSONObject {
+            botCalls += endpoint to payload
+            return when (endpoint) {
             // 旧管线端点：行管线不该再调用（调用就记下来，测试断言为空）。
             "chat", "room-chat" -> {
                 chatEndpoints += endpoint
@@ -82,7 +88,16 @@ class BotChatParityPipelineTest {
                 JSONObject()
             }
 
+            // 忽略提问卡：像真宿主一样按会话把它从 state 里删掉（后续 refreshBotStatus 即对齐）。
+            "dismiss-question" -> {
+                stateResponse.optJSONObject("questions")?.remove(payload.optString("sessionId"))
+                JSONObject()
+            }
+
+            "state" -> stateResponse
+
             else -> JSONObject()
+            }
         }
 
         override suspend fun timeline(request: TimelineRequest): TimelineSnapshot {
@@ -258,7 +273,9 @@ class BotChatParityPipelineTest {
         // 排队：服务端 inbox 行（requestId 命中）替换 p: 行。
         api.emitTimeline(api.row("inbox:i-1", "inbox", null, requestId = lastRequestId(api), slot = "next-turn"))
         scheduler.runCurrent()
-        val queued = viewModel.uiState.value.entries
+        // 队列行不进时间线（官方 web 的时间线也不出现排队行），只进输入框上方的队列条。
+        assertTrue("排队行不该出现在时间线里：${viewModel.uiState.value.entries.map { it.id }}", viewModel.uiState.value.entries.isEmpty())
+        val queued = viewModel.uiState.value.pendingQueue
         assertEquals(listOf("inbox:i-1"), queued.map { it.id })
         assertEquals(ChatEntryKind.PENDING, queued.single().kind)
         assertEquals("next-turn", queued.single().pendingSlot)
@@ -266,7 +283,7 @@ class BotChatParityPipelineTest {
         // 插话：同 key 行换成 next-step。
         api.emitTimeline(api.row("inbox:i-1", "inbox", null, requestId = lastRequestId(api), slot = "next-step"))
         scheduler.runCurrent()
-        assertEquals("next-step", viewModel.uiState.value.entries.single().pendingSlot)
+        assertEquals("next-step", viewModel.uiState.value.pendingQueue.single().pendingSlot)
 
         // 认领：user 行带 requestId → 渲染键保留 p:<requestId>，元素原地过渡。
         api.emitTimeline(api.row("user:7", "user", 7L, requestId = lastRequestId(api)))
@@ -285,7 +302,7 @@ class BotChatParityPipelineTest {
         val viewModel = viewModel(api, scheduler)
         scheduler.runCurrent()
 
-        val pending = viewModel.uiState.value.entries.single()
+        val pending = viewModel.uiState.value.pendingQueue.single()
         viewModel.recallPending(pending)
         scheduler.runCurrent()
 
@@ -294,7 +311,7 @@ class BotChatParityPipelineTest {
         val request = args.getJSONObject("request")
         assertEquals("i-1", request.optString("itemId"))
         assertEquals("remove", request.getJSONObject("action").optString("kind"))
-        assertTrue("撤回后行先乐观摘除", viewModel.uiState.value.entries.isEmpty())
+        assertTrue("撤回后行先乐观摘除", viewModel.uiState.value.pendingQueue.isEmpty())
     }
 
     @Test
@@ -478,7 +495,7 @@ class BotChatParityPipelineTest {
         val viewModel = viewModel(api, scheduler, isGroup = true)
         scheduler.runCurrent()
 
-        val pending = viewModel.uiState.value.entries.single()
+        val pending = viewModel.uiState.value.pendingQueue.single()
         assertEquals(ChatEntryKind.PENDING, pending.kind)
         assertEquals("user", pending.pendingSourceKind)
 
@@ -490,7 +507,7 @@ class BotChatParityPipelineTest {
         assertEquals("room-1", payload.optString("roomId"))
         assertEquals("roomq:room-1:3", payload.optString("id"))
         assertEquals("remove", payload.optString("action"))
-        assertTrue("撤回后乐观摘行", viewModel.uiState.value.entries.isEmpty())
+        assertTrue("撤回后乐观摘行", viewModel.uiState.value.pendingQueue.isEmpty())
         assertTrue("群聊不提供改为插话", api.rpcCalls.none { it.first == "session/updateQueue" })
     }
 
@@ -505,11 +522,127 @@ class BotChatParityPipelineTest {
         val viewModel = viewModel(api, scheduler, isGroup = true)
         scheduler.runCurrent()
 
-        viewModel.recallPending(viewModel.uiState.value.entries.single())
+        viewModel.recallPending(viewModel.uiState.value.pendingQueue.single())
         scheduler.runCurrent()
 
         assertTrue("成员项不该发 room-queue 请求", api.botValueCalls.isEmpty())
-        assertEquals("成员项仍留在列表里", 1, viewModel.uiState.value.entries.size)
+        assertEquals("成员项仍留在队列条里", 1, viewModel.uiState.value.pendingQueue.size)
+    }
+
+    /**
+     * #2 私聊「发送中」的 echo 气泡仍在时间线里（官方也是乐观气泡），
+     * 只有已经进队列的 inbox 行搬到队列条。
+     */
+    @Test
+    fun echoStaysInTimelineWhileQueueRowsMoveToTheDock() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("bot:1", "bot", 1L))
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        viewModel.send("刚发的")
+        scheduler.runCurrent()
+        val requestId = lastRequestId(api)
+        // 发送中：echo 在时间线尾部。
+        assertEquals(
+            listOf("bot:1", "p:$requestId"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+        assertTrue(viewModel.uiState.value.pendingQueue.isEmpty())
+
+        // 进队列后：时间线只剩 bot:1，队列条拿到 inbox 行。
+        api.emitTimeline(api.row("inbox:q-1", "inbox", null, requestId = requestId, slot = "next-turn"))
+        scheduler.runCurrent()
+        assertEquals(listOf("bot:1"), viewModel.uiState.value.entries.map { it.id })
+        assertEquals(listOf("inbox:q-1"), viewModel.uiState.value.pendingQueue.map { it.id })
+    }
+
+    /**
+     * #3 单聊 running 不看「群里的工作」：`work.bots[botId]` 带 `roomId` 时
+     * 那是群回合挂上来的，私聊必须保持空闲（不带 roomId 才算自己会话在跑）。
+     */
+    @Test
+    fun singleChatRunningIgnoresGroupWorkBoundToTheSameBot() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+
+        // 带 roomId：群回合挂在同一个 botId 上 → 私聊不亮。
+        val withRoom = FakeApi().apply {
+            stateResponse = JSONObject().put(
+                "work",
+                JSONObject().put(
+                    "bots",
+                    JSONObject().put("bot-1", JSONObject().put("roomId", "room-1").put("tool", "bash")),
+                ),
+            )
+        }
+        val groupBusy = viewModel(withRoom, scheduler)
+        scheduler.advanceUntilIdle()
+        assertFalse("带 roomId 的群工作不该点亮私聊 running", groupBusy.uiState.value.running)
+        assertFalse(groupBusy.uiState.value.stopVisible)
+
+        // 不带 roomId：自己的会话在跑 → 亮。
+        val own = FakeApi().apply {
+            stateResponse = JSONObject().put(
+                "work",
+                JSONObject().put("bots", JSONObject().put("bot-1", JSONObject().put("tool", "bash"))),
+            )
+        }
+        val ownBusy = viewModel(own, scheduler)
+        scheduler.advanceUntilIdle()
+        assertTrue("自己的会话在跑应该亮 running", ownBusy.uiState.value.running)
+        assertTrue(ownBusy.uiState.value.stopVisible)
+    }
+
+    /** #6 忽略提问卡：`dismiss-question {sessionId}` + 本地乐观摘卡。 */
+    @Test
+    fun dismissQuestionSendsSessionScopedEndpointAndClearsTheCard() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.stateResponse = JSONObject().put(
+            "questions",
+            JSONObject().put(
+                "s-1",
+                JSONObject()
+                    .put("id", "q-1")
+                    .put("question", "要继续吗？")
+                    .put("options", JSONArray().put(JSONObject().put("label", "是"))),
+            ),
+        )
+        val viewModel = viewModel(api, scheduler)
+        scheduler.advanceUntilIdle()
+        val card = viewModel.uiState.value.pendingQuestions.single()
+
+        viewModel.dismissChatQuestion(card)
+        scheduler.advanceUntilIdle()
+
+        // 后面 refreshBotStatus 还会打一次 `state`：只在调用记录里找那一次 dismiss-question。
+        val (endpoint, payload) = api.botCalls.first { it.first == "dismiss-question" }
+        assertEquals("dismiss-question", endpoint)
+        assertEquals("按会话关整张卡：只带 sessionId", "s-1", payload.optString("sessionId"))
+        assertTrue(
+            "本地应乐观摘掉提问卡",
+            viewModel.uiState.value.pendingQuestions.none { it.id == "q-1" },
+        )
+    }
+
+    /** #7 单独停下群成员的工作：`stop-member-work {roomId, botId}` + 轻提示。 */
+    @Test
+    fun stopMemberWorkCallsTheRoomScopedEndpointAndShowsANotice() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        val viewModel = viewModel(api, scheduler, isGroup = true)
+        scheduler.runCurrent()
+
+        viewModel.stopMemberWork(RoomMemberUi(id = "bot-9", name = "研究员", inkId = null, avatarImage = null, avatarShape = null))
+        // 只推进到请求完成：轻提示 2.5s 后自动收回，不能推进到 idle。
+        scheduler.advanceTimeBy(1_000)
+
+        val (endpoint, payload) = api.botValueCalls.single()
+        assertEquals("stop-member-work", endpoint)
+        assertEquals("room-1", payload.optString("roomId"))
+        assertEquals("bot-9", payload.optString("botId"))
+        assertEquals("已让 研究员 停下", viewModel.uiState.value.actionNotice)
     }
 
     private fun lastRequestId(api: FakeApi): String =
