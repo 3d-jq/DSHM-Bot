@@ -29,7 +29,6 @@ import com.dshm.bot.data.remote.BotApproval
 import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.runtime.RuntimeEndpoint
-import com.dshm.bot.data.runtime.RuntimeInstaller
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
 import com.dshm.bot.domain.model.DshGoPreferences
@@ -208,6 +207,9 @@ private val FOLLOW_TOOLS = setOf(
     "message_bot", "stop_bot", "create_bot", "update_bot",
     "create_group", "update_group", "delete_group", "post_to_group",
     "read_group_chat",
+    // 交付声明进对话时间线：轮内只有这一行表示「正在交付/已交付」
+    // （产物卡本身等轮闭合才出，对齐官方网页版）。
+    "present",
     // 「看了一眼」类的动作（看团队 / 看密钥 / 翻自己的记录）、浏览器动作、更新记忆
     // 都不进对话时间线：活动状态栏已经在显示，每来一行只会把对话冲乱。
 )
@@ -389,12 +391,6 @@ class BotChatViewModel internal constructor(
     private val sessionEvents = LinkedHashMap<Long, JSONObject>()
     private val eventsCache = appContext?.let { ChatEventsCache(it, botId) }
     private var eventsSaveJob: Job? = null
-    /** 引擎 rootfs：输出目录兜底要直接扫工作区。 */
-    private val rootfsDir = appContext?.let { RuntimeInstaller(it).rootfsDir }
-    /** 输出目录扫描的短缓存：合并在每次事件后都会跑，别每次都扫盘。 */
-    private var outputsCache: List<OutputFile> = emptyList()
-    private var outputsCacheAt = 0L
-    private var outputsScanJob: Job? = null
     /**
      * DSH 的会话运行状态（mux 的 `api-session/status`）：会话 id → 这一轮还在跑吗。
      *
@@ -428,17 +424,23 @@ class BotChatViewModel internal constructor(
     /**
      * 见过的最大会话 seq。
      *
-     * 乐观用户气泡的占位 seq 取 `maxSeenSeq + 1`：比「已加载的历史」大一档，
-     * 于是本轮的新事件（seq 更大）会被插到它**后面**，更早的事件插到它前面。
-     * **不能**再往上加（曾经写成 `maxSeenSeq + ++optimisticSeq`）：占位 seq 一旦
-     * 高过本轮的真实 seq，`mergeTimeline` 就会把本轮事件插到用户气泡上面 ——
-     * 表现成「流式期间用户气泡错位」。
+     * 乐观用户气泡的占位 seq 取 `max(maxSeenSeq, maxLocalSeq) + 1`：比「已加载的
+     * 历史」大一档，于是本轮的新事件（seq 更大）会被插到它**后面**，更早的事件
+     * 插到它前面。**不能**再往上加（曾经写成 `maxSeenSeq + ++optimisticSeq`）：
+     * 占位 seq 一旦高过本轮的真实 seq，`mergeTimeline` 就会把本轮事件插到用户
+     * 气泡上面 —— 表现成「流式期间用户气泡错位」。
+     *
+     * [maxLocalSeq] 防连发碰撞：HTTP 一回来 `sending` 就放行下一条，此时第一条的
+     * 回显可能还没到（maxSeenSeq 没动），两条会拿到同一个占位 seq —— 用本地已占位
+     * 的最大值错开，谁也不撞谁；回显认领真 seq 时同步抬升它。
      *
      * follow 帧已通过 [followDeliveries] 切回主线程处理，这里本来只在主线程读写；
      * volatile 是防回归的兜底（万一哪条新路径又从别的线程碰到它）。
      */
     @Volatile
     private var maxSeenSeq = 0L
+    @Volatile
+    private var maxLocalSeq = 0L
     private val pendingTools = LinkedHashMap<String, PendingTool>()
 
     private data class PendingTool(
@@ -446,6 +448,8 @@ class BotChatViewModel internal constructor(
         val args: JSONObject,
         val callId: String,
         val time: Long,
+        /** `tool/call` 事件的 seq：present 的「正在交付」行挂在这里，结果一到就撤。 */
+        val callSeq: Long = -1L,
     )
     /**
      * follow 流的一次投递：一帧，或流结束。
@@ -462,6 +466,10 @@ class BotChatViewModel internal constructor(
     }
 
     private val followDeliveries = Channel<FollowDelivery>(Channel.UNLIMITED)
+
+    /** follow 断流重订：退避任务与当前退避档位（帧一到达就归零）。 */
+    private var followRetryJob: Job? = null
+    private var followRetryAttempt = 0
 
     /** 更早历史的游标；null 表示没有更早的了。 */
     private var cursor: ChatCursor? = null
@@ -481,6 +489,15 @@ class BotChatViewModel internal constructor(
     private var browserShotSessionId: String? = null
     /** 本屏发出的用户气泡；服务端回显用 `requestId` 认出同一条，不画第二条。 */
     private val localUserEntries = LinkedHashMap<String, ChatEntry>()
+
+    /**
+     * 发出了但还没等到服务端回显的 requestId。
+     *
+     * 回显认领（[adoptLocalSeq]）或历史重载认出正主（[load]）时摘掉；一轮结束时
+     * 还有剩，说明回显漏投了 —— 重拉一次历史把正主换上来，别让占位气泡挂着
+     * 错误的占位 seq 过夜。
+     */
+    private val unclaimedRequests = LinkedHashSet<String>()
 
     init {
         cachedHistory?.let { restoreHistory(it) }
@@ -580,13 +597,44 @@ class BotChatViewModel internal constructor(
         )
     }
 
-    /** follow 流结束（主线程）：清掉流 id，重连后由 [ensureFollow] 重开。 */
+    /**
+     * follow 流结束（主线程）：清掉流 id 并安排退避重订。
+     *
+     * 以前这里只清 streamId，没人重订 —— WS 抖一次之后 `turn/end`、
+     * `deliverables/presented` 就再也收不到，产物卡要等重进对话才补回来。
+     */
     private fun handleFollowStreamEnd(error: String?) {
         DshMuxLog.log("session/follow 结束：${error ?: "closed"}")
         followStreamId = null
+        scheduleFollowRetry(error)
+    }
+
+    /**
+     * follow 断流后按指数退避重开（1s 起步、封顶 32s）。
+     *
+     * 快照/事件帧一到达就把退避归零；会话已归档、流参数被网关拒了这类永久失败
+     * 不重试（重试也不会好），等下一次 `load()` 换会话时自然重开。
+     */
+    private fun scheduleFollowRetry(error: String?) {
+        val session = followSessionId ?: return
+        if (error != null && FOLLOW_STREAM_GIVE_UP.containsMatchIn(error)) {
+            DshMuxLog.log("session/follow 不再重订：$error")
+            return
+        }
+        if (followRetryJob?.isActive == true) return
+        val attempt = followRetryAttempt.coerceAtMost(FOLLOW_RETRY_MAX_SHIFT)
+        followRetryAttempt += 1
+        followRetryJob = viewModelScope.launch {
+            delay(FOLLOW_RETRY_BASE_MS * (1L shl attempt))
+            // 会话已切换（load 订了新的）或者已经有人重开过：这次退避作废。
+            if (followSessionId != session || followStreamId != null) return@launch
+            ensureFollow(session)
+        }
     }
 
     private fun handleFollowFrame(frame: JSONObject) {
+        // 流活着：退避归零（重连成功的第一帧就把档位清掉）。
+        followRetryAttempt = 0
         when (frame.optString("type")) {
             "snapshot" -> {
                 toolEvents.clear()
@@ -600,6 +648,11 @@ class BotChatViewModel internal constructor(
                             handleSessionEvent(record.optJSONObject("event"))
                         }
                     }
+                }
+                // 快照窗口边缘的 present 调用（结果落在窗口外）别把「正在交付」挂一辈子；
+                // 结果稍后从实时流到达时会再画「已交付」行。
+                pendingTools.values.filter { it.name == "present" && it.callSeq >= 0 }.forEach {
+                    toolEvents.remove(it.callSeq)
                 }
                 mergeSessionEvents()
             }
@@ -627,7 +680,19 @@ class BotChatViewModel internal constructor(
                 if (callId.isEmpty()) return
                 val turn = data.optInt("turn", -1)
                 if (name !in FOLLOW_TOOLS) return
-                pendingTools[callId] = PendingTool(name, toolArguments(data), callId, time)
+                pendingTools[callId] = PendingTool(name, toolArguments(data), callId, time, seq)
+                // 交付中的行先挂出来（官方 Delivering）：结果一到就被「已交付」行换下。
+                if (name == "present") {
+                    val count = toolArguments(data).optJSONArray("files")?.length() ?: 0
+                    toolEvents[seq] = ChatEntry(
+                        id = "tool:$seq",
+                        kind = ChatEntryKind.EVENT,
+                        text = if (count > 0) "正在交付 $count 个文件…" else "正在交付文件…",
+                        seq = seq,
+                        timeMs = time,
+                        tool = name,
+                    )
+                }
             }
             "tool/result" -> {
                 val message = data.optJSONObject("message")
@@ -638,6 +703,9 @@ class BotChatViewModel internal constructor(
                     message?.optBoolean("isError") == true ||
                     data.optBoolean("error")
                 val pending = pendingTools.remove(callId) ?: return
+                // present 的「正在交付」行挂在 call 的 seq 上：结果行一到就把它撤掉，
+                // 不然交付完对话里还留着一根「正在交付」。
+                if (pending.callSeq != seq) toolEvents.remove(pending.callSeq)
                 val resultText = textContent(message?.opt("content"))
                 val line = toolEventLine(pending.name, pending.args, resultText, isError, botName) ?: return
                 toolEvents[seq] = ChatEntry(
@@ -745,24 +813,18 @@ class BotChatViewModel internal constructor(
      * 每一轮完成的产物卡。
      *
      * 对齐 dsh-Go：**从会话事件记录重新推导**（交付声明 / 本轮新建的文件 /
-     * 回复里链接的文件 / 输出目录兜底），卡贴在这一轮 `turn/end` 处。
+     * 回复里链接的文件），卡贴在这一轮 `turn/end` 处、出卡后不再移动。
      * 以前是边流边攒，事件一旦不在 follow 快照窗口里就永久丢失
      * （比如 `present` 发生在几轮之前，或者当时对话页没开着）。
      */
     private fun artifactEntries(): List<ChatEntry> {
         if (sessionEvents.isEmpty()) return emptyList()
-        // 顺手把输出目录扫描排到后台（带 TTL + 单飞）；推导先用上一次的结果，
-        // 绝不在这里扫盘 —— 这个函数跑在主线程的一帧里。
-        scheduleOutputsScan()
-        // 「至少有一轮已结束」不再是出卡前提：`deriveArtifacts` 对「已交付但轮还在跑」
-        // 的轮也会出卡（贴 `present` 处），所以这里不再提前 return。
         val events = sessionEvents.values.toList()
         val turns = turnTraces(events)
         val derived = deriveArtifacts(
             events = events,
             turns = turns,
             cwd = _uiState.value.botWorkDir,
-            outputs = outputsCache,
         )
         return derived.map { group ->
             ChatEntry(
@@ -776,59 +838,6 @@ class BotChatViewModel internal constructor(
                 artifactsDelivered = group.delivered,
             )
         }
-    }
-
-    /**
-     * 输出目录兜底：会话工作区里最近改动的文件。
-     *
-     * dsh-Go 扫的是手机下载目录（它的运行时把产物写在那儿）；我们的引擎写工作区，
-     * 所以扫工作区。扫描放后台（带 TTL + 单飞），扫完再合并一次 —— 推导本身在主线程，
-     * 不能让它去扫盘。
-     */
-    private fun scheduleOutputsScan() {
-        val now = System.currentTimeMillis()
-        if (now - outputsCacheAt < OUTPUTS_CACHE_MS) return
-        if (outputsScanJob?.isActive == true) return
-        outputsCacheAt = now
-        outputsScanJob = viewModelScope.launch(Dispatchers.IO) {
-            val scanned = runCatching { scanWorkspaceOutputs() }.getOrDefault(emptyList())
-            withContext(Dispatchers.Main) {
-                if (scanned != outputsCache) {
-                    outputsCache = scanned
-                    mergeSessionEvents()
-                }
-            }
-        }
-    }
-
-    private fun scanWorkspaceOutputs(): List<OutputFile> {
-        val rootfs = rootfsDir ?: return emptyList()
-        val guest = _uiState.value.botWorkDir?.takeIf { it.startsWith("/") } ?: DEFAULT_WORKSPACE
-        val dir = java.io.File(rootfs, guest.removePrefix("/"))
-        if (!dir.isDirectory) return emptyList()
-        val cutoff = System.currentTimeMillis() - WORKSPACE_SCAN_WINDOW_MS
-        val out = ArrayList<OutputFile>()
-        fun walk(current: java.io.File, depth: Int) {
-            if (depth > WORKSPACE_SCAN_DEPTH || out.size >= WORKSPACE_SCAN_LIMIT) return
-            for (child in current.listFiles().orEmpty()) {
-                if (out.size >= WORKSPACE_SCAN_LIMIT) return
-                if (child.isDirectory) {
-                    if (child.name in WORKSPACE_SKIP_DIRS) continue
-                    walk(child, depth + 1)
-                } else if (child.lastModified() >= cutoff) {
-                    val guestPath = "/" + child.absolutePath
-                        .removePrefix(rootfs.absolutePath)
-                        .trimStart('/')
-                    out += OutputFile(
-                        path = guestPath,
-                        modifiedMs = child.lastModified(),
-                        bytes = child.length(),
-                    )
-                }
-            }
-        }
-        walk(dir, 0)
-        return out
     }
 
     /**
@@ -871,20 +880,45 @@ class BotChatViewModel internal constructor(
     /**
      * 服务端回显带来的**真实 seq** 认领回本地乐观气泡。
      *
-     * 本地气泡只有占位 seq（`maxSeenSeq + 1`）；真 seq 更大时改写它，
-     * 之后本轮事件按真 seq 插在气泡后面，不会再出现「用户气泡错位」。
+     * 本地气泡只有占位 seq（`max(maxSeenSeq, maxLocalSeq) + 1`）；回显一到就改写成
+     * 真 seq —— **向下也认**（排队/steer 的消息落日志晚，占位通常偏低，但连发窗口里
+     * 也可能偏高，拒绝向下会让错位永远停在那）。
+     *
+     * 认领后按 seq 做一次稳定重排：连发、steer 与排队混发时「发送序 ≠ 日志序」，
+     * 之前以占位 seq 定位的气泡之间/与先到的 feed 消息之间会有相对裂缝，`mergeTimeline`
+     * 只插事件行、从不动 base —— 这里是唯一的收口时机。重排规则见 [resortBySeq]。
      */
     private fun adoptLocalSeq(id: String, seq: Long?) {
         if (seq == null) return
         val key = localUserEntries.entries.firstOrNull { it.value.id == id }?.key ?: return
         val current = localUserEntries.getValue(key)
-        if (seq <= (current.seq ?: Long.MIN_VALUE)) return
+        unclaimedRequests.remove(key)
+        if (seq == current.seq) return
         val updated = current.copy(seq = seq)
         localUserEntries[key] = updated
+        if (seq > maxLocalSeq) maxLocalSeq = seq
         _uiState.update { state ->
-            state.copy(entries = state.entries.map { entry -> if (entry.id == id) updated else entry })
+            state.copy(
+                entries = resortBySeq(
+                    state.entries.map { entry -> if (entry.id == id) updated else entry },
+                ),
+            )
         }
         mergeSessionEvents()
+    }
+
+    /**
+     * 按 seq 的稳定重排：**无 seq 的条目原地不动**（`mergeTimeline`「不动无 seq 段」的
+     * 约束——分隔线、旧问答这些历史里没有 seq 的行不参与），有 seq 的按 seq 升序归位，
+     * 同 seq 保持原相对顺序（稳定排序）。
+     */
+    private fun resortBySeq(entries: List<ChatEntry>): List<ChatEntry> {
+        val ordered = entries.withIndex().filter { it.value.seq != null }.sortedBy { it.value.seq }
+        if (ordered.size < 2) return entries
+        var cursor = 0
+        return entries.map { entry ->
+            if (entry.seq != null) ordered[cursor++].value else entry
+        }
     }
 
     private fun mergeSessionEvents() {
@@ -1128,15 +1162,20 @@ class BotChatViewModel internal constructor(
         val requestId = UUID.randomUUID().toString()
         optimisticRun = true
         userStoppedRun = false
+        // 占位 seq：比「已见过的最大 seq / 本地已占位的最大 seq」大一档。
+        // 连发时（HTTP 一回、回显未到就发下一条）maxSeenSeq 还停在原值，两条会拿到
+        // 同一个占位 —— 用 maxLocalSeq 错开；回显认领真 seq 时它会跟着抬升。
+        val placeholderSeq = maxOf(maxSeenSeq, maxLocalSeq) + 1
+        maxLocalSeq = placeholderSeq
+        unclaimedRequests.add(requestId)
         val bubble = ChatEntry(
             id = "user:$requestId",
             kind = ChatEntryKind.USER,
             text = text,
             attachments = attachments.map { it.name },
-            // 占位 seq：比「已加载的历史」大一档（= 本轮这条消息的真实 seq）。
             // 本轮事件 seq 更大 → 插在气泡后面；更早的事件 → 插在气泡前面。
             // 服务端回显到达后用 `adoptLocalSeq()` 认领真实 seq，进一步对齐。
-            seq = maxSeenSeq + 1,
+            seq = placeholderSeq,
             attachmentItems = attachments.mapNotNull { draft ->
                 draft.cachePath?.let { path ->
                     ChatAttachmentItem(draft.name, path, draft.isImage)
@@ -1194,6 +1233,7 @@ class BotChatViewModel internal constructor(
                 watchForRunEnd()
             }.onFailure { failure ->
                 localUserEntries.remove(requestId)
+                unclaimedRequests.remove(requestId)
                 seen.remove(bubble.id)
                 _uiState.update { state ->
                     state.copy(
@@ -1251,6 +1291,11 @@ class BotChatViewModel internal constructor(
                     }
                 }
                 // 历史还没追上这次发送时，本地气泡也不能被刷新弄丢。
+                // 历史里已经出现正主（id 同为 user:$rpcId）的本地气泡就此认领：
+                // 从未回显清单里摘掉，轮末的自愈重拉不再为它白跑。
+                localUserEntries.forEach { (requestId, local) ->
+                    if (entries.any { it.id == local.id }) unclaimedRequests.remove(requestId)
+                }
                 val withLocal = entries + localUserEntries.values.filterNot { local ->
                     entries.any { it.id == local.id }
                 }
@@ -1357,7 +1402,7 @@ class BotChatViewModel internal constructor(
                 // 自己发的却要等一会儿」。`appendItem` 自带 id/seq 去重，不会写重。
                 historyCache?.appendItem(item)
                 // 自己刚发的那条回显虽然会被 `seen` 去重，但它带着**真实 seq**：
-                // 认领回本地气泡，`mergeTimeline` 才能把本轮事件插到正确位置。
+                // 认领回本地气泡，mergeTimeline 才能把本轮事件插到正确位置。
                 adoptLocalSeq(entry.id, entry.seq)
                 if (!seen.add(entry.id)) return
                 // 最终消息已经进列表，立即撤掉流式临时气泡，避免同一段回复出现两遍。
@@ -1366,9 +1411,12 @@ class BotChatViewModel internal constructor(
                 if (entry.kind == ChatEntryKind.BOT) {
                     clearStreaming()
                 }
+                // 不再无条件追加：占位气泡挂在末尾、排队/steer 的消息落日志又晚，
+                // 直接 `+ entry` 会把「比占位气泡更早落日志」的收尾文字/回复排到它
+                // 后面（表现成回复跑到了新消息下面）。按 seq 找真位置插进去。
                 _uiState.update { state ->
                     state.copy(
-                        entries = state.entries + entry,
+                        entries = mergeTimelineEntry(state.entries, entry),
                         waitingForReply = if (entry.kind == ChatEntryKind.USER) state.waitingForReply else false,
                     )
                 }
@@ -1915,6 +1963,9 @@ class BotChatViewModel internal constructor(
             }
             optimisticRun = false
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
+            // 本轮结束了还有没等到回显的本地气泡（feed 漏投、SSE 断流）：重拉一次历史，
+            // 让正主把它换下来。自愈窗口从「下次任意重载」缩到「本轮结束」。
+            if (unclaimedRequests.isNotEmpty()) scheduleReload()
             val phoneTaskDone = PhoneControlSession.consumeFor(botId)
             // 群成员跑在自己会话里，产物（`present`）也就落在那边：这一轮结束后
             // 去插件收一次，没人 `present` 时就退回「本轮被改动的文件」。
@@ -2439,15 +2490,11 @@ class BotChatViewModel internal constructor(
         private const val RUN_WATCH_MAX_FAILURES = 5
         /** 会话事件记录的内存上限（够覆盖最近若干轮；产物推导只看完成的轮）。 */
         private const val MAX_SESSION_EVENTS = 4_000
-        /** 输出目录扫描的缓存时长：合并在每条事件后都跑，不能每次都扫盘。 */
-        private const val OUTPUTS_CACHE_MS = 5_000L
-        /** 输出目录扫描只看最近这段时间内改动的文件。 */
-        private const val WORKSPACE_SCAN_WINDOW_MS = 6 * 60 * 60 * 1000L
-        private const val WORKSPACE_SCAN_DEPTH = 3
-        private const val WORKSPACE_SCAN_LIMIT = 200
-        private val WORKSPACE_SKIP_DIRS = setOf("node_modules", ".git", "shots", "__pycache__", ".venv")
-        /** 引擎默认工作区（guest 路径）；Bot 没自定义 workDir 时用它。 */
-        private const val DEFAULT_WORKSPACE = "/root/.dsh/bot/workspace"
+        /** follow 断流重订的退避：1s 起步、指数左移封顶 32s。 */
+        private const val FOLLOW_RETRY_BASE_MS = 1_000L
+        private const val FOLLOW_RETRY_MAX_SHIFT = 5
+        /** 这些失败重试也没用（会话归档/不存在、流参数被网关拒）：不再重订。 */
+        private val FOLLOW_STREAM_GIVE_UP = Regex("not-found|archived|arguments-invalid")
         /** 发送确认前先用本地 running 顶住状态行；之后完全交给 state.work。 */
         /** 群聊里刚发出消息后，等 round 建起来的最长时间（超过就不再乐观显示）。 */
 

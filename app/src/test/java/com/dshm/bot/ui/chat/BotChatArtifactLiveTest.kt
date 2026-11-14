@@ -16,17 +16,21 @@ import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
 /**
- * 产物卡在**实时**会话流下就该出现。
+ * 产物卡与交付行在实时会话流下的行为（官方口径：轮闭合才出卡）。
  *
- * bug：Bot 说「交付了 N 个文件」后，对话里要重新进一次才看到产物卡 ——
- * 说明本轮事件没有在实时流里被用上。这里用假 mux 把一轮真实事件喂进去，
- * 断言产物卡当场出现（对齐 dsh-Go：卡贴在 `turn/end` 处）。
+ * - `deliverables/presented` 只代表「声明了交付」，轮内只画工具行
+ *   （「正在交付/已交付 N 个文件」，对齐官方 Delivering / Delivered）；
+ * - 产物卡等 `turn/end`，位置固定在轮末 seq、出卡后不再移动；
+ * - 同一轮多次 present 聚合一张卡。
+ *
+ * 另覆盖 follow 断流自动重订：流结束后按退避重开，永久失败不重试。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class BotChatArtifactLiveTest {
@@ -46,135 +50,264 @@ class BotChatArtifactLiveTest {
         DshMuxLog.sink = defaultSink
     }
 
-    @Test
-    fun presentDeclaredInThisTurnShowsTheArtifactCard() {
-        val scheduler: TestCoroutineScheduler = mainDispatcherRule.testDispatcher.scheduler
-        val api = FakeApi()
-        val links = mutableListOf<FakeMuxLink>()
-        val scope = CoroutineScope(mainDispatcherRule.testDispatcher + SupervisorJob())
-        val mux = DshMux(
-            scope = scope,
-            connect = { FakeMuxLink().also { links += it } },
-            readyTimeoutMs = 1_000,
-            retryCapsMs = listOf(10),
-        )
-        val viewModel = BotChatViewModel(
-            botId = "bot-1",
-            botName = "小助手",
-            isGroup = false,
-            endpoint = null,
-            appContext = null,
-            dependencies = BotChatDependencies(remote = api, transport = null, speech = null, mux = mux),
-        )
-        try {
+    /** 一个测试实例：mux + ViewModel + 已连好的 FakeMuxLink。 */
+    private class Harness(
+        val scheduler: TestCoroutineScheduler,
+        val api: FakeApi,
+        val links: MutableList<FakeMuxLink>,
+        val scope: CoroutineScope,
+        val mux: DshMux,
+        val viewModel: BotChatViewModel,
+    ) {
+        fun start() {
             scheduler.runCurrent()
             val link = links.single()
             link.deliverHostEvent(link.eventsStreamId(), ready())
             scheduler.runCurrent()
+        }
 
-            val followStream = link.opened.entries.firstOrNull { it.value == "session/follow" }
-            assertTrue("单聊没有订阅 session/follow，产物卡永远不会实时出现", followStream != null)
+        /** 当前 session/follow 流：断言它已订阅并返回链路与 streamId。 */
+        fun followStream(): Pair<FakeMuxLink, String> {
+            val link = links.single()
+            val streamId = link.opened.entries.lastOrNull { it.value == "session/follow" }?.key
+                ?: error("单聊没有订阅 session/follow")
+            return link to streamId
+        }
+
+        fun followStreamCount(): Int =
+            links.sumOf { link -> link.opened.values.count { it == "session/follow" } }
+
+        fun close() {
+            mux.close()
+            scope.cancel()
+        }
+
+        companion object {
+            /** [rule] 提供测试调度器（Dispatchers.Main 被替换成它）。 */
+            fun create(rule: MainDispatcherRule): Harness {
+                val scheduler = rule.testDispatcher.scheduler
+                val api = FakeApi()
+                val links = mutableListOf<FakeMuxLink>()
+                val scope = CoroutineScope(rule.testDispatcher + SupervisorJob())
+                val mux = DshMux(
+                    scope = scope,
+                    connect = { FakeMuxLink().also { links += it } },
+                    readyTimeoutMs = 1_000,
+                    retryCapsMs = listOf(10),
+                )
+                val viewModel = BotChatViewModel(
+                    botId = "bot-1",
+                    botName = "小助手",
+                    isGroup = false,
+                    endpoint = null,
+                    appContext = null,
+                    dependencies = BotChatDependencies(remote = api, transport = null, speech = null, mux = mux),
+                )
+                return Harness(scheduler, api, links, scope, mux, viewModel)
+            }
+
+            private fun ready(clientId: String = "client-1") = JSONObject()
+                .put("type", "ready")
+                .put("clientId", clientId)
+                .put("host", JSONObject().put("home", "/"))
+        }
+    }
+
+    @Test
+    fun presentDeclaredInThisTurnShowsTheArtifactCard() {
+        val harness = Harness.create(mainDispatcherRule)
+        try {
+            harness.start()
+            val (link, followId) = harness.followStream()
 
             // 一轮：turn/start → present 声明交付 → turn/end。
-            link.deliverHostEvent(followStream!!.key, frame(sessionEvent(10, "turn/start", JSONObject().put("turn", 1))))
+            link.deliverHostEvent(followId, frame(sessionEvent(10, "turn/start", JSONObject().put("turn", 1))))
             link.deliverHostEvent(
-                followStream.key,
+                followId,
+                frame(presented(11, turn = 1, callId = "call-1", files = listOf("/workspace/报告.pptx" to "幻灯片"))),
+            )
+            link.deliverHostEvent(followId, frame(sessionEvent(12, "turn/end", JSONObject().put("turn", 1))))
+            harness.scheduler.runCurrent()
+
+            val cards = harness.viewModel.uiState.value.entries.filter { it.kind == ChatEntryKind.ARTIFACTS }
+            assertTrue(
+                "turn/end 已到没推出产物卡（现有条目：" +
+                    harness.viewModel.uiState.value.entries.joinToString { "${it.kind}@${it.seq}" } + "）",
+                cards.isNotEmpty(),
+            )
+            assertEquals("卡的位置应固定在这一轮 turn/end（seq=12）", 12L, cards.single().seq)
+            assertEquals(listOf("/workspace/报告.pptx"), cards.single().artifacts.map { it.path })
+            assertTrue(cards.single().artifactsDelivered)
+        } finally {
+            harness.close()
+        }
+    }
+
+    /** 回归点（新口径）：只给 turn/start + present 不出卡；turn/end 一到立刻出。 */
+    @Test
+    fun presentAloneDoesNotShowCardUntilTurnEnd() {
+        val harness = Harness.create(mainDispatcherRule)
+        try {
+            harness.start()
+            val (link, followId) = harness.followStream()
+
+            link.deliverHostEvent(followId, frame(sessionEvent(30, "turn/start", JSONObject().put("turn", 2))))
+            link.deliverHostEvent(
+                followId,
+                frame(presented(31, turn = 2, callId = "call-2", files = listOf("/workspace/图.png" to null))),
+            )
+            harness.scheduler.runCurrent()
+
+            assertTrue(
+                "轮没闭合就出了卡（应等 turn/end）：" +
+                    harness.viewModel.uiState.value.entries.joinToString { "${it.kind}@${it.seq}" },
+                harness.viewModel.uiState.value.entries.none { it.kind == ChatEntryKind.ARTIFACTS },
+            )
+
+            link.deliverHostEvent(followId, frame(sessionEvent(35, "turn/end", JSONObject().put("turn", 2))))
+            harness.scheduler.runCurrent()
+
+            val cards = harness.viewModel.uiState.value.entries.filter { it.kind == ChatEntryKind.ARTIFACTS }
+            assertEquals("turn/end 到了该出一张卡", 1, cards.size)
+            assertEquals("卡应固定贴在 turn/end（seq=35）", 35L, cards.single().seq)
+        } finally {
+            harness.close()
+        }
+    }
+
+    /** 同一轮多次 present：聚合成一张卡，同路径首现定序、描述取最新。 */
+    @Test
+    fun twoPresentsInOneTurnAggregateIntoOneCard() {
+        val harness = Harness.create(mainDispatcherRule)
+        try {
+            harness.start()
+            val (link, followId) = harness.followStream()
+
+            link.deliverHostEvent(followId, frame(sessionEvent(40, "turn/start", JSONObject().put("turn", 3))))
+            link.deliverHostEvent(
+                followId,
+                frame(
+                    presented(
+                        41,
+                        turn = 3,
+                        callId = "call-3",
+                        files = listOf("/workspace/a.docx" to "初稿", "/workspace/b.png" to null),
+                    ),
+                ),
+            )
+            link.deliverHostEvent(
+                followId,
+                frame(presented(42, turn = 3, callId = "call-4", files = listOf("/workspace/a.docx" to "终稿"))),
+            )
+            link.deliverHostEvent(followId, frame(sessionEvent(45, "turn/end", JSONObject().put("turn", 3))))
+            harness.scheduler.runCurrent()
+
+            val cards = harness.viewModel.uiState.value.entries.filter { it.kind == ChatEntryKind.ARTIFACTS }
+            assertEquals("同轮多次 present 应聚合成一张卡", 1, cards.size)
+            assertEquals(45L, cards.single().seq)
+            assertEquals(
+                listOf("/workspace/a.docx", "/workspace/b.png"),
+                cards.single().artifacts.map { it.path },
+            )
+            assertEquals("同路径的描述应取最新一次声明", "终稿", cards.single().artifacts.first().description)
+        } finally {
+            harness.close()
+        }
+    }
+
+    /** `present` 的工具行：call 时「正在交付 N 个文件…」，result 到了换成「已交付 N 个文件」。 */
+    @Test
+    fun presentToolRowShowsDeliveringThenDelivered() {
+        val harness = Harness.create(mainDispatcherRule)
+        try {
+            harness.start()
+            val (link, followId) = harness.followStream()
+
+            link.deliverHostEvent(
+                followId,
                 frame(
                     sessionEvent(
-                        seq = 11,
-                        type = "deliverables/presented",
-                        data = JSONObject()
-                            .put("turn", 1)
-                            .put("callId", "call-1")
+                        20,
+                        "tool/call",
+                        JSONObject()
+                            .put("turn", 4)
+                            .put("callId", "p1")
+                            .put("name", "present")
                             .put(
-                                "files",
-                                JSONArray().put(
-                                    JSONObject()
-                                        .put("path", "/workspace/报告.pptx")
-                                        .put("description", "幻灯片"),
+                                "arguments",
+                                JSONObject().put(
+                                    "files",
+                                    JSONArray()
+                                        .put(JSONObject().put("path", "/workspace/a.docx"))
+                                        .put(JSONObject().put("path", "/workspace/b.png")),
                                 ),
                             ),
                     ),
                 ),
             )
-            link.deliverHostEvent(followStream.key, frame(sessionEvent(12, "turn/end", JSONObject().put("turn", 1))))
-            scheduler.runCurrent()
+            harness.scheduler.runCurrent()
 
-            val cards = viewModel.uiState.value.entries.filter { it.kind == ChatEntryKind.ARTIFACTS }
-            assertTrue(
-                "本轮 `deliverables/presented` 没有推出产物卡（现有条目：" +
-                    viewModel.uiState.value.entries.joinToString { "${it.kind}@${it.seq}" } + "）",
-                cards.isNotEmpty(),
-            )
+            val pendingRow = harness.viewModel.uiState.value.entries.firstOrNull { it.id == "tool:20" }
+            assertTrue("present 调用后没有「正在交付」行", pendingRow != null)
+            assertEquals("正在交付 2 个文件…", pendingRow?.text)
+
+            link.deliverHostEvent(followId, frame(toolResult(21, callId = "p1")))
+            harness.scheduler.runCurrent()
+
+            val entries = harness.viewModel.uiState.value.entries
+            assertTrue("结果到了「正在交付」行还没撤", entries.none { it.id == "tool:20" })
+            val doneRow = entries.firstOrNull { it.id == "tool:21" }
+            assertTrue("结果到了没有「已交付」行", doneRow != null)
+            assertEquals("已交付 2 个文件", doneRow?.text)
         } finally {
-            mux.close()
-            scope.cancel()
+            harness.close()
         }
     }
 
+    /** follow 流正常结束（网关 TYPE_END）：按退避自动重开一条新流。 */
     @Test
-    fun presentAloneShowsCardBeforeTurnEnd() {
-        val scheduler: TestCoroutineScheduler = mainDispatcherRule.testDispatcher.scheduler
-        val api = FakeApi()
-        val links = mutableListOf<FakeMuxLink>()
-        val scope = CoroutineScope(mainDispatcherRule.testDispatcher + SupervisorJob())
-        val mux = DshMux(
-            scope = scope,
-            connect = { FakeMuxLink().also { links += it } },
-            readyTimeoutMs = 1_000,
-            retryCapsMs = listOf(10),
-        )
-        val viewModel = BotChatViewModel(
-            botId = "bot-1",
-            botName = "小助手",
-            isGroup = false,
-            endpoint = null,
-            appContext = null,
-            dependencies = BotChatDependencies(remote = api, transport = null, speech = null, mux = mux),
-        )
+    fun followStreamReopensAfterEnd() {
+        val harness = Harness.create(mainDispatcherRule)
         try {
-            scheduler.runCurrent()
-            val link = links.single()
-            link.deliverHostEvent(link.eventsStreamId(), ready())
-            scheduler.runCurrent()
-            val followStream = link.opened.entries.firstOrNull { it.value == "session/follow" }
+            harness.start()
+            val (link, followId) = harness.followStream()
+            assertEquals(1, harness.followStreamCount())
 
-            // 只给 turn/start + present，**不给 turn/end** —— 产物卡必须当场出现（回归点）。
-            link.deliverHostEvent(followStream!!.key, frame(sessionEvent(30, "turn/start", JSONObject().put("turn", 2))))
-            link.deliverHostEvent(
-                followStream.key,
-                frame(
-                    sessionEvent(
-                        seq = 31,
-                        type = "deliverables/presented",
-                        data = JSONObject()
-                            .put("turn", 2)
-                            .put("callId", "call-2")
-                            .put(
-                                "files",
-                                JSONArray().put(JSONObject().put("path", "/workspace/图.png")),
-                            ),
-                    ),
-                ),
-            )
-            scheduler.runCurrent()
+            link.deliver(JSONObject().put("type", "end").put("streamId", followId))
+            harness.scheduler.runCurrent()
+            // 退避 1s 起步：虚拟时间推进到位，重开的流应该出现。
+            harness.scheduler.advanceTimeBy(1_000)
+            harness.scheduler.runCurrent()
 
-            val cards = viewModel.uiState.value.entries.filter { it.kind == ChatEntryKind.ARTIFACTS }
-            assertTrue(
-                "present 已到但轮未结束，产物卡没实时出现（现有条目：" +
-                    viewModel.uiState.value.entries.joinToString { "${it.kind}@${it.seq}" } + "）",
-                cards.isNotEmpty(),
-            )
+            assertEquals("follow 断流后没有自动重订", 2, harness.followStreamCount())
         } finally {
-            mux.close()
-            scope.cancel()
+            harness.close()
         }
     }
 
-    private fun ready(clientId: String = "client-1") = JSONObject()
-        .put("type", "ready")
-        .put("clientId", clientId)
-        .put("host", JSONObject().put("home", "/"))
+    /** 会话已归档/不存在这类永久失败：不重试。 */
+    @Test
+    fun followStreamDoesNotRetryOnPermanentError() {
+        val harness = Harness.create(mainDispatcherRule)
+        try {
+            harness.start()
+            val (link, followId) = harness.followStream()
+
+            link.deliver(
+                JSONObject()
+                    .put("type", "error")
+                    .put("streamId", followId)
+                    .put("error", JSONObject().put("code", "session/not-found")),
+            )
+            harness.scheduler.runCurrent()
+            harness.scheduler.advanceTimeBy(60_000)
+            harness.scheduler.runCurrent()
+
+            assertEquals("永久失败不该重订", 1, harness.followStreamCount())
+        } finally {
+            harness.close()
+        }
+    }
 
     private fun frame(event: JSONObject) = JSONObject()
         .put("type", "event")
@@ -185,6 +318,34 @@ class BotChatArtifactLiveTest {
         .put("seq", seq)
         .put("time", 1_700_000_000_000L + seq)
         .put("data", data)
+
+    private fun presented(seq: Long, turn: Int, callId: String, files: List<Pair<String, String?>>) =
+        sessionEvent(
+            seq,
+            "deliverables/presented",
+            JSONObject()
+                .put("turn", turn)
+                .put("callId", callId)
+                .put(
+                    "files",
+                    JSONArray().apply {
+                        files.forEach { (path, description) ->
+                            put(JSONObject().put("path", path).also { if (description != null) it.put("description", description) })
+                        }
+                    },
+                ),
+        )
+
+    private fun toolResult(seq: Long, callId: String) = sessionEvent(
+        seq,
+        "tool/result",
+        JSONObject().put(
+            "message",
+            JSONObject()
+                .put("toolCallId", callId)
+                .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "ok"))),
+        ),
+    )
 
     private class FakeApi : DshRemoteApi {
         private val feedEvents = MutableSharedFlow<BotFeedEvent>(extraBufferCapacity = 8)

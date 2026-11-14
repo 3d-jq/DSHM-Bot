@@ -7,7 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 产物推导：对齐 dsh-Go `deriveArtifacts` 的四种来源与「只给完成轮」规则。 */
+/** 产物推导：对齐 dsh-Go `deriveArtifacts` 的来源与「轮闭合才出卡、位置固定轮末」规则。 */
 class ArtifactDerivationTest {
 
     private fun event(type: String, seq: Long, data: JSONObject, time: Long = 1_000L * seq) =
@@ -80,19 +80,49 @@ class ArtifactDerivationTest {
     }
 
     @Test
-    fun `没有 present 时用工具结果里的 meta path 补新建文件`() {
+    fun `没有 present 时按官方 produced 口径补变更过的文件`() {
         val events = buildList {
             addAll(finishedTurn(2, 1, 20))
             add(toolCall(2, 2, "c1", "write", JSONObject().put("file_path", "report.pptx")))
             add(toolResult(3, 2, "c1", JSONObject().put("operation", "create").put("path", "/root/.dsh/bot/workspace/report.pptx")))
-            // 覆盖写（没有 operation=create）不算新建。
+            // 编辑 / 覆盖也算（官方 produced：这轮改过的文件全算，不看是不是新建）。
             add(toolCall(4, 2, "c2", "write", JSONObject().put("file_path", "old.md")))
             add(toolResult(5, 2, "c2", JSONObject().put("operation", "update").put("path", "/root/.dsh/bot/workspace/old.md")))
         }
 
         val out = deriveArtifacts(events, turnTraces(events), cwd = "/root/.dsh/bot/workspace")
 
-        assertEquals(listOf("/root/.dsh/bot/workspace/report.pptx"), out.single().files.map { it.path })
+        assertEquals(
+            listOf("/root/.dsh/bot/workspace/report.pptx", "/root/.dsh/bot/workspace/old.md"),
+            out.single().files.map { it.path },
+        )
+        assertEquals(ArtifactOrigin.WRITTEN, out.single().files.first().origin)
+    }
+
+    @Test
+    fun `md 文档也算交付物，不再按扩展名过滤`() {
+        val events = buildList {
+            addAll(finishedTurn(4, 1, 40))
+            add(
+                toolCall(
+                    2, 4, "c1", "str_replace_editor",
+                    JSONObject().put("command", "create").put("path", "/root/.dsh/bot/workspace/report.md"),
+                ),
+            )
+            add(toolResult(3, 4, "c1", meta = null))
+            // view 是读不算变更。
+            add(
+                toolCall(
+                    4, 4, "c2", "str_replace_editor",
+                    JSONObject().put("command", "view").put("path", "/root/.dsh/bot/workspace/other.md"),
+                ),
+            )
+            add(toolResult(5, 4, "c2", meta = null))
+        }
+
+        val out = deriveArtifacts(events, turnTraces(events), cwd = "/root/.dsh/bot/workspace")
+
+        assertEquals(listOf("/root/.dsh/bot/workspace/report.md"), out.single().files.map { it.path })
         assertEquals(ArtifactOrigin.WRITTEN, out.single().files.single().origin)
     }
 
@@ -114,36 +144,19 @@ class ArtifactDerivationTest {
     }
 
     @Test
-    fun `输出目录里的文件按本轮时间窗兜底`() {
-        val events = buildList {
-            addAll(finishedTurn(4, 1, 40))
-        }
-        val outputs = listOf(
-            OutputFile("/root/.dsh/bot/workspace/in_window.png", modifiedMs = 2_500L),
-            OutputFile("/root/.dsh/bot/workspace/too_late.png", modifiedMs = 99_999L),
-        )
-
-        val out = deriveArtifacts(events, turnTraces(events), cwd = "/root/.dsh/bot/workspace", outputs = outputs)
-
-        assertEquals(listOf("/root/.dsh/bot/workspace/in_window.png"), out.single().files.map { it.path })
-        assertEquals(ArtifactOrigin.OUTPUT, out.single().files.single().origin)
-    }
-
-    @Test
-    fun `已声明交付但还没 end 的轮也出卡，贴 present 处`() {
+    fun `已声明交付但还没 end 的轮不出卡`() {
+        // 官方口径：轮闭合才画卡，轮内交付只有工具行（present 一到就出卡的做法已撤销）。
         val events = listOf(
             event("turn/start", 1, JSONObject().put("turn", 5)),
             presented(9, 5, "/root/.dsh/bot/workspace/x.docx" to null),
         )
 
         val out = deriveArtifacts(events, turnTraces(events), cwd = null)
-        assertEquals(1, out.size)
-        assertEquals(9L, out.single().seq) // 卡先出现在 present 位置
-        assertEquals(listOf("/root/.dsh/bot/workspace/x.docx"), out.single().files.map { it.path })
+        assertTrue("轮没闭合不该出卡：$out", out.isEmpty())
     }
 
     @Test
-    fun `已交付的轮 end 后卡位置前移到 turn end`() {
+    fun `已交付的轮 end 后出卡且位置固定在轮末`() {
         val events = buildList {
             add(event("turn/start", 1, JSONObject().put("turn", 6)))
             add(presented(9, 6, "/root/.dsh/bot/workspace/x.docx" to null))
@@ -152,7 +165,28 @@ class ArtifactDerivationTest {
 
         val out = deriveArtifacts(events, turnTraces(events), cwd = null)
         assertEquals(1, out.size)
-        assertEquals(20L, out.single().seq) // end 之后卡落到轮末
+        assertEquals(20L, out.single().seq) // 位置固定 = turn/end，不再贴 present 处
+        assertEquals(listOf("/root/.dsh/bot/workspace/x.docx"), out.single().files.map { it.path })
+        assertTrue(out.single().delivered)
+    }
+
+    @Test
+    fun `同轮多次 present 聚合一张卡，同路径首现定序、描述取最新`() {
+        val events = buildList {
+            add(event("turn/start", 1, JSONObject().put("turn", 7)))
+            add(presented(5, 7, "/root/.dsh/bot/workspace/a.docx" to "初稿", "/root/.dsh/bot/workspace/b.png" to null))
+            add(presented(8, 7, "/root/.dsh/bot/workspace/a.docx" to "终稿"))
+            add(event("turn/end", 12, JSONObject().put("turn", 7)))
+        }
+
+        val out = deriveArtifacts(events, turnTraces(events), cwd = null)
+        assertEquals(1, out.size)
+        assertEquals(12L, out.single().seq)
+        assertEquals(
+            listOf("/root/.dsh/bot/workspace/a.docx", "/root/.dsh/bot/workspace/b.png"),
+            out.single().files.map { it.path },
+        )
+        assertEquals("终稿", out.single().files.first().description)
     }
 
     @Test

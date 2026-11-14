@@ -956,7 +956,56 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   再验证修复：本轮事件落在最新用户气泡之后、占位 seq 不累加、回显认领真 seq。
 - 验证：76 测试类 / 438 用例全绿，lint 零 warning，assembleDebug 通过，真机确认。
 
-### ⬜ 待办：交付产物卡要等整轮结束才出现（2026-11-13 定位完成，**未修**，用户要求先记着）
+### 修「用户气泡错位」的残余成因（2026-11-14，高强度复发 → 已修）
+
+76e25fc 之后高强度使用仍复发，逐链路排查出三个残余成因（本轮全部已修）：
+
+1. **feed 条目无条件追加到列表末尾**（主因）：排队/steer 的消息落日志晚
+   （DS Bot 把 prompt 放 `agent.inbox.nextTurn/nextStep`，`user/message` 事件在**被消费时**
+   才写日志拿 seq），占位气泡挂在末尾的窗口里，先到的收尾文字/回复被 `entries + entry`
+   甩到它后面；`mergeTimeline` 只重插事件行、从不动已有条目的相对顺序，错位冻到下次重载。
+   修法：feed `message` 落地改走 `mergeTimelineEntry`（有 seq 插到「第一条 seq 更大的条目」
+   之前，无 seq 追加末尾；对齐官方 runtime 的 insertAssistantSettlement）。
+2. **连发占位碰撞**：HTTP 一回 `sending` 就放行下一条，第一条的回显未到时两条拿到
+   同一个占位 seq（= `maxSeenSeq+1`）。修法：新增 `maxLocalSeq` 记本地已占位最大值，
+   占位取 `max(maxSeenSeq, maxLocalSeq) + 1`，回显认领真 seq 时同步抬升。
+3. **发送序 ≠ 日志序（steer 与排队混发）**：steer 落日志在下一步（秒级）、排队在下一轮
+   （可分钟级），认领只改 seq 不改表序，两者的相对顺序错到底。修法：认领后按 seq
+   **稳定重排**——无 seq 条目原地不动（保住 `mergeTimeline`「不动无 seq 段」的约束），
+   有 seq 的升序归位、同 seq 保持原序；并删掉 `seq <= current.seq` 的拒绝分支，
+   **向下也认**（占位偏高的场景自愈）。
+
+配套：**轮末自愈**——`watchForRunEnd` 收尾时若 `unclaimedRequests` 还有没等到回显的
+本地气泡就 `scheduleReload()`，自愈窗口从「下次任意重载」缩到「本轮结束」。
+`BotChatTimelinePositionTest` 改写为 6 例：S1 排队消息+收尾文字归位、S2 连发防碰撞、
+S3 混发按日志序归位，加原有 3 例（本轮事件在气泡后、占位不漂移、回显认领）。
+
+### 产物卡口径定案与落地（2026-11-14，已修；推翻同日早先的「策略 A」）
+
+产物卡「要等轮末 / 中途才出现」的调查历史见下两节；两路基线调查（官方网页 `client.js`、
+官方 npm 包）+ 用户拍板后，本轮落地。**最终口径 = 跟官方走：轮闭合（`turn/end`）才出卡、
+位置固定在轮末 `endSeq`、出卡后不再移动。**
+
+- **撤销 76e25fc 的策略 A（present 一到就出卡 + 事后前移）**：官方 `useFileMentions`
+  只在 `turn.status === "closed"` 且节点是轮末 finalNode 时画（`client.js` `useFileMentions`），
+  轮内交付只有 "Delivering/Delivered" 工具行；提前出卡是我们自创的，还带一次位置跳动。
+  `deriveArtifacts` 的 eligible 改回仅「已完成的轮」，卡位置固定 `seq = trace.endSeq`。
+- **三路兜底砍掉 OUTPUT（扫盘）**：WRITTEN / LINKED 保留（对齐 dsh-Go 的 1-2 级兜底）；
+  OUTPUT 假阳性大（时间窗内任何被碰过的文件都成卡），官方也没有这一路
+  （`dsh-client-ui-deliverables` 只认 present 声明 + 回复内链接）。
+  `scheduleOutputsScan` / `scanWorkspaceOutputs` / `OUTPUTS_CACHE_MS` / `WORKSPACE_SCAN_*` /
+  `DEFAULT_WORKSPACE` 整条链路删除。
+- **present 轮内工具行**：`present` 进 `FOLLOW_TOOLS`，call 时挂「正在交付 N 个文件…」
+  （官方 Delivering），result 到了换成「已交付 N 个文件」（官方 Delivered）；
+  快照窗口边缘的悬空调用会把「正在交付」行收掉。
+- **DELIVERED 聚合不变**：同一轮多次 present 按 path 去重、首现定序、描述取最新。
+- 「模型没 present 也没写链接」的边界从今天起的表现是**不出卡**（与官方一致）；
+  治本靠下节的提示词方案（已上线，图片场景实测有效）。
+- 测试：`BotChatArtifactLiveTest` 按新口径改写 6 例（轮闭合才出卡+位置=endSeq、
+  present 不提前出卡、多次 present 聚合、present 工具行两态、follow 重订、永久失败不重试），
+  `ArtifactDerivationTest` 删 OUTPUT 用例、反转「present 即出卡」用例。
+
+### ⬜→☑️ 定位史：交付产物卡要等整轮结束才出现（2026-11-13 定位，当日按 A 修过一轮，2026-11-14 定案推翻）
 
 **现象**（2026-11-13 用户两次校订）：Bot 交付文件后，私聊里那张产物卡**不是马上出现**；
 **等一会儿会自己出来**，重新进对话也能立刻看到。（用户原话：这个图片显示产物又不及时显示。）
@@ -970,11 +1019,7 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   位置优先 `turn/end`，**没有就退回 `presentedSeq`（`present` 声明那一刻）** ——
   所以 `present` 一到就出卡，不等整轮跑完。
 - **新实现**（`9381887` 起，`ArtifactDerivation.kt` + `artifactEntries()`）：
-  ```kotlin
-  if (turns.none { !it.running && it.endSeq != null }) return emptyList()   // artifactEntries
-  for (trace in turns) if (!trace.running && trace.endSeq != null) finished[trace.turn] = trace
-  ```
-  **必须有一轮已经 `turn/end`** 才推导，`deliverables/presented` 到了也不画。
+  必须有一轮已经 `turn/end` 才推导，`deliverables/presented` 到了也不画。
 
 **真机证据**（`adb shell run-as com.dshm.bot cat shared_prefs/bot-chat-events:<sessionId>.xml`，
 一份 1.5MB 的真实事件记录，604 条）——turn 256 的事件序列：
@@ -992,42 +1037,13 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 模型 `present` 之后如果还要接着干活/等子代理，这段间隔就越拉越长 → 用户感觉「要等一会儿」；
 重新进对话时 `eventsCache` 里已经有 `turn/end`，所以**立刻**就有 → 这也解释了「重进就马上有」。
 
-**顺带确认过的（都不是主因，记录备查）**：
+**当时选了策略 A 并于 76e25fc 落地**（已结束或已声明交付都出卡；轮内贴 present、
+end 后前移）。两路基线确认官方从不这么做（见上节定案），2026-11-14 推翻、回退到
+「轮闭合才出卡、位置固定轮末」。当年顺带确认的两笔遗留也已处理/在案：
 
-- 推导 + 合并这条链本身没问题：`BotChatArtifactLiveTest` 喂
-  `turn/start → presented → turn/end` 当场出卡；
-- 这台机器上 logcat 里 tag `DshMux` **一条都没有**（进程和引擎都活着），
-  下次取证**不要依赖 logcat**，直接读上面的 `bot-chat-events` 缓存（debug 包 `run-as` 可用）；
-- 「`ensureFollow` 的 `onEnd` 之后没人重订、follow 可能永久死」这条**仍在**（
-  `DshMux` 收到 `TYPE_END`/`TYPE_ERROR` 会把流从 `streams` 移除），但解释不了本现象，
-  单独记一笔当后续风险；
-- `ChatEventsCache.MAX_CHARS = 1MB`，真机那份 prefs 1.5MB（XML 转义膨胀），
-  `load()` 有 `raw.length > MAX_CHARS → emptyList()` 的早退；当前样本正文约 1.03MB 还能加载，
-  但**已经很接近上限**，会话再长就会读不出缓存（重新进对话时产物卡也会跟着丢）——单独记一笔。
-
-**建议的修法（待用户发话再动）**：把「已结束」的门槛放宽成「已结束 **或** 本轮已有交付声明」，
-两个文件各一处：
-
-- `deriveArtifacts()`：`finished` 里除了 `!running && endSeq != null` 的轮，也纳入
-  「有 `presented` 声明」的轮，位置取 `presented` 事件的 seq（拿不到就取 endSeq）；
-- `artifactEntries()` 开头那句 `turns.none { ... }` 同步放宽；
-- `turn/end` 到了以后卡的位置自然前进到 `endSeq`（和旧实现一致），卡片 id 仍是
-  `present:<turn>`、`base` 仍过滤 `present:`，不会重复。
-- 补一条测试：只喂 `turn/start → presented`（**不给 turn/end**）时就该出卡；
-  再补 `turn/end` 后卡的位置前移到 endSeq。
-
-**修完的行为预期（2026-11-13 与用户确认过口径）**：位置**最终仍然落在这一轮结束处**
-（官方网页版也是画在轮末，`present` 之后往往还有一段收尾文字）——修的是**出现时刻**
-（`present` 一到就画），不是最终位置。所以：
-
-- `present` 完马上收尾的短回合，肉眼差别很小（例如 turn 256 只差 6 个事件）；
-- 长尾回合（先交文件、又接着干几十秒 / 等子代理）差别明显：现在这段什么都看不到，
-  修完立刻能看到文件卡。
-
-两个位置策略，动手时二选一（用户尚未定）：
-
-- **A（推荐，与网页版一致）**：先出在 `present` 位置，`turn/end` 到了再落到轮末 —— 会有一次小幅下移；
-- **B（不挪）**：出在 `present` 位置就不动，无跳动，但最终位置与网页版不完全一致。
+- 「`ensureFollow` 的 `onEnd` 之后没人重订、follow 可能永久死」→ **2026-11-14 已修**
+  （指数退避重订，见气泡残余成因一节的配套说明与 `BotChatArtifactLiveTest` 两例）；
+- `ChatEventsCache.MAX_CHARS = 1MB` 真机已接近上限 → 仍在案（长会话治理，P2 单独做）。
 
 
 ### 产物卡延迟：二次定位（2026-11-13，真机实锤，已修）
@@ -1053,9 +1069,35 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
 明确「文档/表格/演示/**图片/视频/音频**都算交付物，交给用户时调 `present`」。
 用户实测：**图片产物卡现在实时出现**（= 模型在这一轮调了 `present`）。详见下一节。
 
-**仍然存在的边界（未改）**：如果模型在回复里完全没提那个文件路径、也没 `present`，只能靠
-`OUTPUT` 兜底（轮末 + 扫盘 TTL）。是否彻底去掉三路兜底（只认 `present`，对齐官方
-`dsh-client-ui-deliverables`）尚未决定；当前保留。
+**边界（2026-11-14 更新）**：如果模型在回复里完全没提那个文件路径、也没 `present`，现在**不出卡**
+（`OUTPUT` 扫盘兜底已随口径定案整条删除，与官方 `dsh-client-ui-deliverables` 一致）；
+治本靠上面的提示词方案（已上线）。WRITTEN / LINKED 两级事件推导兜底保留（对齐 dsh-Go）。
+
+### 产物卡全灭 + retry 行堆山（2026-11-14，真机取证 + 已修）
+
+用户高强度做文档时发现：**产物卡全都不出现了**，同时「已要求重试写成文本的工具调用」一排排堆很高。
+
+**取证（adb run-as 读 bot-chat-events 缓存，方法见上）**：
+- 最近 30 轮 `present` 声明 **0 条**、`workspace/changes` 0 条，最近窗口的工具调用全是
+  `bash`（18 次）——文档全是模型用 bash 写的，没有一次 `present`；
+- 设备上的 `files/runtime/rootfs/root/.dsh/AGENTS.md` **没有交付规则**：交付规则 11-13 加进
+  `GuestSetup` 后**只在首次 provision 时写入**，且旧保护逻辑「文件不以我们标记开头就整段跳过」
+  把这台设备的宿主基础文件放行了——规则从未落到 live 文件上（运行时升级冲掉重装同理）。
+  模型没有指令 → 不调 `present` → 扫盘兜底一砍，bash 写的文件三个来源全够不着 → 卡全灭。
+
+**修法（两处）**：
+1. `GuestSetup` 改**幂等 upsert**（每次引擎启动跑）：无文件/自有标记 → 写入或规则更新重写；
+   用户文件已带我们的块 / 已有同名交付小节 → 不动；其余（宿主基础文件、升级冲掉的旧文件）→
+   **末尾追加**规则块，原文保留。自愈场景：运行时升级冲掉 AGENTS.md 后下次启动自动补回。
+2. `ArtifactDerivation` 的 WRITTEN 对齐官方 `produced` 口径（npm 实锤：
+   `mutationPath`/`mutationResultPath`）：`write` / `edit` / `str_replace_editor` 变更类命令
+   （create/str_replace/insert）的**成功结果全算，编辑/覆盖也算、不看扩展名**——
+   文档工作流的 .md 就靠这一路；此前「只认 create + `isArtifactKindPath` 过滤（Markdown 不算）」
+   是 dsh-Go 的取舍，官方没有。LINKED 同步去掉扩展名过滤。
+
+**retry 行堆山**：`retry` 事件行官方也是一条一行（`cells.js:619`），这是有意的偏离——
+渲染前把**连续且完全相同**的事件行折叠成一条「 ×N」（`EventLineFold`，relay/带目标/带图标
+行不折，代表条目取组内第一条保证 LazyColumn key 稳定）。
 
 ## 🎯 大目标：让 DSH / DS Bot 适配我们（2026-11-13 用户定，**未排期**）
 

@@ -22,3 +22,21 @@ fun mergeTimeline(base: List<ChatEntry>, incoming: List<ChatEntry>): List<ChatEn
     }
     return merged.toList()
 }
+
+/**
+ * 单条按 [mergeTimeline] 的同一套规则插入（feed `message` 的落地用）：
+ * 有 seq 的插到「第一条 seq 更大的条目」之前，找不到就追加末尾；无 seq 的条目对
+ * 定位透明，新条目追加末尾。
+ *
+ * 对齐官方 runtime（insertAssistantSettlement：持久事件插到已可见尾部之前的真 seq
+ * 位置）：排队/steer 的消息还没回显、占位气泡挂在末尾时，先到的收尾文字与回复
+ * 不能被无条件甩到它后面 —— 追加会把「比占位气泡更早落日志」的消息排错。
+ */
+fun mergeTimelineEntry(base: List<ChatEntry>, entry: ChatEntry): List<ChatEntry> {
+    val seq = entry.seq ?: return base + entry
+    val at = base.indexOfFirst { existing ->
+        val existingSeq = existing.seq ?: return@indexOfFirst false
+        existingSeq > seq
+    }
+    return if (at >= 0) base.toMutableList().apply { add(at, entry) } else base + entry
+}

@@ -103,6 +103,19 @@ fun toolEventLine(
             target?.takeUnless { isError },
         )
 
+        // 交付声明（DSH `present` 工具，官方网页的 Delivered 行）：文件数从 args.files
+        // 数出来。「正在交付」的行在 tool/call 时由 ViewModel 直接挂（见
+        // BotChatViewModel 的 tool/call 分支），这里只负责结果行。
+        "present" -> ToolEventLine(
+            when {
+                isError -> "没能交付文件"
+                else -> {
+                    val count = args.optJSONArray("files")?.length() ?: 0
+                    if (count > 0) "已交付 $count 个文件" else "已交付文件"
+                }
+            },
+        )
+
         // 「看了一眼」类的动作（看团队 / 看密钥 / 翻自己的记录）、浏览器动作、
         // 更新记忆都不进对话：活动状态栏已经在显示，多一行只会把对话冲乱。
         else -> null

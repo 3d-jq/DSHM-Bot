@@ -44,4 +44,30 @@ class TimelineMergeTest {
         val twice = mergeTimeline(once.filterNot { it.id.startsWith("tool:") }, listOf(entry("tool:150", 150L)))
         assertEquals(listOf("bot-1", "tool:150", "bot-2"), twice.map { it.id })
     }
+
+    @Test
+    fun `single entry lands before the first entry with a larger seq`() {
+        val base = listOf(entry("bot-1", 100L), entry("bot-2", 300L))
+        val merged = mergeTimelineEntry(base, entry("feed:150", 150L))
+
+        assertEquals(listOf("bot-1", "feed:150", "bot-2"), merged.map { it.id })
+    }
+
+    @Test
+    fun `single entry without a seq is appended`() {
+        val base = listOf(entry("bot-1", 100L), entry("local", null))
+        val merged = mergeTimelineEntry(base, entry("feed:?", null))
+
+        assertEquals(listOf("bot-1", "local", "feed:?"), merged.map { it.id })
+    }
+
+    @Test
+    fun `single entry newer than everything is appended, not inserted`() {
+        // 占位气泡 seq=101 挂在末尾：seq 101 的收尾文字与它相等（不是「更大」），
+        // 落到末尾 —— 真正归位靠回显认领后的稳定重排（见 BotChatTimelinePositionTest）。
+        val base = listOf(entry("bot-1", 100L), entry("local-user", 101L))
+        val merged = mergeTimelineEntry(base, entry("feed:101", 101L))
+
+        assertEquals(listOf("bot-1", "local-user", "feed:101"), merged.map { it.id })
+    }
 }
