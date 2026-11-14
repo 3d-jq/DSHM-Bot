@@ -27,14 +27,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.key
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,15 +39,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
@@ -200,113 +194,29 @@ internal fun parseMarkdown(source: String): List<MarkdownBlock> {
     return blocks
 }
 
-/** 当前正在渲染的消息 id（选区按消息 + 片段定位）。 */
-internal val LocalMarkdownMessageId = compositionLocalOf { "" }
-
 /**
- * 同一条 markdown 里每个 `ShardText` 的稳定子序号。
+ * 一个文本片段：MinisTextKit 选区子系统下线后就是普通 Text。
  *
- * 照 DeepSearch `ShardSubIndexAllocator`：一条消息里可能有多个 Text 节点，
- * 只用 `块号:类型` 会撞 id，注册表里后画的把先画的覆盖掉 —— 表现为「有的段落选不中」。
- */
-internal class ShardSubIndexAllocator {
-    private var counter = 0
-    fun next(): Int = counter++
-}
-
-internal val LocalShardSubIndex = compositionLocalOf<ShardSubIndexAllocator?> { null }
-
-/**
- * 一段参与选择的文字。
- *
- * 严格照 DeepSearch `StreamingMarkdownText.kt` 的 `MdText`：
- * - 基础 id 是完整 `TextShardId(messageId, 块id)`，子序号由 [LocalShardSubIndex]
- *   在 `remember(baseId)` 里分配一次，拼成 `块id#序号`；
- * - `register`/`unregister` 走 [RegisterSelectionShard]；
- * - `drawBehind` **无条件**挂，选区状态在 draw 阶段读（不重组 Text）；
- * - Text 的 `onGloballyPositioned` 只更新一个普通数组，不写 snapshot state。
+ * 以前这里挂着 MinisTextKit 的选区分片（`TextShard` 注册 + `drawBehind` 高亮 +
+ * `onGloballyPositioned` 坐标上报），聊天列表的长按改走 MessageActionSheet、
+ * 面板里用系统 `SelectionContainer` 之后，选区注册表/手势/浮条全部移除，
+ * 只剩排版职责。`fillWidth` 的语义保留：代码块要 `softWrap=false` + 横向滚动，
+ * 不能撑满，单独关掉。
  */
 @Composable
 internal fun ShardText(
     text: AnnotatedString,
     style: TextStyle,
-    shardId: String,
     modifier: Modifier = Modifier,
     softWrap: Boolean = true,
-    /** true = 长按整段选中（表格单元格用）；false = 按词选中。 */
-    isAtomicUnit: Boolean = false,
-    /**
-     * Text 是否占满可用宽度。
-     *
-     * DeepSearch 的 `MdText` 由调用方把 `weight(1f)` / `width(120.dp)` 直接挂到
-     * Text 上，命中矩形因此覆盖整行/整格。我们之前把 weight 挂在外层 Box，
-     * Text 只包住字面宽度 —— 点在 `.md` / `.docx` 后面的空白处就命中不到。
-     * 代码块要 `softWrap=false` + 横向滚动，不能撑满，故单独关掉。
-     */
+    /** Text 是否占满可用宽度。 */
     fillWidth: Boolean = true,
 ) {
-    val messageId = LocalMarkdownMessageId.current
-    val controller = LocalMinisSelectionController.current
-    val allocator = LocalShardSubIndex.current
-    // 聊天列表已经不参与 MinisTextKit 选区：走极简 Text，
-    // 不挂 onTextLayout / onGloballyPositioned / drawBehind / shard 构建。
-    if (controller == null) {
-        Text(
-            text = text,
-            style = style,
-            softWrap = softWrap,
-            modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier).then(modifier),
-        )
-        return
-    }
-    // 基础 id 同 `LocalShardId`；remember key 只用 baseId，和 DeepSearch 一致
-    // （用具体 shardId 当 key 会在块内容变化时重新分配序号，注册表抖动）。
-    val baseId = remember(messageId, shardId) { TextShardId(messageId, shardId) }
-    val subIndex = remember(baseId) { allocator?.next() ?: 0 }
-    // `shardOrderKey` 取最后一个冒号后的整数当文档顺序（DeepSearch 的
-    // `mdblock:<parent>:<index>` 约定）。用 `#index` 会解析失败，退回按
-    // 窗口 y 比较；反序列表里 y 顺序与文档顺序相反，同消息的其它片段
-    // 会被判"不在选区内" → 不画高亮（但复制仍可用，正是用户看到的现象）。
-    val id = remember(baseId, subIndex, allocator) {
-        if (allocator == null) baseId.copy(shardId = "$shardId:$subIndex")
-        else baseId.copy(shardId = "$shardId:$subIndex")
-    }
-    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    // `inlineMarkdown` 每次重组都新建 AnnotatedString，用纯文本当 key 避免 shard 重建。
-    val plainText = text.text
-    val shard = remember(id, layoutResult, plainText, isAtomicUnit) {
-        val result = layoutResult
-        if (result == null) null else buildTextShard(
-            id = id,
-            plainText = plainText,
-            layoutResult = result,
-            coordinatesProvider = { coordinates[0] },
-            isAtomicUnit = isAtomicUnit,
-        )
-    }
-    RegisterSelectionShard(shard)
-    val selectionState = controller?.selection
-    val highlight = Dshm.colors.accent.copy(alpha = 0.28f)
     Text(
         text = text,
         style = style,
         softWrap = softWrap,
-        modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-            .then(modifier)
-            .onGloballyPositioned { coordinates[0] = it }
-            .drawBehind {
-                val result = layoutResult ?: return@drawBehind
-                val selection = selectionState?.value ?: return@drawBehind
-                drawSelectionForShard(
-                    shardId = id,
-                    result = result,
-                    selection = selection,
-                    controller = controller,
-                    color = highlight,
-                )
-            },
-        onTextLayout = { layoutResult = it },
+        modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier).then(modifier),
     )
 }
 
@@ -320,8 +230,6 @@ fun MarkdownText(
     fontScale: Float,
     modifier: Modifier = Modifier,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
-    /** 这条消息的 id：选区按 (消息, 片段) 记位置，滚动回来还能续上。 */
-    messageId: String = "",
     /** false：短消息按内容宽度排版，不把气泡撑满（Bot 气泡用）。 */
     fillWidth: Boolean = true,
     /** 流式输出中：按块冻结 + 后台解析，最后一块才是 live tail。 */
@@ -334,20 +242,15 @@ fun MarkdownText(
         color = colors.textPrimary,
     )
 
-    val allocator = remember(messageId) { ShardSubIndexAllocator() }
     // DeepSearch `MarkdownBlockBody`：冻结块解析一次并进进程级缓存，
     // live tail 在 Dispatchers.Default 上解析后再回主线程画，
     // 避免长表格 / 长段落每次 publish 都在主线程重扫。
     // 按块分片（DeepSearch `splitMarkdownIntoBlockTexts`）：每片是独立
-    // composable、自己 produceState，未变的前缀 Compose 直接 skip，
+    // composable、自己解析自己的片段，未变的前缀 Compose 直接 skip，
     // 只有 live tail 那一小片会随 token 重画。
     val fragments = splitStreamingFragments(markdown)
     val liveFade = if (streaming) rememberStreamingFade() else null
     if (liveFade != null) StreamingFadeDriver(liveFade)
-    CompositionLocalProvider(
-        LocalMarkdownMessageId provides messageId,
-        LocalShardSubIndex provides allocator,
-    ) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
@@ -368,7 +271,6 @@ fun MarkdownText(
             }
         }
     }
-    }
 }
 
 /**
@@ -382,7 +284,6 @@ internal fun CodeBlockView(
     language: String,
     base: TextStyle,
     colors: DshmColors,
-    shardId: String,
 ) {
     val context = LocalContext.current
     var copied by remember(code) { mutableStateOf(false) }
@@ -450,7 +351,6 @@ internal fun CodeBlockView(
                     fontSize = base.fontSize * 0.9f,
                     lineHeight = base.lineHeight * 0.95f,
                 ),
-                shardId = shardId,
                 softWrap = false,
                 fillWidth = false,
             )
@@ -471,6 +371,7 @@ internal fun MarkdownTable(
     rows: List<List<String>>,
     colors: DshmColors,
     base: TextStyle,
+    /** 只用于横向滚动状态的 key（[TableHScrollStates]），同一张表滚到哪还记得。 */
     shardBase: String = "table",
 ) {
     if (header.isEmpty()) return
@@ -529,7 +430,6 @@ internal fun MarkdownTable(
                             base = base,
                             bold = true,
                             modifier = Modifier.width(cellWidth),
-                            shardId = "$shardBase:h$column",
                         )
                     }
                 }
@@ -545,7 +445,6 @@ internal fun MarkdownTable(
                                 base = base,
                                 bold = false,
                                 modifier = Modifier.width(cellWidth),
-                                shardId = "$shardBase:r$rowIndex$column",
                             )
                         }
                     }
@@ -565,7 +464,6 @@ internal fun TableCell(
     base: TextStyle,
     bold: Boolean,
     modifier: Modifier = Modifier,
-    shardId: String = "",
 ) {
     Box(
         // 固定列宽：整体交给外层横向滚动，格子本身不再换行挤窄。
@@ -582,8 +480,6 @@ internal fun TableCell(
                 fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
                 color = colors.textPrimary,
             ),
-            shardId = shardId,
-            isAtomicUnit = true,
         )
     }
 }
@@ -596,7 +492,6 @@ internal fun ListLine(
     colors: DshmColors,
     base: TextStyle,
     mentionMembers: List<com.dshm.bot.ui.home.RoomMemberUi> = emptyList(),
-    shardId: String = "",
     fillWidth: Boolean = true,
     streaming: Boolean = false,
 ) {
@@ -618,8 +513,7 @@ internal fun ListLine(
             modifier = Modifier.width(Dshm.spacing.lg),
         )
         Spacer(Modifier.width(Dshm.spacing.xxs))
-        // 注意：weight 放在外层 Box 上，Text 本身保持普通测量 ——
-        // 直接把 weight 挂在 Text 上时，它在 Compose 的选择注册里会漏掉（长按选不中）。
+        // 注意：weight 放在外层 Box 上，Text 本身保持普通测量。
         Box(modifier = Modifier.weight(1f)) {
             ShardText(
                 text = if (streaming) {
@@ -630,7 +524,6 @@ internal fun ListLine(
                     inlineMarkdown(text, colors, base, mentionMembers)
                 },
                 style = base,
-                shardId = shardId,
                 fillWidth = fillWidth,
             )
         }

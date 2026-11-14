@@ -72,6 +72,11 @@ internal object MarkdownParseCache {
     fun blocks(raw: String): List<MarkdownBlock> = synchronized(blocks) {
         blocks.getOrPut(raw) { parseMarkdown(raw) }
     }
+
+    /** 只查不解析：命中给结果，未命中给空表（绝不现算）—— 给组合期取初值用。 */
+    fun peek(raw: String): List<MarkdownBlock> = synchronized(blocks) {
+        blocks[raw].orEmpty()
+    }
 }
 
 /** 单个 markdown 块；live tail 走增量行内解析，其余块走普通缓存。 */
@@ -100,7 +105,6 @@ internal fun RenderMarkdownBlock(
         is MarkdownBlock.Paragraph -> ShardText(
             text = withFade(inline(block.text), block.text),
             style = base,
-            shardId = "$baseId:p",
             fillWidth = fillWidth,
         )
 
@@ -111,7 +115,6 @@ internal fun RenderMarkdownBlock(
                 lineHeight = base.lineHeight * if (block.level <= 2) 1.18f else 1.08f,
                 fontWeight = FontWeight.Bold,
             ),
-            shardId = "$baseId:h",
             fillWidth = fillWidth,
         )
 
@@ -122,7 +125,6 @@ internal fun RenderMarkdownBlock(
             colors = colors,
             base = base,
             mentionMembers = mentionMembers,
-            shardId = "$baseId:l",
             fillWidth = fillWidth,
             streaming = live,
         )
@@ -133,7 +135,6 @@ internal fun RenderMarkdownBlock(
                 color = colors.textSecondary,
                 fontStyle = FontStyle.Italic,
             ),
-            shardId = "$baseId:q",
             fillWidth = fillWidth,
             modifier = Modifier
                 .drawBehind {
@@ -151,7 +152,6 @@ internal fun RenderMarkdownBlock(
             language = block.language,
             base = base,
             colors = colors,
-            shardId = "$baseId:c",
         )
 
         MarkdownBlock.Divider -> HorizontalDivider(

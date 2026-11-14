@@ -1,7 +1,6 @@
 package com.dshm.bot.ui.chat
 
 import android.content.Context
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -42,6 +41,7 @@ import com.dshm.bot.ui.home.TeamRoomUi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -311,7 +311,7 @@ class BotChatViewModel internal constructor(
     ) : this(botId, botName, isGroup, endpoint, appContext, BotChatDependencies.production(endpoint))
 
     private val notifyContext: Context? = appContext
-    private val settingsRepository = notifyContext?.let { SharedPrefsSettingsRepository(it) }
+    private val settingsRepository = notifyContext?.let { SharedPrefsSettingsRepository.getInstance(it) }
     private var notifyEnabled = true
     private var notifyPrefs = DshGoPreferences()
 
@@ -433,7 +433,11 @@ class BotChatViewModel internal constructor(
      * **不能**再往上加（曾经写成 `maxSeenSeq + ++optimisticSeq`）：占位 seq 一旦
      * 高过本轮的真实 seq，`mergeTimeline` 就会把本轮事件插到用户气泡上面 ——
      * 表现成「流式期间用户气泡错位」。
+     *
+     * follow 帧已通过 [followDeliveries] 切回主线程处理，这里本来只在主线程读写；
+     * volatile 是防回归的兜底（万一哪条新路径又从别的线程碰到它）。
      */
+    @Volatile
     private var maxSeenSeq = 0L
     private val pendingTools = LinkedHashMap<String, PendingTool>()
 
@@ -443,6 +447,22 @@ class BotChatViewModel internal constructor(
         val callId: String,
         val time: Long,
     )
+    /**
+     * follow 流的一次投递：一帧，或流结束。
+     *
+     * 帧来自 WebSocket 读线程（`DshWebSocketMuxLink` 的 onMessage），而
+     * [toolEvents] / [sessionEvents] / [pendingTools] 这些会话事件集合都在主线程
+     * 被 `mergeSessionEvents` / `load` / `adoptLocalSeq` 读写 —— 直接在回调里动它们
+     * 就是跨线程竞态（ConcurrentModificationException / LinkedHashMap 撕裂）。
+     * 所以 WS 线程只把投递入队，由主线程的单一消费者按到达顺序处理。
+     */
+    private sealed interface FollowDelivery {
+        data class Frame(val frame: JSONObject) : FollowDelivery
+        data class StreamEnded(val error: String?) : FollowDelivery
+    }
+
+    private val followDeliveries = Channel<FollowDelivery>(Channel.UNLIMITED)
+
     /** 更早历史的游标；null 表示没有更早的了。 */
     private var cursor: ChatCursor? = null
     private var feedJob: Job? = null
@@ -472,6 +492,16 @@ class BotChatViewModel internal constructor(
         // 用落盘的事件先推导一次：产物卡和第一条消息同一帧出现，不用等 follow 快照。
         if (sessionEvents.isNotEmpty()) mergeSessionEvents()
         if (client != null) {
+            // follow 帧的单一消费者：会话事件的处理按到达顺序串行在主线程跑。
+            // UNLIMITED 缓冲让 WS 线程 trySend 永不失败、不阻塞读线程。
+            viewModelScope.launch {
+                for (delivery in followDeliveries) {
+                    when (delivery) {
+                        is FollowDelivery.Frame -> handleFollowFrame(delivery.frame)
+                        is FollowDelivery.StreamEnded -> handleFollowStreamEnd(delivery.error)
+                    }
+                }
+            }
             // 先读历史，别让补模型/探测目录的 state 调用挡住对话首屏。
             load(initial = true)
             viewModelScope.launch { repairModelIfNeeded() }
@@ -503,7 +533,7 @@ class BotChatViewModel internal constructor(
     }
 
     /** 热启动：先把上次的历史放回时间线，再向引擎静默对齐。 */
-    private fun restoreHistory(snapshot: ChatHistoryCache.Snapshot) {
+    private fun restoreHistory(snapshot: HistoryMemory.Snapshot) {
         sessionId = snapshot.sessionId
         val scope = sessionId ?: botId
         val entries = buildList {
@@ -544,12 +574,16 @@ class BotChatViewModel internal constructor(
         followStreamId = mux?.openStream(
             endpoint = "session/follow",
             args = args,
-            onFrame = { frame -> handleFollowFrame(frame) },
-            onEnd = { error ->
-                DshMuxLog.log("session/follow 结束：${error ?: "closed"}")
-                followStreamId = null
-            },
+            // WS 线程只入队：真正的帧处理在主线程的消费者里（见 init 的 pump）。
+            onFrame = { frame -> followDeliveries.trySend(FollowDelivery.Frame(frame)) },
+            onEnd = { error -> followDeliveries.trySend(FollowDelivery.StreamEnded(error)) },
         )
+    }
+
+    /** follow 流结束（主线程）：清掉流 id，重连后由 [ensureFollow] 重开。 */
+    private fun handleFollowStreamEnd(error: String?) {
+        DshMuxLog.log("session/follow 结束：${error ?: "closed"}")
+        followStreamId = null
     }
 
     private fun handleFollowFrame(frame: JSONObject) {
@@ -700,7 +734,10 @@ class BotChatViewModel internal constructor(
         eventsSaveJob?.cancel()
         eventsSaveJob = viewModelScope.launch {
             delay(800)
-            cache.save(sessionEvents.values.toList())
+            // 快照在主线程取（sessionEvents 只在主线程动），序列化 + 写盘挪到 IO ——
+            // 上限 1MB 的事件表整表 toString 不该占着主线程。
+            val snapshot = sessionEvents.values.toList()
+            withContext(Dispatchers.IO) { cache.save(snapshot) }
         }
     }
 
@@ -860,7 +897,8 @@ class BotChatViewModel internal constructor(
                     it.id.startsWith("present:") ||
                     it.id.startsWith("shot:") ||
                     it.id.startsWith("retry:") ||
-                    it.id.startsWith("turnfail:")
+                    it.id.startsWith("turnfail:") ||
+                    it.id.startsWith("diag:")
             }
             // follow 的快照覆盖整个会话；只把「已经加载出来的这段历史」里的事件并进去，
             // 否则列表顶部会堆一堆比最早一条消息还老的事件行。
@@ -1828,24 +1866,44 @@ class BotChatViewModel internal constructor(
         runningWatchJob?.cancel()
         runningWatchJob = viewModelScope.launch {
             var idlePolls = 0
+            var failedPolls = 0
             var lastRunning: Boolean? = null
             var lastStatusAt = 0L
+            var lastStateAt = 0L
             val watchStartedAt = System.currentTimeMillis()
             val botEntriesAtStart = _uiState.value.entries.count { it.kind == ChatEntryKind.BOT }
             while (idlePolls < 2) {
                 delay(1_000)
+                val now = System.currentTimeMillis()
                 // 群聊只读 `room-progress`（很小）；`state` 太重，不能每秒拉 ——
                 // 手机上的引擎被高频轮询拖垮过，round 反而推不动。
+                // 单聊同病：拉 `state` 节流到 3 秒一次（状态行本来就是 3 秒一刷），
+                // 中间的秒沿用上一次的结论，回合结束的判定最多晚一个节流窗口。
                 val running = if (isGroup) {
                     refreshGroupProgress(connection)
+                } else if (lastRunning == null || now - lastStateAt >= SINGLE_CHAT_STATE_MIN_MS) {
+                    val state = runCatching { connection.bot("state") }.getOrNull()
+                    if (state == null) {
+                        // 连续拿不到 `state`（引擎下线/超时）：到上限就按「没在跑」收尾，
+                        // 别对着已经不在的引擎每秒空转（以前这里 `?: continue` 会永远轮询）。
+                        failedPolls += 1
+                        if (failedPolls >= RUN_WATCH_MAX_FAILURES) {
+                            idlePolls = 2
+                            false
+                        } else {
+                            continue
+                        }
+                    } else {
+                        failedPolls = 0
+                        lastStateAt = now
+                        runningNow(state.optJSONObject("work")?.optJSONObject("bots")?.has(botId) == true)
+                    }
                 } else {
-                    val state = runCatching { connection.bot("state") }.getOrNull() ?: continue
-                    runningNow(state.optJSONObject("work")?.optJSONObject("bots")?.has(botId) == true)
+                    lastRunning == true
                 }
                 if (running) {
                     idlePolls = 0
                     // 状态行（工具文案/计时）不需要每秒刷；3 秒一次够了。
-                    val now = System.currentTimeMillis()
                     if (lastRunning != true || now - lastStatusAt >= 3_000L) {
                         lastStatusAt = now
                         refreshBotStatus()
@@ -1870,7 +1928,6 @@ class BotChatViewModel internal constructor(
             val last = _uiState.value.entries.lastOrNull { it.kind == ChatEntryKind.BOT }?.text.orEmpty()
             val showPhoneResult = phoneTaskDone && context != null &&
                 DshmAccessibilityService.current != null
-            Log.i("PhoneResult", "watch end: done=$phoneTaskDone show=$showPhoneResult produced=$produced")
             // 对齐 dsh-Go：无论这一轮有没有产出都查一次失败诊断（模型中途失败也
             // 不算「正常做完」，必须补一条错误行，不让失败静默）。已按 time 去重。
             var turnFailure: String? = null
@@ -2055,24 +2112,33 @@ class BotChatViewModel internal constructor(
             if (entrySession.isNotEmpty() && entrySession != mine) continue
             val time = entry.optLong("time", 0L)
             if (time in 1 until sinceMs) continue
-            val code = entry.optString("code").takeIf { it.isNotEmpty() }
-            val id = "turnfail:$time"
-            if (!seen.add(id)) return null
-            val label = "$botName 没能回答：${failureLabel(code, entry.optString("text"))}"
-            _uiState.update { state ->
-                state.copy(
-                    entries = state.entries + ChatEntry(
-                        id = id,
-                        kind = ChatEntryKind.EVENT,
-                        text = label,
-                        author = botName,
-                        botId = botId,
-                        eventKind = "failed",
-                        eventCode = code,
-                        timeMs = time.takeIf { it > 0L },
-                    ),
-                )
+            // follow 的 `turn/end` 已经把这一轮的失败画成 `turnfail:$seq`（code 同源）：
+            // 这一轮里已有失败行就不再补诊断行，避免双份。
+            val alreadyReported = toolEvents.values.any { existing ->
+                existing.id.startsWith("turnfail:") &&
+                    existing.eventKind == "failed" &&
+                    (existing.timeMs ?: 0L) >= sinceMs
             }
+            if (alreadyReported) return null
+            val code = entry.optString("code").takeIf { it.isNotEmpty() }
+            val id = "diag:$time"
+            if (toolEvents.values.any { it.id == id }) return null
+            val label = "$botName 没能回答：${failureLabel(code, entry.optString("text"))}"
+            // 诊断条目没有会话 seq：键取负数（真实事件 seq 恒 ≥ 0，永不冲突）。
+            // 放进 toolEvents 让 mergeSessionEvents 每次重灌，不再被 base 剥除后弄丢。
+            toolEvents[-(time.takeIf { it > 0L } ?: 1L)] = ChatEntry(
+                id = id,
+                kind = ChatEntryKind.EVENT,
+                text = label,
+                author = botName,
+                botId = botId,
+                eventKind = "failed",
+                eventCode = code,
+                // 贴在刚结束的这轮边界上；follow 没连上时退到乐观占位 seq（列表末尾）。
+                seq = lastTurnEndSeq.takeIf { it > 0L } ?: (maxSeenSeq + 1),
+                timeMs = time.takeIf { it > 0L },
+            )
+            mergeSessionEvents()
             return label
         }
         return null
@@ -2343,6 +2409,7 @@ class BotChatViewModel internal constructor(
     override fun onCleared() {
         feedJob?.cancel()
         reloadJob?.cancel()
+        followDeliveries.close()
         followStreamId?.let { mux?.closeStream(it) }
     }
 
@@ -2366,6 +2433,10 @@ class BotChatViewModel internal constructor(
         private const val NEWLINE_FLUSH_MAX_LEN = 32_000
         private const val NEWLINE_FLUSH_MIN_CHARS = 50
         private const val STOP_GRACE_NS = 2_000_000_000L
+        /** 单聊 `state` 拉取的最小间隔：重接口，和状态行的 3 秒刷新对齐。 */
+        private const val SINGLE_CHAT_STATE_MIN_MS = 3_000L
+        /** 回合监视连续拿不到 `state` 的上限：超过就按「没在跑」收尾，不再空转。 */
+        private const val RUN_WATCH_MAX_FAILURES = 5
         /** 会话事件记录的内存上限（够覆盖最近若干轮；产物推导只看完成的轮）。 */
         private const val MAX_SESSION_EVENTS = 4_000
         /** 输出目录扫描的缓存时长：合并在每条事件后都跑，不能每次都扫盘。 */

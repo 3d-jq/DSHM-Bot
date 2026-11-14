@@ -293,7 +293,7 @@ private fun MenuAction(
         androidx.compose.material3.Icon(
             painter = painterResource(icon),
             contentDescription = null,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(Dshm.spacing.settingsRowIcon),
             tint = tint,
         )
         Text(text = label, style = Dshm.typography.rowTitle, color = tint)

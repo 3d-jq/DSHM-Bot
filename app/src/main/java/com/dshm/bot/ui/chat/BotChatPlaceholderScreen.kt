@@ -66,11 +66,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.sample
@@ -306,7 +306,10 @@ fun BotChatScreen(
     }
     // 输入框的实际高度 —— 列表要留出这么多，消息才不会被输入框压住
     // （照 DeepSearch 的 bottomChromeHeight + bottomReserve）。
-    var composerHeight by remember { mutableStateOf(56.dp) }
+    // 初值用输入框的最小高度令牌，实测值由 onSizeChanged 覆写。
+    // Dshm.spacing 是 @Composable 取值，先在组合里读出再进 remember。
+    val composerMinHeight = Dshm.spacing.composerMinHeight
+    var composerHeight by remember { mutableStateOf(composerMinHeight) }
     val density = LocalDensity.current
     // 输入法高度与系统导航栏高度分开取 —— 两个间隙要能各自调。
     val imeInset = with(density) { WindowInsets.Companion.ime.getBottom(this).toDp() }
@@ -696,7 +699,7 @@ private fun LoadingEarlierRow() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 16.dp),
+            .padding(vertical = Dshm.spacing.lg),
         contentAlignment = Alignment.Center,
     ) {
         CircularProgressIndicator(
@@ -730,7 +733,7 @@ private fun ChatMessages(
     /** 最近一次发送时间：发送后的短暂宽限内强制跟随，不让新气泡藏在输入框下。 */
     lastSendAt: Long = 0L,
     /** 输入框 + 它下面留白的实测高度 —— 列表要留出这么多才不会被盖住。 */
-    bottomChromeHeight: Dp = 56.dp,
+    bottomChromeHeight: Dp = Dshm.spacing.composerMinHeight,
     /** 上次加载出错时不再自动触发（否则会一直重试）。 */
     autoLoadEnabled: Boolean = true,
     onOpenMember: (String) -> Unit = {},
@@ -775,7 +778,7 @@ private fun ChatMessages(
     val scope = rememberCoroutineScope()
     val draggedByUser by listState.interactionSource.collectIsDraggedAsState()
     var userDragged by remember { mutableStateOf(false) }
-    val nearBottomThresholdPx = with(LocalDensity.current) { 32.dp.toPx() }.toInt()
+    val nearBottomThresholdPx = with(LocalDensity.current) { Dshm.spacing.xxxl.toPx() }.toInt()
     val isNearBottom by remember(listState, nearBottomThresholdPx) {
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 &&
@@ -875,9 +878,7 @@ private fun ChatMessages(
     )
 
     // 长按已全部走 MessageActionSheet（面板里用系统 SelectionContainer 选字），
-    // 聊天列表不再需要 MinisTextKit 那套「每个表格单元格注册一个选区分片」的机制。
-    // 它会在滚动时反复写 `mutableStateMap` / `onTextLayout` 状态，表格越大越卡。
-    CompositionLocalProvider(LocalMinisSelectionController provides null) {
+    // 聊天列表不再挂任何自定义选区层。
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
@@ -954,7 +955,6 @@ private fun ChatMessages(
                             members = bot.roomMembers,
                             adminId = bot.roomAdmin,
                             onOpenMember = onOpenMember,
-                            messageId = "streaming",
                             streaming = true,
                         )
                     }
@@ -1026,7 +1026,6 @@ private fun ChatMessages(
                         durationMs = null,
                         whole = entry.whole,
                         endpoint = endpoint,
-                        messageId = entry.id,
                     )
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
@@ -1196,7 +1195,6 @@ private fun ChatMessages(
             }
         }
     }
-}
 }
 
 /**
@@ -1466,7 +1464,7 @@ private fun UserBubble(
         timeMs?.let { t ->
             Text(
                 text = clockLabel(t),
-                style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                style = Dshm.typography.rowTime,
                 color = Dshm.colors.textTertiary,
                 modifier = Modifier.padding(top = Dshm.spacing.xxs, end = Dshm.spacing.xs),
             )
@@ -1506,12 +1504,15 @@ private fun UserThumb(
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
 ) {
-    val bitmap = remember(item.path) {
-        if (item.path.isEmpty()) null else runCatching {
-            val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
-            android.graphics.BitmapFactory.decodeFile(item.path, options)
-        }.getOrNull()
+    // 解码挪到后台：以前 remember 里同步 decodeFile 且只 inSampleSize=2，
+    // 相机原图在组合线程解成 2000×1500，滚动列表明显掉帧。
+    val density = LocalDensity.current
+    val thumbPx = remember(item.path) {
+        with(density) { TILE_SIZE.toPx() }.toInt().coerceAtLeast(1)
     }
+    val bitmap = produceState<android.graphics.Bitmap?>(null, item.path) {
+        value = withContext(Dispatchers.IO) { decodeBubbleThumbnail(item.path, thumbPx) }
+    }.value
     val shape = RoundedCornerShape(Dshm.radius.sm)
     Box(
         modifier = modifier
@@ -1562,7 +1563,7 @@ private fun UserFileTile(name: String) {
         Spacer(Modifier.height(Dshm.spacing.hairline))
         Text(
             text = name,
-            style = Dshm.typography.rowTime.copy(fontSize = 9.sp, lineHeight = 11.sp),
+            style = Dshm.typography.microTime,
             color = Dshm.colors.textPrimary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -1572,6 +1573,18 @@ private fun UserFileTile(name: String) {
 }
 
 private val TILE_SIZE = 64.dp
+
+/** 用户气泡缩略图：按 64dp tile 的像素尺寸降采样（照 ChatComposer 的附件缩略图做法）。 */
+private fun decodeBubbleThumbnail(path: String, targetPx: Int): android.graphics.Bitmap? {
+    if (path.isEmpty()) return null
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeFile(path, bounds)
+    if (bounds.outWidth <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / sample > targetPx * 2) sample *= 2
+    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    return runCatching { android.graphics.BitmapFactory.decodeFile(path, options) }.getOrNull()
+}
 
 /**
  * Bot 消息气泡：
@@ -1595,8 +1608,6 @@ private fun BotBubble(
     /** 长文消息：正文折起，完整内容在附件里（网页版「显示全部」）。 */
     whole: ChatWholePost? = null,
     endpoint: RuntimeEndpoint? = null,
-    /** 时间线条目 id：选区按消息定位，也是「复制全文」的键。 */
-    messageId: String = "",
     /** 流式输出中的临时气泡：行内 markdown 先不扫（对齐 dsh-Go）。 */
     streaming: Boolean = false,
 ) {
@@ -1619,6 +1630,7 @@ private fun BotBubble(
                     modifier = Modifier
                         .then(
                             if (collapsible && !expanded) {
+                                // 折叠预览高度 280dp（对齐 dsh-Go 折叠卡的可见高度），无令牌。
                                 Modifier.heightIn(max = 280.dp).clipToBounds()
                             } else {
                                 Modifier
@@ -1626,12 +1638,11 @@ private fun BotBubble(
                         )
                         .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
                 ) {
-                    // 长按 = 选中文字（MinisTextKit 选区：代码块 / 表格 / 列表都能选）。
+                    // 正文按 markdown 画（代码块 / 表格 / 列表都走同一套排版）。
                     MarkdownText(
                         markdown = text,
                         fontScale = fontScale,
                         mentionMembers = members,
-                        messageId = messageId,
                         fillWidth = false,
                         streaming = streaming,
                     )
@@ -1696,7 +1707,7 @@ private fun BotBubble(
                 }
                 Text(
                     text = name,
-                    style = Dshm.typography.rowTitle.copy(fontSize = 13.sp),
+                    style = Dshm.typography.rowTitleSm,
                     // DS Bot 群名行用成员自己的 BotInk 色，不是统一黑。
                     color = member?.let {
                         androidx.compose.ui.graphics.Color(
@@ -1708,7 +1719,7 @@ private fun BotBubble(
                     Spacer(Modifier.width(Dshm.spacing.xs))
                     Text(
                         text = stringResource(R.string.room_settings_admin_badge),
-                        style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                        style = Dshm.typography.rowTime,
                         color = Dshm.colors.textSecondary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(Dshm.radius.xs))
@@ -1720,7 +1731,7 @@ private fun BotBubble(
                     Spacer(Modifier.width(Dshm.spacing.xs))
                     Text(
                         text = clockLabel(t),
-                        style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                        style = Dshm.typography.rowTime,
                         color = Dshm.colors.textTertiary,
                     )
                 }
@@ -1728,7 +1739,7 @@ private fun BotBubble(
                     Spacer(Modifier.width(Dshm.spacing.xs))
                     Text(
                         text = "· ${chatActivityElapsed(d)}",
-                        style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                        style = Dshm.typography.rowTime,
                         color = Dshm.colors.textTertiary,
                     )
                 }
@@ -1951,7 +1962,7 @@ private fun BotTitleCapsule(
             Spacer(Modifier.width(Dshm.spacing.xs))
             Text(
                 text = stringResource(R.string.chat_memory_updated),
-                style = Dshm.typography.rowTime.copy(fontSize = 11.sp),
+                style = Dshm.typography.rowTime,
                 color = Dshm.colors.accent,
                 maxLines = 1,
             )

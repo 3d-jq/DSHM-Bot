@@ -48,4 +48,27 @@ class BrowserActionScriptsTest {
         assertTrue(type!!.contains("""var value = 'hi';"""))
         assertEquals(true, type.contains("dispatchEvent(new Event('input'"))
     }
+
+    @Test
+    fun pageScriptTimeoutPassesThroughTimelyResults() = kotlinx.coroutines.test.runTest {
+        // 及时完成的脚本原样返回：限时包装不改变正常路径。
+        assertEquals(42, withPageScriptTimeout { 42 })
+    }
+
+    @Test
+    fun pageScriptTimeoutReturnsNullAfterDeadline() = kotlinx.coroutines.test.runTest {
+        // 页面 JS 卡死（delay 超过 PAGE_SCRIPT_TIMEOUT_MS）按超时回 null ——
+        // 老实现会永远挂起，把整条 browser-wait 长轮询拖死。
+        val startedAt = testScheduler.currentTime
+        assertNull(withPageScriptTimeout<Long> { kotlinx.coroutines.delay(60_000); 1L })
+        assertEquals(PAGE_SCRIPT_TIMEOUT_MS, testScheduler.currentTime - startedAt)
+    }
+
+    @Test
+    fun answerTimeoutReceiptMatchesFailureShape() {
+        val receipt = answerTimeoutReceipt("req-1")
+        assertEquals("req-1", receipt.optString("id"))
+        assertEquals(false, receipt.optBoolean("ok"))
+        assertEquals("The page did not answer", receipt.optString("error"))
+    }
 }

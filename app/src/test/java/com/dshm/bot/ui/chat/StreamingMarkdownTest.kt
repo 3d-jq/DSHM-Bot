@@ -93,6 +93,17 @@ class StreamingMarkdownTest {
     }
 
     @Test
+    fun `peek 只查缓存不现算`() {
+        // MarkdownFragment 的初值走 peek：未命中必须给空表而不是在主线程现算一遍
+        // （live tail 的 raw 每次 publish 都在变，老实现的 initialValue 逐帧重扫）。
+        val raw = "peek-uniq-${System.nanoTime()}\n\n第二段"
+        assertTrue(MarkdownParseCache.peek(raw).isEmpty())
+        val parsed = MarkdownParseCache.blocks(raw)
+        assertTrue(parsed.isNotEmpty())
+        org.junit.Assert.assertSame(parsed, MarkdownParseCache.peek(raw))
+    }
+
+    @Test
     fun `逐词淡入只覆盖新追加后缀`() {
         val fade = StreamingFadeController()
         fade.ingest("你好 世界")

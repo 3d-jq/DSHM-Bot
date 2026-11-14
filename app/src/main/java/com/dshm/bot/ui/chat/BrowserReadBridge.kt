@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -56,7 +57,16 @@ object BrowserReadBridge {
             lastError.value = null
             for (index in 0 until items.length()) {
                 val item = items.optJSONObject(index) ?: continue
-                answer(api, store, item)
+                // 兜底：里面的每一步（脚本 8 秒、waitStable 30 秒、网络 30 秒）都已各自有界，
+                // 这是最后的保险丝 —— 一条请求不管卡在哪都不许拖住整条长轮询。
+                // 超时补一条失败回执，让 Bot 立刻拿到错误，而不是等满自己的超时。
+                val finished = withTimeoutOrNull(ANSWER_FALLBACK_TIMEOUT_MS) { answer(api, store, item) }
+                if (finished == null) {
+                    val id = item.optString("id")
+                    if (id.isNotEmpty()) {
+                        runCatching { api.botValue("browser-result", answerTimeoutReceipt(id)) }
+                    }
+                }
             }
         }
     }
@@ -594,4 +604,16 @@ object BrowserReadBridge {
 
     /** `scroll_collect` 最多往下滚几次（防止无限列表）。 */
     private const val MAX_SCROLL_STEPS = 25
+
+    /**
+     * 单条请求的兜底限时：要盖过最长的合法动作（`waitStable` 上限 30 秒），
+     * 所以取 60 秒；正常路径永远不会碰到它。
+     */
+    private const val ANSWER_FALLBACK_TIMEOUT_MS = 60_000L
 }
+
+/** 兜底超时的回执：和 `answer` 的失败形状一致，Bot 拿到就能继续。 */
+internal fun answerTimeoutReceipt(id: String): JSONObject = JSONObject()
+    .put("id", id)
+    .put("ok", false)
+    .put("error", "The page did not answer")

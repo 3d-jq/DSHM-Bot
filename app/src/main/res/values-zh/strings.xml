@@ -197,8 +197,6 @@
     <string name="chat_member_dock_waiting_more">%1$s、%2$s 等 %3$d 人等你批准</string>
     <string name="chat_member_dock_doing">%1$s · %2$s…</string>
     <string name="chat_selection_copy">复制</string>
-    <string name="chat_selection_add_to_input">加入输入框</string>
-    <string name="chat_selection_copy_markdown">复制全文</string>
     <string name="chat_menu_copy">复制</string>
     <string name="chat_menu_select_text">选择文字</string>
     <string name="chat_copy_all">复制全部</string>

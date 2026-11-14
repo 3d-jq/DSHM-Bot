@@ -158,8 +158,7 @@ private fun MessageMenuRow(
  * 「选择文字」：底部面板，整条消息可以直接拖选复制（对齐 dsh-Go `showSelectTextSheet`）。
  *
  * 回复按 markdown 画（选出来的是看到的文字），用户消息按纯文本画；
- * 面板里关掉聊天页那套自定义选区（`LocalMinisSelectionController`），
- * 改用 Compose 自己的 `SelectionContainer`，避免两个选区系统打架。
+ * 选区用 Compose 自己的 `SelectionContainer`。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -200,36 +199,29 @@ internal fun SelectTextSheet(
                     Text(stringResource(R.string.chat_copy_all))
                 }
             }
-            androidx.compose.runtime.CompositionLocalProvider(
-                LocalMinisSelectionController provides null,
-                LocalMarkdownMessageId provides "select-text-sheet",
-                LocalShardSubIndex provides null,
+            SelectionContainer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             ) {
-                SelectionContainer(
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = Dshm.spacing.lg)
+                        .padding(top = Dshm.spacing.xs, bottom = Dshm.spacing.xxxl),
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = Dshm.spacing.lg)
-                            .padding(top = Dshm.spacing.xs, bottom = Dshm.spacing.xxxl),
-                    ) {
-                        if (markdown) {
-                            MarkdownText(
-                                markdown = text,
-                                fontScale = 1f,
-                                messageId = "",
-                            )
-                        } else {
-                            Text(
-                                text = text,
-                                style = Dshm.typography.composerText,
-                                color = Dshm.colors.textPrimary,
-                            )
-                        }
+                    if (markdown) {
+                        MarkdownText(
+                            markdown = text,
+                            fontScale = 1f,
+                        )
+                    } else {
+                        Text(
+                            text = text,
+                            style = Dshm.typography.composerText,
+                            color = Dshm.colors.textPrimary,
+                        )
                     }
                 }
             }

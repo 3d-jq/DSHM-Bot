@@ -112,10 +112,10 @@ private fun CreateMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
         modifier = Modifier.width(Dshm.spacing.menuWidth),
-        offset = DpOffset(x = 0.dp, y = Dshm.spacing.xs),
+        offset = DpOffset(x = Dshm.spacing.none, y = Dshm.spacing.xs),
         shape = RoundedCornerShape(Dshm.radius.md),
         containerColor = Dshm.colors.surface,
-        tonalElevation = 0.dp,
+        tonalElevation = Dshm.spacing.none,
         shadowElevation = Dshm.spacing.floatingElevation,
     ) {
         MenuRow(

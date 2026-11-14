@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import com.dshm.bot.MainDispatcherRule
 import com.dshm.bot.data.remote.BotFeedEvent
 import com.dshm.bot.data.remote.DshMux
+import com.dshm.bot.data.remote.DshMuxFrame
 import com.dshm.bot.data.remote.DshMuxLog
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.FakeMuxLink
@@ -20,6 +21,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -179,13 +181,217 @@ class BotChatViewModelWiringTest {
         assertEquals("你好", viewModel.streamingText.value)
     }
 
-    /** 最小假实现：只有 `chat` / `state` 会被 ViewModel 在读历史与状态时调用。 */
-    private class FakeRemoteApi : DshRemoteApi {
+    /** 按 WS 读线程的投递形状喂一个 session/follow 帧。 */
+    private fun deliverFollow(link: FakeMuxLink, streamId: String, event: JSONObject) {
+        link.deliver(
+            JSONObject()
+                .put("type", DshMuxFrame.TYPE_ITEM)
+                .put("streamId", streamId)
+                .put("value", event),
+        )
+    }
+
+    /** turn/end 失败事件（reason.kind=error）：handleSessionEvent 会画成 `turnfail:<seq>` 行。 */
+    private fun turnEndEvent(seq: Long, timeMs: Long, message: String): JSONObject = JSONObject()
+        .put("type", "event")
+        .put(
+            "event",
+            JSONObject()
+                .put("type", "turn/end")
+                .put("seq", seq)
+                .put("time", timeMs)
+                .put(
+                    "data",
+                    JSONObject().put(
+                        "reason",
+                        JSONObject()
+                            .put("kind", "error")
+                            .put("error", JSONObject().put("code", "boom").put("message", message)),
+                    ),
+                ),
+        )
+
+    @Test
+    fun followFramesFromWsThreadRunOnMainInOrder() = runTest(mainDispatcherRule.testDispatcher) {
+        // follow 帧来自 WebSocket 读线程：VM 只允许把帧入队，处理串行在 Main（测试调度器）上。
+        // 旧实现在 WS 线程里直接动 sessionEvents / toolEvents（与主线程竞态），这条测试锁住新语义。
+        val remote = FakeRemoteApi(sessionId = "sess-1")
+        val links = mutableListOf<FakeMuxLink>()
+        val scope = CoroutineScope(mainDispatcherRule.testDispatcher + SupervisorJob())
+        val mux = DshMux(
+            scope = scope,
+            connect = { FakeMuxLink().also { links += it } },
+            readyTimeoutMs = 1_000,
+            retryCapsMs = listOf(10),
+        )
+        val viewModel = viewModel(remote, mux)
+        try {
+            runCurrent()
+            val link = links.single()
+            link.deliverHostEvent(readyFrame())
+            runCurrent()
+            val followStreamId = link.opened.entries
+                .firstOrNull { it.value == "session/follow" }?.key
+            assertTrue("session/follow 流没开出来", followStreamId != null)
+
+            // WS 读线程按到达顺序投两帧。
+            val wsThread = Thread {
+                deliverFollow(link, followStreamId!!, turnEndEvent(5, System.currentTimeMillis(), "第一次失败"))
+                deliverFollow(link, followStreamId, turnEndEvent(6, System.currentTimeMillis(), "第二次失败"))
+            }
+            wsThread.start()
+            wsThread.join()
+            // 此刻帧只入过队：由 runCurrent 驱动的主线程消费者按顺序处理。
+            runCurrent()
+
+            val entries = viewModel.uiState.value.entries
+            val at5 = entries.indexOfFirst { it.id == "turnfail:5" }
+            val at6 = entries.indexOfFirst { it.id == "turnfail:6" }
+            assertTrue("第一帧失败事件没进列表", at5 >= 0)
+            assertTrue("第二帧失败事件没进列表", at6 >= 0)
+            assertTrue("帧处理顺序不对", at5 < at6)
+        } finally {
+            mux.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun watchRunEndGivesUpWhenStateKeepsFailing() = runTest(mainDispatcherRule.testDispatcher) {
+        // 引擎持续拿不到 `state`：回合监视到达失败上限就按「没在跑」收尾，
+        // 不再对着下线的引擎每秒空转（以前 `?: continue` 跳过失败计数，永远轮询）。
+        val remote = FakeRemoteApi(failEndpoints = setOf("state"))
+        val viewModel = viewModel(remote)
+        runCurrent()
+
+        viewModel.send("Hello")
+        advanceUntilIdle()
+
+        assertFalse("引擎持续失败后 running 应该被收掉", viewModel.uiState.value.running)
+        assertFalse(viewModel.uiState.value.stopVisible)
+    }
+
+    @Test
+    fun diagFailureRowSurvivesTimelineMerge() = runTest(mainDispatcherRule.testDispatcher) {
+        // 诊断失败行写进 toolEvents（id = diag:<time>），mergeSessionEvents 剥完 base
+        // 会从 toolEvents 重灌 —— 旧实现直接 append 进 entries，下一次合并就丢。
+        // 让 `state` 一直失败：回合监视走「连续失败上限」收尾（无 mux 时乐观 running
+        // 只有主机事件能清，state 若成功会无限轮询），诊断接口保持可用。
+        val remote = FakeRemoteApi(
+            failEndpoints = setOf("state"),
+            diagnostics = {
+                JSONObject().put(
+                    "entries",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("source", "turn")
+                            .put("time", System.currentTimeMillis())
+                            .put("code", "rate_limit")
+                            .put("text", "配额耗尽"),
+                    ),
+                )
+            },
+        )
+        val viewModel = viewModel(remote)
+        runCurrent()
+
+        viewModel.send("Hello")
+        advanceUntilIdle()
+        assertEquals(1, viewModel.uiState.value.entries.count { it.id.startsWith("diag:") })
+
+        // 再触发一次合并（浏览器缩略图卡）：诊断行不能被剥掉。
+        viewModel.addBrowserShot(
+            ChatBrowserShot(path = "/tmp/x.png", url = "https://a.b/c", title = "t", timeMs = 42L),
+        )
+        runCurrent()
+        assertEquals(
+            "合并后诊断失败行丢了",
+            1,
+            viewModel.uiState.value.entries.count { it.id.startsWith("diag:") },
+        )
+    }
+
+    @Test
+    fun turnFailureNotDuplicatedWhenFollowAlreadyReported() = runTest(mainDispatcherRule.testDispatcher) {
+        // follow 的 turn/end 已经给这一轮画过失败行：watch 收尾的诊断不能再补一条 diag: 行。
+        // 同样让 `state` 失败，走失败上限收尾；diagnostics 可用。
+        val remote = FakeRemoteApi(
+            sessionId = "sess-1",
+            failEndpoints = setOf("state"),
+            diagnostics = {
+                JSONObject().put(
+                    "entries",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("source", "turn")
+                            .put("time", System.currentTimeMillis())
+                            .put("code", "boom")
+                            .put("text", "失败"),
+                    ),
+                )
+            },
+        )
+        val links = mutableListOf<FakeMuxLink>()
+        val scope = CoroutineScope(mainDispatcherRule.testDispatcher + SupervisorJob())
+        val mux = DshMux(
+            scope = scope,
+            connect = { FakeMuxLink().also { links += it } },
+            readyTimeoutMs = 1_000,
+            retryCapsMs = listOf(10),
+        )
+        val viewModel = viewModel(remote, mux)
+        try {
+            runCurrent()
+            val link = links.single()
+            link.deliverHostEvent(readyFrame())
+            runCurrent()
+            val followStreamId = link.opened.entries
+                .firstOrNull { it.value == "session/follow" }?.key
+            assertTrue("session/follow 流没开出来", followStreamId != null)
+
+            viewModel.send("Hello")
+            runCurrent()
+            // follow 先报同一轮失败（time 放到未来，稳落在监视窗口内）。
+            deliverFollow(link, followStreamId!!, turnEndEvent(5, System.currentTimeMillis() + 60_000, "失败"))
+            runCurrent()
+            assertTrue(viewModel.uiState.value.entries.any { it.id == "turnfail:5" })
+
+            advanceUntilIdle()
+            assertEquals(
+                "诊断补了重复的失败行",
+                0,
+                viewModel.uiState.value.entries.count { it.id.startsWith("diag:") },
+            )
+            assertEquals(1, viewModel.uiState.value.entries.count { it.id.startsWith("turnfail:") })
+        } finally {
+            mux.close()
+            scope.cancel()
+        }
+    }
+
+    /** 最小假实现：只有 `chat` / `state` / `diagnostics` 会被 ViewModel 在读历史与状态时调用。 */
+    private class FakeRemoteApi(
+        /** `chat` 回执里的 sessionId；非空时 ViewModel 会据此开 session/follow 流。 */
+        val sessionId: String? = null,
+        /** 列在这些名字里的端点一律抛错（模拟引擎下线/超时）。 */
+        val failEndpoints: Set<String> = emptySet(),
+        /** `state` 的固定回执；null 时回空对象。 */
+        val stateResponse: JSONObject? = null,
+        /** `diagnostics` 的回执构造（调用时刻生成，time 才能落在监视窗口内）。 */
+        val diagnostics: (() -> JSONObject)? = null,
+    ) : DshRemoteApi {
         val feedEvents = MutableSharedFlow<BotFeedEvent>(extraBufferCapacity = 32)
 
-        override suspend fun bot(endpoint: String, payload: JSONObject): JSONObject = when (endpoint) {
-            "chat", "room-chat" -> JSONObject().put("items", JSONArray())
-            else -> JSONObject()
+        override suspend fun bot(endpoint: String, payload: JSONObject): JSONObject {
+            if (endpoint in failEndpoints) throw java.io.IOException("engine offline: $endpoint")
+            return when (endpoint) {
+                "chat", "room-chat" -> JSONObject().put("items", JSONArray()).also { response ->
+                    sessionId?.let { response.put("sessionId", it) }
+                }
+                "state" -> stateResponse ?: JSONObject()
+                "diagnostics" -> diagnostics?.invoke() ?: JSONObject()
+                else -> JSONObject()
+            }
         }
 
         override suspend fun botValue(endpoint: String, payload: JSONObject): Any? = JSONObject()

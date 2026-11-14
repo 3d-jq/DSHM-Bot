@@ -2,6 +2,7 @@ package com.dshm.bot.ui.chat
 
 import android.webkit.WebView
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 /**
@@ -127,15 +128,24 @@ internal object BrowserActionScripts {
     }
 }
 
-/** 在页面上跑一段脚本，把 `JSON.stringify` 的结果取回来。 */
+/** 页面脚本统一限时：页面 JS 卡死（死循环/渲染线程挂起）时按超时回 null，不拖死长轮询通道。 */
+internal const val PAGE_SCRIPT_TIMEOUT_MS = 8_000L
+
+/** 统一的限时包装（JVM 可测）：超时回 null，及时完成原样返回。 */
+internal suspend fun <T> withPageScriptTimeout(block: suspend () -> T): T? =
+    withTimeoutOrNull(PAGE_SCRIPT_TIMEOUT_MS) { block() }
+
+/** 在页面上跑一段脚本，把 `JSON.stringify` 的结果取回来；超时返回 null（按「页面没回答」处理）。 */
 internal suspend fun evaluatePageScript(webView: WebView, script: String): JSONObject? {
-    val raw = suspendCancellableCoroutine<String?> { continuation ->
-        runCatching {
-            webView.evaluateJavascript(script) { value ->
-                if (continuation.isActive) continuation.resumeWith(Result.success(value))
+    val raw = withPageScriptTimeout {
+        suspendCancellableCoroutine<String?> { continuation ->
+            runCatching {
+                webView.evaluateJavascript(script) { value ->
+                    if (continuation.isActive) continuation.resumeWith(Result.success(value))
+                }
+            }.onFailure { error ->
+                if (continuation.isActive) continuation.resumeWith(Result.failure(error))
             }
-        }.onFailure { error ->
-            if (continuation.isActive) continuation.resumeWith(Result.failure(error))
         }
     }
     return decodeJsJson(raw)
