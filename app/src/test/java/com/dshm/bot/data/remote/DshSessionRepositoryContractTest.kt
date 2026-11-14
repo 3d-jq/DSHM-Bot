@@ -124,6 +124,44 @@ class DshSessionRepositoryContractTest {
         }
     }
 
+    /**
+     * 排队消息的操作面（对齐官方 `session/updateQueue`，dsh-client-ui-conversation
+     * 的 steerQueue / QueueDock：`{kind:'steer'}` 插话、`{kind:'remove'}` 撤回）。
+     * edit 已在上面锁过，这里补 steer / remove 两个动作的形状。
+     */
+    @Test
+    fun updateQueueSteerAndRemoveActions() {
+        FakeDshServer().use { server ->
+            val seen = Collections.synchronizedList(mutableListOf<String>())
+            server.responder = { request ->
+                when {
+                    request.path.startsWith(FakeDshServer.LOGIN_PATH_PREFIX) -> FakeDshServer.cookie("sess")
+                    request.path == "/api/session/updateQueue" -> {
+                        seen.add(request.body)
+                        rpcResult("{}")
+                    }
+                    else -> FakeDshServer.Response(404)
+                }
+            }
+            server.start()
+
+            runBlocking {
+                val repository = DshSessionRepository(DshClient(server.endpoint))
+                repository.updateQueue("s1", "item-1", steer = true)
+                repository.updateQueue("s1", "item-2", remove = true)
+            }
+
+            assertEquals(2, seen.size)
+            val actions = seen.map { body ->
+                JSONObject(body).getJSONObject("payload").getJSONObject("args").getJSONObject("request")
+            }
+            assertEquals("item-1", actions[0].optString("itemId"))
+            assertEquals("steer", actions[0].getJSONObject("action").optString("kind"))
+            assertEquals("item-2", actions[1].optString("itemId"))
+            assertEquals("remove", actions[1].getJSONObject("action").optString("kind"))
+        }
+    }
+
     @Test
     fun listProvidersKeepsArrayShapedValue() {
         FakeDshServer().use { server ->

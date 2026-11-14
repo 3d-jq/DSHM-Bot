@@ -264,6 +264,92 @@ class BotChatArtifactLiveTest {
         }
     }
 
+    /**
+     * 快照窗口边缘的 present：调用的 result 落在窗口外（窗口太短 / 当时页没开着），
+     * 「正在交付」行不能挂一辈子 —— 快照处理完要把还没等到结果的 present 行撤掉
+     * （`BotChatViewModel.handleFollowFrame` 的快照收尾清理）。
+     */
+    @Test
+    fun snapshotDropsAPendingPresentRowWhoseResultFellOutside() {
+        val harness = Harness.create(mainDispatcherRule)
+        try {
+            harness.start()
+            val (link, followId) = harness.followStream()
+
+            // 实时流里先来一条 present 调用（「正在交付」行挂出来）。
+            link.deliverHostEvent(
+                followId,
+                frame(
+                    sessionEvent(
+                        50,
+                        "tool/call",
+                        JSONObject()
+                            .put("turn", 5)
+                            .put("callId", "p5")
+                            .put("name", "present")
+                            .put(
+                                "arguments",
+                                JSONObject().put("files", JSONArray().put(JSONObject().put("path", "/workspace/x.docx"))),
+                            ),
+                    ),
+                ),
+            )
+            harness.scheduler.runCurrent()
+            assertTrue(
+                "「正在交付」行没有挂出来",
+                harness.viewModel.uiState.value.entries.any { it.id == "tool:50" },
+            )
+
+            // 网关补发一条快照：窗口里只有这轮的 turn/start + present 调用，result 在窗口外。
+            link.deliverHostEvent(
+                followId,
+                JSONObject()
+                    .put("type", "snapshot")
+                    .put(
+                        "records",
+                        JSONArray().put(
+                            JSONObject().put(
+                                "type",
+                                "event",
+                            ).put(
+                                "event",
+                                sessionEvent(48, "turn/start", JSONObject().put("turn", 5)),
+                            ),
+                        ).put(
+                            JSONObject()
+                                .put("type", "event")
+                                .put(
+                                    "event",
+                                    sessionEvent(
+                                        50,
+                                        "tool/call",
+                                        JSONObject()
+                                            .put("turn", 5)
+                                            .put("callId", "p5")
+                                            .put("name", "present")
+                                            .put(
+                                                "arguments",
+                                                JSONObject().put(
+                                                    "files",
+                                                    JSONArray().put(JSONObject().put("path", "/workspace/x.docx")),
+                                                ),
+                                            ),
+                                    ),
+                                ),
+                        ),
+                    ),
+            )
+            harness.scheduler.runCurrent()
+
+            assertTrue(
+                "快照处理完还留着悬挂的「正在交付」行",
+                harness.viewModel.uiState.value.entries.none { it.id == "tool:50" },
+            )
+        } finally {
+            harness.close()
+        }
+    }
+
     /** follow 流正常结束（网关 TYPE_END）：按退避自动重开一条新流。 */
     @Test
     fun followStreamReopensAfterEnd() {

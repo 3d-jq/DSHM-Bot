@@ -191,6 +191,62 @@ class BotChatViewModelWiringTest {
         )
     }
 
+    /** follow 流里的 `llm/retry` 事件：官方画一条普通事件行，对齐成「模型请求失败，正在重试(n/max)：原因」。 */
+    private fun llmRetryEvent(seq: Long, retry: Int, max: Int, code: String, message: String): JSONObject =
+        JSONObject()
+            .put("type", "event")
+            .put(
+                "event",
+                JSONObject()
+                    .put("type", "llm/retry")
+                    .put("seq", seq)
+                    .put("time", 1_700_000_000_000L + seq)
+                    .put(
+                        "data",
+                        JSONObject()
+                            .put("retry", retry)
+                            .put("maxRetries", max)
+                            .put("failure", JSONObject().put("code", code).put("message", message)),
+                    ),
+            )
+
+    @Test
+    fun llmRetryFrameBecomesARetryRow() = runTest(mainDispatcherRule.testDispatcher) {
+        // 官方（dsh-Go 同款）：llm/retry 是对话里的一条普通事件行，不是静默也不是错误弹层。
+        // 回归点：这条行以前不存在（整条静默），用户看到的是「转了半天什么都没有」。
+        val remote = FakeRemoteApi(sessionId = "sess-1")
+        val links = mutableListOf<FakeMuxLink>()
+        val scope = CoroutineScope(mainDispatcherRule.testDispatcher + SupervisorJob())
+        val mux = DshMux(
+            scope = scope,
+            connect = { FakeMuxLink().also { links += it } },
+            readyTimeoutMs = 1_000,
+            retryCapsMs = listOf(10),
+        )
+        val viewModel = viewModel(remote, mux)
+        try {
+            runCurrent()
+            val link = links.single()
+            link.deliverHostEvent(readyFrame())
+            runCurrent()
+            val followStreamId = link.opened.entries
+                .firstOrNull { it.value == "session/follow" }?.key
+            assertTrue("session/follow 流没开出来", followStreamId != null)
+
+            deliverFollow(link, followStreamId!!, llmRetryEvent(7, retry = 2, max = 4, code = "rate_limit", message = "配额限流"))
+            runCurrent()
+
+            val row = viewModel.uiState.value.entries.firstOrNull { it.id == "retry:7" }
+            assertTrue("llm/retry 没有画成事件行", row != null)
+            assertEquals("模型请求失败，正在重试（2/4）：配额限流", row?.text)
+            assertEquals("retry", row?.eventKind)
+            assertEquals("rate_limit", row?.eventCode)
+        } finally {
+            mux.close()
+            scope.cancel()
+        }
+    }
+
     /** turn/end 失败事件（reason.kind=error）：handleSessionEvent 会画成 `turnfail:<seq>` 行。 */
     private fun turnEndEvent(seq: Long, timeMs: Long, message: String): JSONObject = JSONObject()
         .put("type", "event")

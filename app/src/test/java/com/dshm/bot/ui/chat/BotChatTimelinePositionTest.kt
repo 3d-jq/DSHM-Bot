@@ -259,6 +259,37 @@ class BotChatTimelinePositionTest {
         )
     }
 
+    /**
+     * 官方语义②的另一半：回显是「原位认领」而不是再插一行 —— 本地气泡的 id 就是
+     * `user:$requestId`，服务端 `user/message` 带着 `rpcId` 回来时必须命中同一条，
+     * USER 气泡保持 1 个（dsh-Go：同 key 行原地从「发送中」过渡到已回显）。
+     */
+    @Test
+    fun serverEchoKeepsOneBubbleInPlace() {
+        val scheduler: TestCoroutineScheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        val viewModel = viewModel(api, scheduler)
+
+        viewModel.send("问题")
+        scheduler.runCurrent()
+        val local = viewModel.uiState.value.entries.last { it.kind == ChatEntryKind.USER && it.text == "问题" }
+        val localId = local.id
+        assertTrue("本地气泡 id 应由 requestId 组成：$localId", localId.startsWith("user:"))
+
+        api.emitUserEcho(seq = 9, requestId = api.sentRequests.single())
+        scheduler.runCurrent()
+
+        val echoed = viewModel.uiState.value.entries.filter { it.id == localId }
+        assertEquals("回显后同 id 的用户气泡出现多条（重复插入）", 1, echoed.size)
+        assertEquals("回显应认领原气泡（同 id 原位），而不是换一条新的", localId, echoed.single().id)
+        assertEquals(9L, echoed.single().seq)
+        assertEquals(
+            "回显之外不应多出一条内容相同的用户气泡",
+            1,
+            viewModel.uiState.value.entries.count { it.kind == ChatEntryKind.USER && it.text == "问题" },
+        )
+    }
+
     private class FakeApi : DshRemoteApi {
         private val feedEvents = MutableSharedFlow<BotFeedEvent>(extraBufferCapacity = 16)
 
