@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -516,7 +517,10 @@ fun NewGroupScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Dshm.colors.pageBackground)
-                    .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+                    // 底栏要吃系统导航栏 inset（否则按钮贴着屏幕底边），
+                    // 再留一档自己的下边距让按钮「抬起来」。
+                    .navigationBarsPadding()
+                    .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.lg),
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
