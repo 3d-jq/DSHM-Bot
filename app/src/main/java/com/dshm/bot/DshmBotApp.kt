@@ -56,7 +56,7 @@ import com.dshm.bot.ui.chat.BOT_PAGE_FOLDER
 import com.dshm.bot.ui.chat.BOT_PAGE_MEMORY
 import com.dshm.bot.ui.chat.BOT_PAGE_NOTICE
 import com.dshm.bot.ui.chat.BOT_PAGE_SCHEDULES
-import com.dshm.bot.ui.chat.NewGroupDialog
+import com.dshm.bot.ui.chat.NewGroupScreen
 import com.dshm.bot.ui.chat.NewBotScreen
 import com.dshm.bot.ui.chat.RoomMemberOption
 import com.dshm.bot.ui.chat.RoomSettingsScreen
@@ -119,6 +119,7 @@ private const val SCREEN_LANGUAGE = "language"
 private const val SCREEN_ACCOUNT = "account"
 private const val SCREEN_SETTINGS_PAGE = "settings-page"
 private const val SCREEN_NEW_BOT = "new-bot"
+private const val SCREEN_NEW_GROUP = "new-group"
 private const val SCREEN_DIAGNOSTICS = "diagnostics"
 private const val CHAT_PREFIX = "chat:"
 private const val BOT_DETAILS_PREFIX = "bot-details:"
@@ -337,6 +338,7 @@ fun DshmBotApp(
     val screenKey = when {
         !onboardingDone -> SCREEN_ONBOARDING
         newBotOpen -> SCREEN_NEW_BOT
+        newGroupOpen -> SCREEN_NEW_GROUP
         webOpen -> SCREEN_WEB
         // 诊断页是引擎页推出来的：它要先判，否则 engineOpen 会把诊断页挡住。
         diagnosticsOpen -> SCREEN_DIAGNOSTICS
@@ -476,6 +478,26 @@ fun DshmBotApp(
                     botDetailsOpen = true
                 },
             )
+
+            key == SCREEN_NEW_GROUP -> {
+                val endpoint = (engineState as? RuntimeState.Running)?.endpoint
+                NewGroupScreen(
+                    bots = uiState.rows.filterNot { it.isGroup }.map { RoomMemberOption(it.id, it.name) },
+                    onBack = {
+                        navForward = false
+                        newGroupOpen = false
+                    },
+                    onCreate = { name, admin, members ->
+                        RoomSettingsViewModel.createRoom(endpoint, name, admin, members)
+                    },
+                    onCreated = { roomId ->
+                        navForward = true
+                        newGroupOpen = false
+                        openBotId = roomId
+                        botDetailsOpen = true
+                    },
+                )
+            }
 
             key == SCREEN_BOT_BROWSER -> BotBrowserScreen(
                 botId = openBotId,
@@ -1037,26 +1059,6 @@ fun DshmBotApp(
             )
         }
         }
-    }
-
-    if (newGroupOpen) {
-        val endpoint = (engineState as? RuntimeState.Running)?.endpoint
-        val botOptions = uiState.rows
-            .filterNot { it.isGroup }
-            .map { RoomMemberOption(it.id, it.name) }
-        NewGroupDialog(
-            bots = botOptions,
-            onDismiss = { newGroupOpen = false },
-            onCreate = { name, admin, members ->
-                RoomSettingsViewModel.createRoom(endpoint, name, admin, members)
-            },
-            onCreated = { roomId ->
-                newGroupOpen = false
-                navForward = true
-                openBotId = roomId
-                botDetailsOpen = true
-            },
-        )
     }
 
     // 浏览器守卫：Bot 要点「付款 / 发送 / 删除」这类按钮时，先在这里问一次。

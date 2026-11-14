@@ -1,6 +1,8 @@
 package com.dshm.bot.ui.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,9 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -22,6 +23,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -484,11 +486,16 @@ private fun ListPickDialog(
     }
 }
 
-/** 新建群聊：至少两名 Bot，先选管理员，再选其他成员。 */
+/**
+ * 新建群聊（**全屏页**）：先选管理员，再勾其他成员，最后填群名。
+ *
+ * 2026-11-14 用户要求：主界面「＋ → 新建群聊」原来弹 `AlertDialog`，改成与
+ * 「新建 Bot」同一套全屏壳（`SettingsPage`）—— 表单内容不变，只是不再是弹窗。
+ */
 @Composable
-fun NewGroupDialog(
+fun NewGroupScreen(
     bots: List<RoomMemberOption>,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
     onCreate: suspend (String, String, List<String>) -> Result<String>,
     onCreated: (String) -> Unit,
 ) {
@@ -497,87 +504,133 @@ fun NewGroupDialog(
     var name by rememberSaveable { mutableStateOf("") }
     var busy by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
+    val canCreate = canCreateGroup(admin, members)
 
-    AlertDialog(
-        onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(stringResource(R.string.home_new_group)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(stringResource(R.string.room_settings_choose_admin), style = Dshm.typography.rowTitle)
-                bots.forEach { bot ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                admin = bot.id
-                                members = members - bot.id
-                            }
-                            .padding(vertical = Dshm.spacing.xs),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = admin == bot.id, onClick = null)
-                        Text(bot.name, modifier = Modifier.padding(start = Dshm.spacing.sm))
-                    }
+    SettingsPage(
+        title = stringResource(R.string.home_new_group),
+        onBack = { if (!busy) onBack() },
+        bottomBar = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Dshm.colors.pageBackground)
+                    .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = onBack,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(android.R.string.cancel)) }
+                Button(
+                    enabled = !busy && canCreate,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        val pickedAdmin = admin ?: return@Button
+                        busy = true
+                        error = null
+                        scope.launch {
+                            onCreate(name, pickedAdmin, members.toList())
+                                .onSuccess { id -> onCreated(id) }
+                                .onFailure { failure ->
+                                    busy = false
+                                    error = failure.message ?: "创建群聊失败"
+                                }
+                        }
+                    },
+                ) {
+                    Text(
+                        if (busy) stringResource(R.string.new_bot_creating)
+                        else stringResource(R.string.room_settings_create),
+                    )
                 }
-                if (admin != null) {
-                    Spacer(Modifier.height(Dshm.spacing.md))
-                    Text(stringResource(R.string.room_settings_choose_members), style = Dshm.typography.rowTitle)
-                    bots.filter { it.id != admin }.forEach { bot ->
+            }
+        },
+    ) {
+        item {
+            SettingsSection(title = stringResource(R.string.room_settings_choose_admin)) {
+                Column(Modifier.padding(Dshm.spacing.md)) {
+                    bots.forEach { bot ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    members = if (bot.id in members) members - bot.id else members + bot.id
+                                    admin = bot.id
+                                    members = members - bot.id
                                 }
-                                .padding(vertical = Dshm.spacing.xs),
+                                .padding(vertical = Dshm.spacing.sm),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            androidx.compose.material3.Checkbox(
-                                checked = bot.id in members,
-                                onCheckedChange = null,
-                            )
+                            RadioButton(selected = admin == bot.id, onClick = null)
                             Text(bot.name, modifier = Modifier.padding(start = Dshm.spacing.sm))
                         }
                     }
-                    Spacer(Modifier.height(Dshm.spacing.md))
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text(stringResource(R.string.bot_settings_name)) },
-                        placeholder = { Text(stringResource(R.string.room_settings_name_hint)) },
-                        singleLine = true,
-                        shape = dshmFieldShape(),
-                        colors = dshmFieldColors(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                error?.let { message ->
-                    Spacer(Modifier.height(Dshm.spacing.sm))
-                    Text(message, color = Dshm.colors.danger, style = Dshm.typography.rowPreview)
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = !busy && admin != null && members.isNotEmpty(),
-                onClick = {
-                    val pickedAdmin = admin ?: return@TextButton
-                    busy = true
-                    error = null
-                    scope.launch {
-                        val result = onCreate(name, pickedAdmin, members.toList())
-                        busy = false
-                        result.onSuccess { id -> onCreated(id) }
-                            .onFailure { failure -> error = failure.message ?: "创建群聊失败" }
+        }
+
+        // 成员只能在选出管理员之后勾选：管理员自己不能同时当成员。
+        if (admin != null) {
+            item {
+                SettingsSection(title = stringResource(R.string.room_settings_choose_members)) {
+                    Column(Modifier.padding(Dshm.spacing.md)) {
+                        bots.filter { it.id != admin }.forEach { bot ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        members = if (bot.id in members) members - bot.id else members + bot.id
+                                    }
+                                    .padding(vertical = Dshm.spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                androidx.compose.material3.Checkbox(
+                                    checked = bot.id in members,
+                                    onCheckedChange = null,
+                                )
+                                Text(bot.name, modifier = Modifier.padding(start = Dshm.spacing.sm))
+                            }
+                        }
                     }
-                },
-            ) { Text(stringResource(R.string.room_settings_create)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !busy) {
-                Text(stringResource(android.R.string.cancel))
+                }
             }
-        },
-    )
+
+            item {
+                SettingsSection(title = stringResource(R.string.bot_settings_name)) {
+                    Column(Modifier.padding(Dshm.spacing.md)) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            placeholder = { Text(stringResource(R.string.room_settings_name_hint)) },
+                            singleLine = true,
+                            shape = dshmFieldShape(),
+                            colors = dshmFieldColors(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        }
+
+        error?.let { message ->
+            item {
+                Text(
+                    message,
+                    color = Dshm.colors.danger,
+                    style = Dshm.typography.rowPreview,
+                    modifier = Modifier.padding(horizontal = Dshm.spacing.lg),
+                )
+            }
+        }
+    }
 }
+
+/**
+ * 能不能建群：有管理员、且至少勾了一个成员（官方要求至少两名 Bot）。
+ *
+ * 抽成纯函数是为了能在 JVM 单测里锁住这条规则。
+ */
+internal fun canCreateGroup(admin: String?, members: Set<String>): Boolean =
+    admin != null && members.isNotEmpty() && members.none { it == admin }
