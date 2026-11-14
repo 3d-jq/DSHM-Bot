@@ -13,6 +13,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.dshm.bot.R
+import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 import com.dshm.bot.service.PhoneAppRule
 import com.dshm.bot.service.PhoneAppRules
 
@@ -76,9 +78,12 @@ fun PhoneAppRulesScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { selected = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+                SettingsSecondaryButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { selected = null },
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
             },
         )
     }

@@ -27,6 +27,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 import com.dshm.bot.domain.model.PhoneConfirmMode
 import com.dshm.bot.service.PhoneActionLog
 import com.dshm.bot.service.PhoneControlBridge
@@ -285,9 +287,11 @@ fun PhoneControlSettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { testText = null }) {
-                    Text(stringResource(R.string.action_done))
-                }
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.action_done),
+                    onClick = { testText = null },
+                    fillWidth = false,
+                )
             },
         )
     }
@@ -323,9 +327,12 @@ fun PhoneControlSettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { ownerPickerOpen = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+                SettingsSecondaryButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { ownerPickerOpen = false },
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
             },
         )
     }

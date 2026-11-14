@@ -21,7 +21,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +43,7 @@ import com.dshm.bot.ui.components.BotAvatar
 import com.dshm.bot.ui.home.ChatRowUi
 import com.dshm.bot.ui.settings.SettingsCopy
 import com.dshm.bot.ui.settings.SettingsPage
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
@@ -416,9 +416,12 @@ fun BotDetailsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { pickShape = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
+                SettingsSecondaryButton(
+                    text = stringResource(android.R.string.cancel),
+                    onClick = { pickShape = false },
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
             },
         )
     }
