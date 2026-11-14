@@ -37,6 +37,7 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.ui.components.BotAvatar
+import com.dshm.bot.ui.settings.SettingsCancelButton
 import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
@@ -519,11 +520,12 @@ fun NewGroupScreen(
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
+                SettingsCancelButton(
+                    text = stringResource(android.R.string.cancel),
                     onClick = onBack,
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
-                ) { Text(stringResource(android.R.string.cancel)) }
+                )
                 Button(
                     enabled = !busy && canCreate,
                     modifier = Modifier.weight(1f),

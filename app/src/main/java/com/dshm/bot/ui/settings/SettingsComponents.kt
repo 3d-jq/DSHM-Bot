@@ -549,6 +549,32 @@ fun SettingsPrimaryButton(
     }
 }
 
+/**
+ * 全屏表单底部的「取消」：**白色胶囊**，与旁边的实心主按钮同高同形（M3 默认圆角），
+ * 一眼能看出是按钮 —— 纯文字 TextButton 没有底，会让人以为它不是可点的。
+ */
+@Composable
+fun SettingsCancelButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth().heightIn(min = Dshm.spacing.iconButton),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Dshm.colors.floatingSurface,
+            contentColor = Dshm.colors.textPrimary,
+            disabledContainerColor = Dshm.colors.surfaceMuted,
+            disabledContentColor = Dshm.colors.textTertiary,
+        ),
+    ) {
+        Text(text, style = Dshm.typography.rowTitle)
+    }
+}
+
 @Composable
 fun SettingsDangerButton(
     text: String,

@@ -52,6 +52,7 @@ import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.BotInks
 import com.dshm.bot.domain.model.BotShapeDefaults
 import com.dshm.bot.ui.components.BotAvatar
+import com.dshm.bot.ui.settings.SettingsCancelButton
 import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsSection
 import org.json.JSONObject
@@ -160,11 +161,12 @@ fun NewBotScreen(
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
+                SettingsCancelButton(
+                    text = stringResource(android.R.string.cancel),
                     onClick = onBack,
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
-                ) { Text(stringResource(android.R.string.cancel)) }
+                )
                 Button(
                     onClick = {
                         busy = true
