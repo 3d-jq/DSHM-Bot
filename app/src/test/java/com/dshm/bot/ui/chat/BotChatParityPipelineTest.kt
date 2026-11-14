@@ -169,10 +169,18 @@ class BotChatParityPipelineTest {
         )
 
         /** feed `timeline` 增量帧（走真实数据形状：JSON → 解析器）。 */
-        fun emitTimeline(vararg rows: TimelineRow, isGroup: Boolean = false, running: Boolean? = null) {
+        fun emitTimeline(
+            vararg rows: TimelineRow,
+            isGroup: Boolean = false,
+            running: Boolean? = null,
+            from: Long? = null,
+            bufferFrom: Long? = null,
+        ) {
             val data = JSONObject()
             if (isGroup) data.put("roomId", "room-1") else data.put("botId", "bot-1")
             data.put("seq", rows.maxOfOrNull { it.seq ?: 0L } ?: 0L)
+            from?.let { data.put("from", it) }
+            bufferFrom?.let { data.put("bufferFrom", it) }
             data.put(
                 "rows",
                 JSONArray().apply {
@@ -643,6 +651,26 @@ class BotChatParityPipelineTest {
         assertEquals("room-1", payload.optString("roomId"))
         assertEquals("bot-9", payload.optString("botId"))
         assertEquals("已让 研究员 停下", viewModel.uiState.value.actionNotice)
+    }
+
+    /** 断档检测：帧 from 比本地 seq 大 → 主动带 since 重放快照，把丢掉的卡补回来。 */
+    @Test
+    fun gapInTimelineFramesTriggersSinceReplay() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L), api.row("bot:11", "bot", 11L))
+        val viewModel = viewModel(api, scheduler)
+        assertEquals(listOf("user:10", "bot:11"), viewModel.uiState.value.entries.map { it.id })
+        val before = api.timelineRequests.size
+
+        // 模拟 feed 断线期间丢了一帧：本地只到快照 seq=40，新帧 from=45（41~44 丢了）。
+        api.emitTimeline(api.row("bot:50", "bot", 50L), from = 45L)
+        scheduler.runCurrent()
+
+        val replay = api.timelineRequests.drop(before).firstOrNull()
+        assertTrue("断档应触发一次带 since 的重放：$replay", replay?.since != null)
+        assertEquals("since 应为断档前的本地 seq", 40L, replay?.since)
+        assertTrue("当前帧仍要正常应用", viewModel.uiState.value.entries.any { it.id == "bot:50" })
     }
 
     private fun lastRequestId(api: FakeApi): String =

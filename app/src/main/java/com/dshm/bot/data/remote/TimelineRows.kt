@@ -174,6 +174,10 @@ data class TimelineFeedFrame(
     val botId: String?,
     val roomId: String?,
     val seq: Long?,
+    /** 本帧覆盖的 seq 起点；客户端 `paritySeq` 落后于它就说明中间有帧丢了。 */
+    val from: Long? = null,
+    /** 宿主行缓冲的最早 seq；客户端比它还老就只能全量重拉。 */
+    val bufferFrom: Long? = null,
     val rows: List<TimelineRow>,
     /**
      * 群聊帧的 round 状态（单聊缺席）：running 的 true→false 边沿 = 本轮收口，
@@ -257,6 +261,8 @@ fun parseTimelineFeedFrame(data: JSONObject?): TimelineFeedFrame? {
                 botId = data.optString("botId").takeIf { it.isNotEmpty() },
                 roomId = data.optString("roomId").takeIf { it.isNotEmpty() },
                 seq = optionalLong(data, "seq"),
+                from = optionalLong(data, "from"),
+                bufferFrom = optionalLong(data, "bufferFrom"),
                 rows = parseTimelineRows(data.optJSONArray("rows")),
                 running = if (data.has("running") && !data.isNull("running")) data.optBoolean("running") else null,
                 speaking = data.optString("speaking").takeIf { it.isNotEmpty() },

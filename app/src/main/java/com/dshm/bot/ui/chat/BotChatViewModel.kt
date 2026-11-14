@@ -1004,14 +1004,17 @@ class BotChatViewModel internal constructor(
      * 拉一次 timeline 快照/重放：`reset` 全量重建行缓冲；否则带 `since` 做 feed 断线
      * 重连的 seq 游标重放（设计 §3）。parity 下这是 entries 的唯一服务端来源。
      */
-    private fun refreshTimelineSnapshot(reset: Boolean) {
+    private fun refreshTimelineSnapshot(reset: Boolean, sinceOverride: Long? = null) {
         val connection = client ?: return
+        // 显式快照：launch 是异步的，不能让它在执行时再读可变的 paritySeq，
+        // 否则断档重放会拿到「已推进到当前帧」的 seq，把丢掉那段跳过。
+        val since = sinceOverride ?: paritySeq.takeIf { it > 0L }
         parityTimelineJob?.cancel()
         parityTimelineJob = viewModelScope.launch {
             val request = TimelineRequest(
                 botId = botId.takeIf { !isGroup },
                 roomId = botId.takeIf { isGroup },
-                since = if (reset) null else paritySeq.takeIf { it > 0L },
+                since = if (reset) null else since,
             )
             val snapshot = runCatching { connection.timeline(request) }.getOrNull() ?: return@launch
             paritySnapshot = snapshot
@@ -1161,8 +1164,24 @@ class BotChatViewModel internal constructor(
             refreshTimelineSnapshot(reset = true)
             return
         }
-        frame.seq?.let { if (it > paritySeq) paritySeq = it }
+        // 断档检测（2026-11-15 真机日志实锤的根治）：宿主 timeline 增量帧是
+        // 「一次性消费」的，SSE 断线/重连窗口里丢掉的帧**不会重发**。帧自带
+        // `from`（本次覆盖的 seq 边界）—— 若本地 paritySeq 落后于它，说明中间
+        // 有帧丢了（产物卡帧最容易在这一刻丢，表现为「卡要重进/冷启动才出」）。
+        // 立刻带 since 重放快照把缺失的行补回来，再正常应用当前帧。
+        val gapFrom = frame.from
+        val gapBufferFrom = frame.bufferFrom
+        val behind = (gapFrom != null && gapFrom > paritySeq + 1) ||
+            (gapBufferFrom != null && paritySeq in 1 until gapBufferFrom - 1)
+        if (behind) {
+            DshMuxLog.log(
+                "timeline 增量断档：本地 seq=$paritySeq，帧 from=$gapFrom bufferFrom=$gapBufferFrom，带 since 重放补齐",
+            )
+            // 显式传断档前的 seq：重放是异步 launch，不能让它执行时再读 paritySeq。
+            refreshTimelineSnapshot(reset = false, sinceOverride = paritySeq.takeIf { it > 0L })
+        }
         frame.rows.forEach { row -> absorbParityRow(row) }
+        frame.seq?.let { if (it > paritySeq) paritySeq = it }
         while (parityRows.size > SHADOW_ROW_BUFFER_MAX * 2) {
             parityRows.remove(parityRows.keys.first())
         }

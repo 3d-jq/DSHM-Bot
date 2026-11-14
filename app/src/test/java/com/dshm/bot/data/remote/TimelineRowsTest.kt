@@ -236,11 +236,15 @@ class TimelineRowsTest {
             JSONObject()
                 .put("botId", "bot-1")
                 .put("seq", 9)
+                .put("from", 8)
+                .put("bufferFrom", 5)
                 .put("rows", JSONArray().put(row("bot:9", "bot", JSONObject().put("text", "x")))),
         )
         assertEquals(false, frame!!.reset)
         assertEquals("bot-1", frame.botId)
         assertEquals(9L, frame.seq)
+        assertEquals(8L, frame.from)
+        assertEquals(5L, frame.bufferFrom)
         assertEquals(listOf("bot:9"), frame.rows.map { it.key })
 
         val reset = parseTimelineFeedFrame(JSONObject().put("reset", true))
