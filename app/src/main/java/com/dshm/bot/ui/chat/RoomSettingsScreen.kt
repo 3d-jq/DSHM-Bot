@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -23,7 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -38,7 +35,7 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.ui.components.BotAvatar
-import com.dshm.bot.ui.settings.SettingsCancelButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
@@ -49,6 +46,7 @@ import com.dshm.bot.ui.settings.dshmFieldColors
 import com.dshm.bot.ui.settings.dshmFieldShape
 import org.json.JSONArray
 import org.json.JSONObject
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
 
 /** 群聊完整设置页：只读单 Bot 设置页，全部走 `state.rooms[]` 与 room 接口。 */
 @Composable
@@ -436,16 +434,26 @@ fun RoomSettingsScreen(
             title = { Text(stringResource(R.string.room_settings_delete)) },
             text = { Text(stringResource(R.string.room_settings_delete_confirm, info?.name ?: row.name)) },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    viewModel.delete { error -> if (error == null) onDeleted() }
-                }) {
-                    Text(stringResource(R.string.bot_settings_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(android.R.string.cancel))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(android.R.string.cancel),
+                        onClick = { confirmDelete = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.bot_settings_delete),
+                        onClick = {
+                            confirmDelete = false
+                            viewModel.delete { error -> if (error == null) onDeleted() }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -524,17 +532,23 @@ fun NewGroupScreen(
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SettingsCancelButton(
+                SettingsSecondaryButton(
                     text = stringResource(android.R.string.cancel),
                     onClick = onBack,
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
                 )
-                Button(
+                SettingsPrimaryButton(
+                    text = if (busy) {
+                        stringResource(R.string.new_bot_creating)
+                    } else {
+                        stringResource(R.string.room_settings_create)
+                    },
                     enabled = !busy && canCreate,
                     modifier = Modifier.weight(1f),
+                    fillWidth = false,
                     onClick = {
-                        val pickedAdmin = admin ?: return@Button
+                        val pickedAdmin = admin ?: return@SettingsPrimaryButton
                         busy = true
                         error = null
                         scope.launch {
@@ -546,12 +560,7 @@ fun NewGroupScreen(
                                 }
                         }
                     },
-                ) {
-                    Text(
-                        if (busy) stringResource(R.string.new_bot_creating)
-                        else stringResource(R.string.room_settings_create),
-                    )
-                }
+                )
             }
         },
     ) {

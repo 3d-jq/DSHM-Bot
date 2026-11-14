@@ -2,7 +2,6 @@ package com.dshm.bot.ui.account
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +52,7 @@ import com.dshm.bot.ui.settings.SettingsPrimaryButton
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsSection
 import androidx.core.net.toUri
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /**
  * 账号页：按 dsh-Go `app/lib/ui/account/account_page.dart` 的信息架构重做，
@@ -213,13 +213,23 @@ fun AccountScreen(viewModel: AccountViewModel, onBack: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = viewModel::confirmSignOut) {
-                    Text(stringResource(R.string.account_sign_out), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::cancelSignOut) {
-                    Text(stringResource(android.R.string.cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(android.R.string.cancel),
+                        onClick = viewModel::cancelSignOut,
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.account_sign_out),
+                        onClick = viewModel::confirmSignOut,
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -516,13 +526,23 @@ private fun KeyDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onSave, enabled = value.isNotBlank()) {
-                Text(stringResource(R.string.api_key_save), color = Dshm.colors.accent)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.cancel), color = Dshm.colors.textSecondary)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+            ) {
+                SettingsSecondaryButton(
+                    text = stringResource(android.R.string.cancel),
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.api_key_save),
+                    onClick = onSave,
+                    modifier = Modifier.weight(1f),
+                    fillWidth = false,
+                    danger = false,
+                )
             }
         },
     )

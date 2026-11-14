@@ -20,6 +20,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.remote.MarketPlugin
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 
 /**
  * 「插件市场」页：读远程市场索引（格式 1），装 / 卸插件。
@@ -144,16 +148,26 @@ fun PluginMarketPanel(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    uninstalling = null
-                    viewModel.uninstall(target.name)
-                }) {
-                    Text(stringResource(R.string.plugins_market_uninstall), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { uninstalling = null }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { uninstalling = null },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.plugins_market_uninstall),
+                        onClick = {
+                            uninstalling = null
+                            viewModel.uninstall(target.name)
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -183,13 +197,23 @@ fun PluginMarketPanel(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.confirmInstall() }) {
-                    Text(stringResource(R.string.plugins_market_build_approval_action), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.clearNotice() }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { viewModel.clearNotice() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.plugins_market_build_approval_action),
+                        onClick = { viewModel.confirmInstall() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )
@@ -219,13 +243,23 @@ fun PluginMarketPanel(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.approvePendingBuilds() }) {
-                    Text(stringResource(R.string.plugins_market_build_approval_action), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.clearNotice() }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { viewModel.clearNotice() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.plugins_market_build_approval_action),
+                        onClick = { viewModel.approvePendingBuilds() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )
@@ -335,17 +369,27 @@ fun PluginMarketDialogs(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val target = uninstalling
-                    onDismissUninstall()
-                    viewModel.uninstall(target.name)
-                }) {
-                    Text(stringResource(R.string.plugins_market_uninstall), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissUninstall) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = onDismissUninstall,
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.plugins_market_uninstall),
+                        onClick = {
+                            val target = uninstalling
+                            onDismissUninstall()
+                            viewModel.uninstall(target.name)
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -374,13 +418,23 @@ fun PluginMarketDialogs(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.confirmInstall() }) {
-                    Text(stringResource(R.string.plugins_market_build_approval_action), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.clearNotice() }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { viewModel.clearNotice() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.plugins_market_build_approval_action),
+                        onClick = { viewModel.confirmInstall() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )
@@ -409,13 +463,23 @@ fun PluginMarketDialogs(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.approvePendingBuilds() }) {
-                    Text(stringResource(R.string.plugins_market_build_approval_action), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.clearNotice() }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { viewModel.clearNotice() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.plugins_market_build_approval_action),
+                        onClick = { viewModel.approvePendingBuilds() },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )

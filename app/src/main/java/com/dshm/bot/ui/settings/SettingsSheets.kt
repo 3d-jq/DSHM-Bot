@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -37,7 +36,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.remote.jsonEquals
@@ -119,21 +117,29 @@ private fun SheetActions(
     onSave: () -> Unit,
     extra: @Composable (() -> Unit)? = null,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = Dshm.spacing.lg),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Column(Modifier.fillMaxWidth().padding(top = Dshm.spacing.lg)) {
         if (extra != null) extra()
-        Spacer(Modifier.weight(1f))
-        TextButton(onClick = onCancel) {
-            Text(cancelText, color = Dshm.colors.textSecondary, style = Dshm.typography.sheetAction)
+        // 「取消 / 保存」成对动作：两枚实心按钮并排（次按钮按弹层底色取反 → 白底）。
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SettingsSecondaryButton(
+                text = cancelText,
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+                fillWidth = false,
+                onBackground = Dshm.colors.surface,
+            )
+            SettingsPrimaryButton(
+                text = saveText,
+                onClick = onSave,
+                enabled = saveEnabled,
+                modifier = Modifier.weight(1f),
+                fillWidth = false,
+            )
         }
-        SettingsPrimaryButton(
-            text = saveText,
-            onClick = onSave,
-            enabled = saveEnabled,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 

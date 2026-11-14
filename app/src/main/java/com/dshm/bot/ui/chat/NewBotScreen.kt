@@ -21,8 +21,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,7 +51,8 @@ import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.BotInks
 import com.dshm.bot.domain.model.BotShapeDefaults
 import com.dshm.bot.ui.components.BotAvatar
-import com.dshm.bot.ui.settings.SettingsCancelButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
 import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsSection
 import org.json.JSONObject
@@ -165,13 +164,18 @@ fun NewBotScreen(
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SettingsCancelButton(
+                SettingsSecondaryButton(
                     text = stringResource(android.R.string.cancel),
                     onClick = onBack,
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
                 )
-                Button(
+                SettingsPrimaryButton(
+                    text = if (busy) {
+                        stringResource(R.string.new_bot_creating)
+                    } else {
+                        stringResource(R.string.room_settings_create)
+                    },
                     onClick = {
                         busy = true
                         error = null
@@ -185,17 +189,9 @@ fun NewBotScreen(
                         }
                     },
                     enabled = !busy && nameProblem == null,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Dshm.colors.accent,
-                        contentColor = Dshm.colors.onAccent,
-                    ),
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        if (busy) stringResource(R.string.new_bot_creating)
-                        else stringResource(R.string.room_settings_create),
-                    )
-                }
+                    fillWidth = false,
+                )
             }
         },
     ) {

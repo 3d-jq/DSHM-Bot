@@ -2,7 +2,6 @@ package com.dshm.bot.ui.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -26,7 +24,6 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
@@ -59,6 +56,8 @@ import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.ui.chat.RoomAvatar
 import com.dshm.bot.ui.components.BotAvatar
 import java.time.ZoneId
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /**
  * 「定时任务」页（对齐 DS-Bot `client/schedules.js`）：
@@ -196,17 +195,27 @@ fun ScheduledTasksScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    detail = null
-                    error = null
-                    viewModel.delete(shown) { failure -> error = failure }
-                }) {
-                    Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { detail = null }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { detail = null },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_delete),
+                        onClick = {
+                            detail = null
+                            error = null
+                            viewModel.delete(shown) { failure -> error = failure }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -455,19 +464,24 @@ private fun NewTaskForm(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Dshm.spacing.lg),
-            horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm, Alignment.End),
+            horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
         ) {
-            TextButton(onClick = onCancel, enabled = !busy) {
-                Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
-            }
-            TextButton(onClick = ::submit, enabled = !busy) {
-                Text(
-                    text = stringResource(
-                        if (busy) R.string.schedules_creating else R.string.schedules_create,
-                    ),
-                    color = if (busy) Dshm.colors.textTertiary else Dshm.colors.accent,
-                )
-            }
+            SettingsSecondaryButton(
+                text = stringResource(R.string.action_cancel),
+                onClick = onCancel,
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+                fillWidth = false,
+            )
+            SettingsPrimaryButton(
+                text = stringResource(
+                    if (busy) R.string.schedules_creating else R.string.schedules_create,
+                ),
+                onClick = ::submit,
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+                fillWidth = false,
+            )
         }
     }
 }
@@ -537,16 +551,26 @@ internal fun ScheduleTimePickerField(
             },
             text = { TimePicker(state = state) },
             confirmButton = {
-                TextButton(onClick = {
-                    onValueChange("%02d:%02d".format(state.hour, state.minute))
-                    open = false
-                }) {
-                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { open = false }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { open = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_done),
+                        onClick = {
+                            onValueChange("%02d:%02d".format(state.hour, state.minute))
+                            open = false
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )
@@ -593,20 +617,30 @@ private fun DateTimePickerField(
             },
             text = { DatePicker(state = state) },
             confirmButton = {
-                TextButton(onClick = {
-                    pickedDate = state.selectedDateMillis?.let {
-                        java.time.Instant.ofEpochMilli(it)
-                            .atZone(java.time.ZoneOffset.UTC)
-                            .toLocalDate()
-                    }
-                    stage = 2
-                }) {
-                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { stage = 0 }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { stage = 0 },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_done),
+                        onClick = {
+                            pickedDate = state.selectedDateMillis?.let {
+                                java.time.Instant.ofEpochMilli(it)
+                                    .atZone(java.time.ZoneOffset.UTC)
+                                    .toLocalDate()
+                            }
+                            stage = 2
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )
@@ -630,21 +664,31 @@ private fun DateTimePickerField(
             },
             text = { TimePicker(state = state) },
             confirmButton = {
-                TextButton(onClick = {
-                    val date = pickedDate ?: java.time.LocalDate.now()
-                    onValueChange(date.atTime(state.hour, state.minute).format(atFormatter))
-                    pickedDate = null
-                    stage = 0
-                }) {
-                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    pickedDate = null
-                    stage = 0
-                }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = {
+                            pickedDate = null
+                            stage = 0
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_done),
+                        onClick = {
+                            val date = pickedDate ?: java.time.LocalDate.now()
+                            onValueChange(date.atTime(state.hour, state.minute).format(atFormatter))
+                            pickedDate = null
+                            stage = 0
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )

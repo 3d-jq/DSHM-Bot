@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,9 +22,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 
 /**
  * 后台运行（对齐 dsh-Go `background_guide_page.dart`）：
@@ -143,16 +145,26 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    showBatteryExemptDialog = false
-                    BackgroundLauncher.openAppDetails(context)
-                }) {
-                    Text(stringResource(R.string.settings_background_open_app_details), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showBatteryExemptDialog = false }) {
-                    Text(stringResource(R.string.action_done), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_done),
+                        onClick = { showBatteryExemptDialog = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.settings_background_open_app_details),
+                        onClick = {
+                            showBatteryExemptDialog = false
+                            BackgroundLauncher.openAppDetails(context)
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )

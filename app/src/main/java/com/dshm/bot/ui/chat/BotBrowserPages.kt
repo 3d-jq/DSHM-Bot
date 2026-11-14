@@ -23,10 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
-import com.dshm.bot.ui.settings.SettingsChoiceChip
 import com.dshm.bot.ui.settings.SettingsEmpty
 import com.dshm.bot.ui.settings.SettingsInput
 import com.dshm.bot.ui.settings.SettingsPage
@@ -39,6 +37,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import androidx.core.net.toUri
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /**
  * 浏览历史页：按 Bot 记录最近访问的页面，点一条就在当前标签里打开。
@@ -106,16 +106,26 @@ fun BrowserHistoryPage(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    session.clearHistory()
-                    confirming = false
-                }) {
-                    Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirming = false }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { confirming = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_delete),
+                        onClick = {
+                            session.clearHistory()
+                            confirming = false
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -365,13 +375,23 @@ private fun ConfirmDialog(
             Text(text = hint, style = Dshm.typography.rowPreview, color = Dshm.colors.textSecondary)
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(confirm, color = Dshm.colors.danger)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+            ) {
+                SettingsSecondaryButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
+                SettingsPrimaryButton(
+                    text = confirm,
+                    onClick = onConfirm,
+                    modifier = Modifier.weight(1f),
+                    fillWidth = false,
+                    danger = true,
+                )
             }
         },
     )

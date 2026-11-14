@@ -35,6 +35,8 @@ import com.dshm.bot.ui.settings.SettingsPage
 import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSection
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /** 诊断页上的两个宿主动作；页面只做展示，动作都交给 VM。 */
 class DiagnosticsActions(
@@ -240,19 +242,26 @@ fun DiagnosticsScreen(
                         )
                     },
                     confirmButton = {
-                        TextButton(onClick = {
-                            confirmClear = false
-                            actions.clear()
-                        }) {
-                            Text(
-                                text = stringResource(R.string.diagnostics_clear_confirm_action),
-                                color = Dshm.colors.danger,
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                        ) {
+                            SettingsSecondaryButton(
+                                text = stringResource(R.string.action_cancel),
+                                onClick = { confirmClear = false },
+                                modifier = Modifier.weight(1f),
+                                fillWidth = false,
+                                onBackground = Dshm.colors.surface,
                             )
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { confirmClear = false }) {
-                            Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                            SettingsPrimaryButton(
+                                text = stringResource(R.string.diagnostics_clear_confirm_action),
+                                onClick = {
+                                    confirmClear = false
+                                    actions.clear()
+                                },
+                                modifier = Modifier.weight(1f),
+                                fillWidth = false,
+                                danger = true,
+                            )
                         }
                     },
                 )
@@ -374,40 +383,49 @@ private fun DiagnosticsLogDialog(
         },
         confirmButton = {
             when (diagnostics.logStatus) {
-                DiagnosticsLogStatus.FAILED -> TextButton(onClick = actions.retryLog) {
-                    Text(stringResource(R.string.action_retry), color = Dshm.colors.accent)
-                }
+                DiagnosticsLogStatus.FAILED -> SettingsPrimaryButton(
+                    text = stringResource(R.string.action_retry),
+                    onClick = actions.retryLog,
+                    fillWidth = false,
+                )
 
-                DiagnosticsLogStatus.LOADED -> if (lines.isNotEmpty()) {
-                    TextButton(onClick = {
-                        onCopy(diagnostics.logText)
-                        copied = true
-                    }) {
-                        Text(
-                            text = if (copied) {
-                                stringResource(R.string.diagnostics_log_copied)
-                            } else {
-                                stringResource(R.string.engine_logs_copy)
-                            },
-                            color = Dshm.colors.accent,
-                        )
-                    }
-                } else {
-                    TextButton(onClick = actions.closeLog) {
-                        Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
-                    }
-                }
+                DiagnosticsLogStatus.LOADED -> SettingsPrimaryButton(
+                    text = if (lines.isNotEmpty()) {
+                        if (copied) {
+                            stringResource(R.string.diagnostics_log_copied)
+                        } else {
+                            stringResource(R.string.engine_logs_copy)
+                        }
+                    } else {
+                        stringResource(R.string.action_done)
+                    },
+                    onClick = {
+                        if (lines.isNotEmpty()) {
+                            onCopy(diagnostics.logText)
+                            copied = true
+                        } else {
+                            actions.closeLog()
+                        }
+                    },
+                    fillWidth = false,
+                )
 
-                else -> TextButton(onClick = actions.closeLog) {
-                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
-                }
+                else -> SettingsPrimaryButton(
+                    text = stringResource(R.string.action_done),
+                    onClick = actions.closeLog,
+                    fillWidth = false,
+                )
             }
         },
+        // 「复制 / 完成」是一对动作：完成作为次按钮（弹层白底 → 灰），与主按钮并排。
         dismissButton = if (diagnostics.logStatus == DiagnosticsLogStatus.LOADED && lines.isNotEmpty()) {
             {
-                TextButton(onClick = actions.closeLog) {
-                    Text(stringResource(R.string.action_done), color = Dshm.colors.textSecondary)
-                }
+                SettingsSecondaryButton(
+                    text = stringResource(R.string.action_done),
+                    onClick = actions.closeLog,
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
             }
         } else {
             null

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +30,8 @@ import com.dshm.bot.data.remote.ProviderModelSpec
 import com.dshm.bot.data.remote.ProviderProfile
 import com.dshm.bot.data.remote.deriveProviderKeyRef
 import com.dshm.bot.ui.components.FloatingIconButton
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /**
  * 渠道详情页，对齐 dsh-Go `app/lib/ui/providers/provider_detail_page.dart`：
@@ -258,20 +259,30 @@ fun ProviderDetailPage(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    deleting = true
-                    viewModel.deleteProvider(profile.route) { failure ->
-                        deleting = false
-                        if (failure == null) onBack()
-                    }
-                }) {
-                    Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { confirmDelete = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_delete),
+                        onClick = {
+                            confirmDelete = false
+                            deleting = true
+                            viewModel.deleteProvider(profile.route) { failure ->
+                                deleting = false
+                                if (failure == null) onBack()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )

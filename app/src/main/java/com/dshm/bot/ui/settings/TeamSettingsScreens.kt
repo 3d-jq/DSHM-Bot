@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
@@ -49,6 +48,8 @@ import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.ui.components.FloatingIconButton
 import org.json.JSONArray
 import androidx.core.net.toUri
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 private const val GITHUB_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
 
@@ -175,16 +176,26 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
             title = { Text(stringResource(R.string.team_secrets_delete)) },
             text = { Text(stringResource(R.string.team_secrets_delete_confirm, secret.name)) },
             confirmButton = {
-                TextButton(onClick = {
-                    deleting = null
-                    viewModel.deleteSecret(secret.name)
-                }) {
-                    Text(stringResource(R.string.team_secrets_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleting = null }) {
-                    Text(stringResource(android.R.string.cancel))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(android.R.string.cancel),
+                        onClick = { deleting = null },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.team_secrets_delete),
+                        onClick = {
+                            deleting = null
+                            viewModel.deleteSecret(secret.name)
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -430,28 +441,24 @@ private fun CapabilitySheet(
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
+                SettingsPrimaryButton(
+                    text = stringResource(
+                        if (confirmDelete) R.string.team_caps_delete_confirm else R.string.team_caps_delete,
+                    ),
                     enabled = !busy,
                     onClick = {
                         if (confirmDelete) onDelete() else confirmDelete = true
                     },
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = Dshm.spacing.iconButton),
-                    shape = RoundedCornerShape(Dshm.radius.md),
-                ) {
-                    Text(
-                        text = stringResource(
-                            if (confirmDelete) R.string.team_caps_delete_confirm else R.string.team_caps_delete,
-                        ),
-                        color = Dshm.colors.danger,
-                    )
-                }
+                    modifier = Modifier.weight(1f),
+                    fillWidth = false,
+                    danger = true,
+                )
                 SettingsPrimaryButton(
                     text = stringResource(android.R.string.ok),
                     enabled = !busy,
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
+                    fillWidth = false,
                 )
             }
         },
@@ -910,30 +917,27 @@ private fun SecretSheetActions(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onDelete != null) {
-            TextButton(
+            SettingsPrimaryButton(
+                text = stringResource(R.string.team_secrets_delete),
                 onClick = onDelete,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = Dshm.spacing.iconButton),
-                shape = RoundedCornerShape(Dshm.radius.md),
-            ) {
-                Text(stringResource(R.string.team_secrets_delete), color = Dshm.colors.danger)
-            }
+                modifier = Modifier.weight(1f),
+                fillWidth = false,
+                danger = true,
+            )
         }
-        TextButton(
+        SettingsSecondaryButton(
+            text = stringResource(android.R.string.cancel),
             onClick = onDismiss,
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = Dshm.spacing.iconButton),
-            shape = RoundedCornerShape(Dshm.radius.md),
-        ) {
-            Text(stringResource(android.R.string.cancel))
-        }
+            modifier = Modifier.weight(1f),
+            fillWidth = false,
+            onBackground = Dshm.colors.surface,
+        )
         SettingsPrimaryButton(
             text = stringResource(android.R.string.ok),
             enabled = !busy && canSave,
             onClick = onSave,
             modifier = Modifier.weight(1f),
+            fillWidth = false,
         )
     }
 }
@@ -1000,17 +1004,19 @@ private fun ConnectorTokenDialog(
                 horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
+                SettingsSecondaryButton(
+                    text = stringResource(android.R.string.cancel),
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(android.R.string.cancel))
-                }
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
                 SettingsPrimaryButton(
                     text = stringResource(R.string.team_connectors_connect),
                     enabled = !busy && token.isNotBlank(),
                     onClick = { onConnect(token) },
                     modifier = Modifier.weight(1f),
+                    fillWidth = false,
                 )
             }
         }

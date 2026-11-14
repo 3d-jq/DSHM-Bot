@@ -28,7 +28,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
@@ -37,6 +36,9 @@ import com.dshm.bot.data.remote.PluginBundle
 import com.dshm.bot.data.remote.PluginBundleGroup
 import coil.compose.AsyncImage
 import kotlin.math.abs
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import androidx.compose.foundation.layout.Arrangement
 
 // 插件：DSH 官方可选包 + 第三方已安装包，结构与 dsh-Go 一致（分组、官方徽标、开关）。
 /** 插件页的两个分段（对齐 dsh-Go 的 PluginsTab）。 */
@@ -336,22 +338,32 @@ fun PluginsScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    uninstallFor = null
-                    detailName = null
-                    busy = removing.name
-                    actionError = null
-                    viewModel.removeBundle(removing.name) { error ->
-                        busy = null
-                        if (error != null) actionError = error
-                    }
-                }) {
-                    Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { uninstallFor = null }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { uninstallFor = null },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_delete),
+                        onClick = {
+                            uninstallFor = null
+                            detailName = null
+                            busy = removing.name
+                            actionError = null
+                            viewModel.removeBundle(removing.name) { error ->
+                                busy = null
+                                if (error != null) actionError = error
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )

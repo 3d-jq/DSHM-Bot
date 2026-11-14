@@ -9,13 +9,11 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -59,6 +57,9 @@ import com.dshm.bot.data.remote.deriveProviderKeyRef
 import com.dshm.bot.data.remote.isValidProviderBaseUrl
 import com.dshm.bot.data.remote.normalizeDiscoveryBaseUrl
 import com.dshm.bot.data.remote.providerRoutePattern
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import androidx.compose.foundation.layout.Arrangement
 
 /** 渠道表单的草稿：放在页面外壳里，模型设置页返回时才有地方回填。 */
 private data class ProviderDraft(
@@ -857,30 +858,37 @@ private fun ProviderEditorScreen(
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        val id = manualModelId.trim()
-                        when {
-                            id.isEmpty() -> Unit
-                            id in draft.models.map { it.id } -> manualModelError = duplicateText
-                            else -> {
-                                onDraftChange(
-                                    draft.copy(models = draft.models + ProviderModelSpec.create(id)),
-                                )
-                                manualModelId = ""
-                                manualModelError = null
-                                showManualModel = false
-                            }
-                        }
-                    },
-                    enabled = manualModelId.isNotBlank(),
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 ) {
-                    Text(stringResource(R.string.action_save), color = Dshm.colors.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showManualModel = false }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { showManualModel = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_save),
+                        onClick = {
+                            val id = manualModelId.trim()
+                            when {
+                                id.isEmpty() -> Unit
+                                id in draft.models.map { it.id } -> manualModelError = duplicateText
+                                else -> {
+                                    onDraftChange(
+                                        draft.copy(models = draft.models + ProviderModelSpec.create(id)),
+                                    )
+                                    manualModelId = ""
+                                    manualModelError = null
+                                    showManualModel = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )
@@ -905,20 +913,30 @@ private fun ProviderEditorScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    saving = true
-                    viewModel.deleteProvider(existing.route) { failure ->
-                        saving = false
-                        if (failure == null) onSaved() else error = failure
-                    }
-                }) {
-                    Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { confirmDelete = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_delete),
+                        onClick = {
+                            confirmDelete = false
+                            saving = true
+                            viewModel.deleteProvider(existing.route) { failure ->
+                                saving = false
+                                if (failure == null) onSaved() else error = failure
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )

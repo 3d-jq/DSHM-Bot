@@ -1,13 +1,7 @@
 package com.dshm.bot.ui.home
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.width
@@ -30,7 +23,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,16 +31,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.rememberLoopValue
 import com.dshm.bot.ui.home.components.BotRow
 import com.dshm.bot.ui.home.components.HomeTopBar
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /**
  * 主界面：Bot 与群聊列表。
@@ -134,21 +126,26 @@ fun HomeScreen(
                 title = { Text(row.name) },
                 text = { Text(stringResource(R.string.bot_settings_delete_confirm, row.name)) },
                 confirmButton = {
-                    TextButton(
-                        onClick = {
-                            pendingDelete = null
-                            onDelete(row)
-                        },
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                     ) {
-                        Text(
-                            text = stringResource(R.string.home_delete),
-                            color = Dshm.colors.danger,
+                        SettingsSecondaryButton(
+                            text = stringResource(R.string.home_search_cancel),
+                            onClick = { pendingDelete = null },
+                            modifier = Modifier.weight(1f),
+                            fillWidth = false,
+                            onBackground = Dshm.colors.surface,
                         )
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingDelete = null }) {
-                        Text(stringResource(R.string.home_search_cancel))
+                        SettingsPrimaryButton(
+                            text = stringResource(R.string.home_delete),
+                            onClick = {
+                                pendingDelete = null
+                                onDelete(row)
+                            },
+                            modifier = Modifier.weight(1f),
+                            fillWidth = false,
+                            danger = true,
+                        )
                     }
                 },
                 containerColor = Dshm.colors.surface,

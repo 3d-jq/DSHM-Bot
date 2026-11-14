@@ -21,7 +21,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,6 +45,9 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.remote.AgentPresetDocument
 import com.dshm.bot.data.remote.AgentPresetInfo
 import com.dshm.bot.data.remote.BUILT_IN_AGENT_PRESETS
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import androidx.compose.foundation.layout.Arrangement
 
 /**
  * 「Agent 预设」页，对齐 dsh-Go `app/lib/ui/features/agent_presets_page.dart`：
@@ -273,19 +275,29 @@ fun AgentPresetsScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    deleteFor = null
-                    error = null
-                    viewModel.deleteAgentPreset(deleting) { failure ->
-                        if (failure != null) error = failure
-                    }
-                }) {
-                    Text(stringResource(R.string.action_delete), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteFor = null }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { deleteFor = null },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_delete),
+                        onClick = {
+                            deleteFor = null
+                            error = null
+                            viewModel.deleteAgentPreset(deleting) { failure ->
+                                if (failure != null) error = failure
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )

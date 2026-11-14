@@ -3,7 +3,6 @@ package com.dshm.bot.ui.settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -20,6 +19,11 @@ import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.data.runtime.PhoneStorageAccess
 import com.dshm.bot.data.remote.PermissionOption
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Modifier
 
 // 权限：新对话默认 + 手机文件访问 + 手机操控确认，对齐 dsh-Go PermissionPage。
 @Composable
@@ -192,27 +196,35 @@ fun PermissionScreen(
                 )
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmRisk = false
-                        if (!PhoneStorageAccess.granted(context)) {
-                            pendingEnable = true
-                            PhoneStorageAccess.openSystemSettings(context)
-                            notice = context.getString(R.string.settings_permission_phone_files_grant)
-                        } else {
-                            pendingEnable = false
-                            settings.setPhoneStorageEnabled(true)
-                            notice = null
-                            onRestartEngine()
-                        }
-                    },
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
                 ) {
-                    Text(stringResource(R.string.action_continue), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmRisk = false }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { confirmRisk = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_continue),
+                        onClick = {
+                            confirmRisk = false
+                            if (!PhoneStorageAccess.granted(context)) {
+                                pendingEnable = true
+                                PhoneStorageAccess.openSystemSettings(context)
+                                notice = context.getString(R.string.settings_permission_phone_files_grant)
+                            } else {
+                                pendingEnable = false
+                                settings.setPhoneStorageEnabled(true)
+                                notice = null
+                                onRestartEngine()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -241,16 +253,26 @@ fun PermissionScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    confirming = null
-                    viewModel.setPermissionDefault(pending.value)
-                }) {
-                    Text(stringResource(R.string.action_continue), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirming = null }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { confirming = null },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.action_continue),
+                        onClick = {
+                            confirming = null
+                            viewModel.setPermissionDefault(pending.value)
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )

@@ -1,7 +1,6 @@
 package com.dshm.bot.ui.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -37,13 +35,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.platform.LocalDensity
@@ -56,6 +50,8 @@ import com.dshm.bot.ui.settings.SettingsMenuItem
 import com.dshm.bot.ui.settings.SettingsSheet
 import com.dshm.bot.ui.settings.ScheduleTimePickerField
 import com.dshm.bot.ui.components.rememberWindowHeightDp
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /**
  * 记忆面板，对齐 DS Bot 的 `MemoryDialog`：
@@ -773,12 +769,24 @@ internal fun FolderPickerDialog(
                             )
                         }
                         Spacer(Modifier.size(Dshm.spacing.sm))
-                        TextButton(onClick = { onChoose(here.path) }) {
-                            Text(stringResource(R.string.bot_details_folder_use))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                        ) {
+                            SettingsSecondaryButton(
+                                text = stringResource(android.R.string.cancel),
+                                onClick = { mode = "list" },
+                                modifier = Modifier.weight(1f),
+                                fillWidth = false,
+                                onBackground = Dshm.colors.surface,
+                            )
+                            SettingsPrimaryButton(
+                                text = stringResource(R.string.bot_details_folder_use),
+                                onClick = { onChoose(here.path) },
+                                modifier = Modifier.weight(1f),
+                                fillWidth = false,
+                            )
                         }
                     }
-                    Spacer(Modifier.size(Dshm.spacing.xs))
-                    TextButton(onClick = { mode = "list" }) { Text(stringResource(android.R.string.cancel)) }
                 }
 
                 else -> {
@@ -970,12 +978,11 @@ internal fun NewScheduleSheet(
             onValueChange = { time = it },
         )
         Spacer(Modifier.height(Dshm.spacing.lg))
-        TextButton(
+        SettingsPrimaryButton(
+            text = stringResource(android.R.string.ok),
             onClick = { onSave(title.trim(), prompt.trim(), time.trim()) },
             enabled = title.isNotBlank() && prompt.isNotBlank(),
-        ) {
-            Text(stringResource(android.R.string.ok))
-        }
+        )
     }
 }
 

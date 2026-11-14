@@ -65,6 +65,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.DshmColors
 import com.dshm.bot.core.design.DshmMotion
 import com.dshm.bot.ui.components.FloatingIconButton
 
@@ -531,12 +532,16 @@ fun SettingsPrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     danger: Boolean = false,
+    /** 默认占满一行；对话框里要和次级按钮并排时传 false（配合 `Modifier.weight(1f)`）。 */
+    fillWidth: Boolean = true,
 ) {
     Button(
         onClick = onClick,
         enabled = enabled,
         // 主按钮统一高度：同类按钮在不同页面不能高矮不一。
-        modifier = modifier.fillMaxWidth().heightIn(min = Dshm.spacing.iconButton),
+        modifier = modifier
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
+            .heightIn(min = Dshm.spacing.iconButton),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (danger) Dshm.colors.danger else Dshm.colors.accent,
             contentColor = if (danger) Dshm.colors.onInk else Dshm.colors.onAccent,
@@ -550,22 +555,34 @@ fun SettingsPrimaryButton(
 }
 
 /**
- * 全屏表单底部的「取消」：**白色胶囊**，与旁边的实心主按钮同高同形（M3 默认圆角），
- * 一眼能看出是按钮 —— 纯文字 TextButton 没有底，会让人以为它不是可点的。
+ * 次级动作按钮：实心胶囊，颜色**按底色取反**，保证和容器有边界：
+ * 白底（对话框/白卡片）→ 灰底，灰底（设置类整页）→ 白底。
+ *
+ * 2026-11-14 用户定的统一规则：成对的动作按钮一律实心 —— 主操作蓝、次操作按底色取反。
+ * 纯文字 TextButton 看不出是可点的，只保留给「行内文字操作」（重试 / 添加 / 更多）。
+ *
+ * @param onBackground 按钮所在容器的底色：对话框传 `Dshm.colors.surface`，
+ *   设置类整页传默认的 `pageBackground`。
  */
 @Composable
-fun SettingsCancelButton(
+fun SettingsSecondaryButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    onBackground: Color = Dshm.colors.pageBackground,
+    /** 默认占满一行；与主按钮并排时传 false（配合 `Modifier.weight(1f)`）。 */
+    fillWidth: Boolean = true,
 ) {
+    val container = secondaryContainerFor(onBackground)
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.fillMaxWidth().heightIn(min = Dshm.spacing.iconButton),
+        modifier = modifier
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
+            .heightIn(min = Dshm.spacing.iconButton),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Dshm.colors.floatingSurface,
+            containerColor = container,
             contentColor = Dshm.colors.textPrimary,
             disabledContainerColor = Dshm.colors.surfaceMuted,
             disabledContentColor = Dshm.colors.textTertiary,
@@ -574,6 +591,13 @@ fun SettingsCancelButton(
         Text(text, style = Dshm.typography.rowTitle)
     }
 }
+
+/**
+ * 次级按钮底色：底色白 → 灰（surfaceMuted）；底色非白（灰/深色）→ 白（floatingSurface，
+ * 深色主题下是亮一档的面）。纯函数，便于 JVM 单测锁住这条规则。
+ */
+internal fun secondaryContainerFor(background: Color, light: DshmColors = DshmColors.Light): Color =
+    if (background == light.surface) light.surfaceMuted else light.floatingSurface
 
 @Composable
 fun SettingsDangerButton(

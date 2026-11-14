@@ -6,10 +6,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,7 +32,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,7 +50,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.rememberLoopValue
@@ -68,6 +62,8 @@ import com.dshm.bot.ui.settings.SettingsRow
 import com.dshm.bot.ui.settings.SettingsRowDivider
 import com.dshm.bot.ui.settings.SettingsSwitchRow
 import com.dshm.bot.ui.components.rememberWindowHeightDp
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
 /** 默认下载地址：我们自己的 Release 运行时包。 */
 const val DEFAULT_RUNTIME_URL =
@@ -264,16 +260,26 @@ fun EngineScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    showStopDialog = false
-                    onStop()
-                }) {
-                    Text(stringResource(R.string.engine_stop_short), color = Dshm.colors.danger)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showStopDialog = false }) {
-                    Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.action_cancel),
+                        onClick = { showStopDialog = false },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.engine_stop_short),
+                        onClick = {
+                            showStopDialog = false
+                            onStop()
+                        },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = true,
+                    )
                 }
             },
         )
@@ -326,15 +332,25 @@ private fun ResetDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                onConfirm(if (keepWorkspace) ResetKeep.KEEP_WORKSPACE else ResetKeep.DELETE_ALL)
-            }) {
-                Text(stringResource(R.string.engine_reset_delete), color = Dshm.colors.danger)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel), color = Dshm.colors.textSecondary)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+            ) {
+                SettingsSecondaryButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    fillWidth = false,
+                    onBackground = Dshm.colors.surface,
+                )
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.engine_reset_delete),
+                    onClick = {
+                        onConfirm(if (keepWorkspace) ResetKeep.KEEP_WORKSPACE else ResetKeep.DELETE_ALL)
+                    },
+                    modifier = Modifier.weight(1f),
+                    fillWidth = false,
+                    danger = true,
+                )
             }
         },
     )

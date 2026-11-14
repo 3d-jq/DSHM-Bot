@@ -14,10 +14,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,7 +24,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -107,6 +104,10 @@ import com.dshm.bot.ui.settings.chatFontLabel
 import com.dshm.bot.ui.settings.languageLabel
 import com.dshm.bot.domain.model.DshGoPreferences
 import com.dshm.bot.domain.model.scale
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
+import com.dshm.bot.ui.settings.SettingsSecondaryButton
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 
 private const val SCREEN_HOME = "home"
 private const val SCREEN_SEARCH = "search"
@@ -1069,13 +1070,23 @@ fun DshmBotApp(
             title = { Text(stringResource(R.string.browser_guard_title)) },
             text = { Text(request.reason) },
             confirmButton = {
-                TextButton(onClick = { BrowserGuardStore.answer(true) }) {
-                    Text(stringResource(R.string.browser_guard_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { BrowserGuardStore.answer(false) }) {
-                    Text(stringResource(R.string.browser_guard_deny))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+                ) {
+                    SettingsSecondaryButton(
+                        text = stringResource(R.string.browser_guard_deny),
+                        onClick = { BrowserGuardStore.answer(false) },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        onBackground = Dshm.colors.surface,
+                    )
+                    SettingsPrimaryButton(
+                        text = stringResource(R.string.browser_guard_allow),
+                        onClick = { BrowserGuardStore.answer(true) },
+                        modifier = Modifier.weight(1f),
+                        fillWidth = false,
+                        danger = false,
+                    )
                 }
             },
         )

@@ -7,11 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
@@ -46,6 +44,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import com.dshm.bot.ui.settings.SettingsPrimaryButton
 
 /**
  * `divider`：一段会话的起点（换对话 / 换目录后）。
@@ -410,9 +409,11 @@ fun WholeAttachmentRow(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { shown = false }) {
-                    Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
-                }
+                SettingsPrimaryButton(
+                    text = stringResource(R.string.action_done),
+                    onClick = { shown = false },
+                    fillWidth = false,
+                )
             },
         )
     }
