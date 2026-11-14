@@ -192,7 +192,7 @@ test('a running room splices live replies, queues roomInbox rows, and shows the 
   rt.roomArtifacts = async (roomId, since, options) => {
     consulted.push({ roomId, since, options })
     return {
-      files: [{ path: '/root/w/AI行业动态.docx', description: '近两周动态', botId: 'b2', name: '大总管' }],
+      files: [{ path: '/root/w/AI行业动态.docx', description: '近两周动态', botId: 'b2', name: '大总管', at: 1000 }],
       changed: [{ path: '/root/w/kitten2.png' }],
     }
   }
@@ -205,7 +205,7 @@ test('a running room splices live replies, queues roomInbox rows, and shows the 
     assert.equal(card.payload.files[0].description, '近两周动态')
     assert.equal(consulted.length, 1)
     assert.equal(consulted[0].options?.scan, false, '扫盘必须显式关掉')
-    assert.equal(consulted[0].since, 1000, '窗口默认成本轮起点（turn/start 的 time）')
+    assert.equal(consulted[0].since, 0, '不再用「本轮起点」截窗口——改为按轮分桶（否则开新一轮就把上一轮的卡弄没）')
     const live = answer.rows[1]
     assert.equal(live.payload.live, true)
     assert.equal(live.payload.text, '先说结论')
@@ -215,6 +215,34 @@ test('a running room splices live replies, queues roomInbox rows, and shows the 
   } finally {
     rt.roomProgress.delete('relay-9')
     rt.roomInbox.delete('room-1')
+    delete rt.roomArtifacts
+  }
+})
+
+test('each round keeps its own deliverable card (cards persist as rounds move on)', async () => {
+  const { rt } = fakeRt()
+  const roomEvents = [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 4 } },
+    { type: 'turn/end', seq: 5, time: 1500, data: { turn: 4 } },
+    { type: 'turn/start', seq: 6, time: 5000, data: { turn: 5 } },
+    { type: 'turn/end', seq: 9, time: 5500, data: { turn: 5 } },
+  ]
+  rt.ctx.sessionController.page = async () => ({ records: roomEvents.map(event => ({ event })), hasMore: false })
+  rt.roomArtifacts = async () => ({
+    files: [
+      { path: '/root/w/第一轮.docx', description: '第一轮交付', at: 1200 },
+      { path: '/root/w/第二轮.docx', description: '第二轮交付', at: 5200 },
+    ],
+    changed: [],
+  })
+  try {
+    const answer = await rt.timelineEndpoint({ roomId: 'room-1' })
+    const cards = answer.rows.filter(row => row.kind === 'artifact')
+    assert.deepEqual(cards.map(row => row.key), ['present:room-1:4', 'present:room-1:5'], '每轮各一张卡')
+    assert.deepEqual(cards.map(row => row.seq), [5, 9], '卡贴各自的 turn/end')
+    assert.deepEqual(cards[0].payload.files.map(file => file.path), ['/root/w/第一轮.docx'])
+    assert.deepEqual(cards[1].payload.files.map(file => file.path), ['/root/w/第二轮.docx'])
+  } finally {
     delete rt.roomArtifacts
   }
 })

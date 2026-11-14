@@ -536,30 +536,49 @@ export function composeRoomRows({ events, baseItems, botName }) {
   return rows
 }
 
-/** When the page's latest round began (the newest `turn/start` time), used to scope
-    the group deliverable card to this round. 0 when the page holds no turn. */
-function roundStartMs(events) {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event?.type !== 'turn/start') continue
-    if (typeof event.time === 'number') return event.time
+/** 一轮里成员的交付：把「时刻」分桶到群回合窗口。
+ *
+ * 群产物卡**按轮各出一张**（对齐私聊「每轮 turn tail 一张」的持久语义）：
+ * 只出一张「最新轮」的卡，会在下一轮开始时把上一轮的卡弄没（用户真机报过
+ * 「群卡没有持久化」）。分桶规则：某条 present 的时刻落在「第 N 轮开始」
+ * 之后、下一轮开始之前 → 归第 N 轮；比页内最早一轮还早的归最早一轮（否则
+ * 滚动到早页时卡会凭空消失）。
+ *
+ * 返回 [{ turn, seq, files }]，已按轮升序；seq 是该轮 turn/end（跑着取 start）。
+ */
+function bucketPresentsByTurn(events, files) {
+  const traces = turnTracesOf(events)
+  if (traces.length === 0) return []
+  const timeOf = new Map()
+  for (const event of events) if (typeof event.seq === 'number') timeOf.set(event.seq, event.time)
+  const rounds = traces.map(trace => ({
+    turn: trace.turn,
+    start: typeof timeOf.get(trace.startSeq) === 'number' ? timeOf.get(trace.startSeq) : 0,
+    seq: trace.endSeq ?? trace.startSeq,
+  })).filter(round => round.start > 0)
+  if (rounds.length === 0) return []
+  const buckets = new Map()
+  for (const file of Array.isArray(files) ? files : []) {
+    if (typeof file?.path !== 'string' || file.path.trim() === '') continue
+    const at = typeof file.at === 'number' ? file.at : 0
+    let picked = rounds[0]
+    for (const round of rounds) if (at >= round.start) picked = round
+    const bucket = buckets.get(picked.turn) ?? []
+    bucket.push(file)
+    buckets.set(picked.turn, bucket)
   }
-  return 0
+  return rounds
+    .filter(round => buckets.has(round.turn))
+    .map(round => ({ turn: round.turn, seq: round.seq, files: buckets.get(round.turn) }))
 }
 
-/** The group's deliverable card (key `present:<roomId>:<turn>`): what this round's
- * members declared with `present`.
+/** The group's deliverable card for one round (key `present:<roomId>:<turn>`).
  *
  * Only the declarations — **never** the workspace scan. Declarations live in each
  * member's group Session, so they describe group work and nothing else; the scan walks
  * the shared team workspace (where a Bot's private work also lands) and used to pull
- * private-chat files onto this card. `turn` is the room Session's latest turn; the card
- * sits at that turn's end (or its start while the round runs). */
-export function roomArtifactRow({ roomId, events, files }) {
-  const traces = turnTracesOf(events)
-  const latest = traces.at(-1)
-  const turn = latest?.turn ?? 0
-  const seq = latest?.endSeq ?? latest?.startSeq ?? (events.length > 0 ? events.at(-1).seq : null)
+ * private-chat files onto these cards. */
+export function roomArtifactRow({ roomId, turn, seq, files }) {
   const out = []
   const seen = new Set()
   for (const file of Array.isArray(files) ? files : []) {
@@ -808,19 +827,21 @@ export function install(rt) {
       const queued = typeof rt.roomInbox?.get === 'function' ? rt.roomInbox.get(room.id) : undefined
       rows.push(...roomInboxRowsOf(queued, { roomId: room.id }))
       rows.push(...inboxRowsOf(agent.inbox === undefined ? undefined : { nextTurn: agent.inbox.nextTurn, nextStep: agent.inbox.nextStep }))
-      // 群产物卡：**只认成员在本轮里的 `present` 声明**，不扫盘。
+      // 群产物卡：**只认成员的 `present` 声明**，不扫盘，且**按轮各出一张**。
       //
-      // 2026-11-14 两次真机取证后的定案：成员会话里确实有带描述的 present
-      // （`AI行业动态…docx` 那种），而扫盘那一路捞到的全是私聊产物（描述 null、
-      // mtime 在房间最后一轮之后）—— 因为 `recentFiles` 扫的是私聊/群聊**共用**的
-      // `/root/.dsh/bot/workspace`，分不清谁写的。所以：声明照出卡，扫盘彻底关掉
-      // （`roomArtifacts(…, {scan:false})`），窗口只截到本轮起点。
+      // 2026-11-14 真机取证定案：成员会话里确实有带描述的 present（`AI行业动态…docx`），
+      // 而扫盘那一路捞到的全是私聊产物（描述 null、共用工作区）→ 扫盘关掉
+      // （`roomArtifacts(…, {scan:false})`）。
+      // 第二处修正（同日，用户报「群卡没有持久化」）：此前只给「最新一轮」出一张卡，
+      // 一开新一轮上一轮的卡就没了；私聊是每轮 turn tail 一张，群聊对齐——把 present
+      // 按时刻分桶到各轮（`bucketPresentsByTurn`），每轮一张卡贴它自己的 turn/end。
       if (cursor === undefined && typeof rt.roomArtifacts === 'function') {
         try {
-          const declared = Number.isInteger(body.artifactSince) && body.artifactSince > 0 ? body.artifactSince : undefined
-          const artifacts = await rt.roomArtifacts(room.id, declared ?? roundStartMs(events), { scan: false })
-          const card = roomArtifactRow({ roomId: room.id, events, files: artifacts?.files ?? [] })
-          if (card !== null) rows.push(card)
+          const artifacts = await rt.roomArtifacts(room.id, 0, { scan: false })
+          for (const round of bucketPresentsByTurn(events, artifacts?.files ?? [])) {
+            const card = roomArtifactRow({ roomId: room.id, turn: round.turn, seq: round.seq, files: round.files })
+            if (card !== null) rows.push(card)
+          }
         } catch (error) {
           rt.warn?.('ds-bot: timeline artifacts for %s failed: %s', room.name ?? room.id, error?.message ?? error)
         }

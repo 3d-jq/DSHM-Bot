@@ -146,7 +146,8 @@ test('the room card carries presents only — the workspace scan never feeds it'
   ]
   const card = roomArtifactRow({
     roomId: 'room-1',
-    events,
+    turn: 3,
+    seq: 3,
     files: [
       { path: '/root/w/AI行业动态.docx', description: '近两周动态', botId: 'b2', name: '大总管' },
       { path: '/root/w/AI行业动态.docx', description: '重复路径被去重', botId: 'b2', name: '大总管' },
@@ -159,7 +160,7 @@ test('the room card carries presents only — the workspace scan never feeds it'
   assert.equal(card.payload.files[0].description, '近两周动态')
   assert.equal(card.payload.files[0].name, '大总管')
   // 没有声明就没有卡（扫盘不参与，所以不会再冒出私聊文件）。
-  assert.equal(roomArtifactRow({ roomId: 'room-1', events, files: [] }), null)
+  assert.equal(roomArtifactRow({ roomId: 'room-1', turn: 3, seq: 3, files: [] }), null)
 })
 
 test('the room queue (roomInbox) projects as tail inbox rows; kickoff and resume posts do not', () => {

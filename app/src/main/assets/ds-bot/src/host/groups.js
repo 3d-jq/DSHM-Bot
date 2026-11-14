@@ -980,7 +980,7 @@ export function install(rt) {
       for (const file of files) {
         if (typeof file?.path !== 'string' || file.path.trim() === '') continue
         const path = file.path.startsWith('/') ? file.path : join(base, file.path)
-        out.push({ path, description: typeof file.description === 'string' ? file.description : null })
+        out.push({ path, description: typeof file.description === 'string' ? file.description : null, ...(typeof event.time === 'number' ? { at: event.time } : {}) })
       }
     }
     return out
