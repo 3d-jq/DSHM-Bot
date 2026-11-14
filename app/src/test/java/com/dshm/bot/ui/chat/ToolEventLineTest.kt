@@ -107,6 +107,21 @@ class ToolEventLineTest {
         assertEquals("团队小群", read?.target)
     }
 
+    /** `present` 结果行（官方 Delivered）：文件数从 args.files 数出来。 */
+    @Test
+    fun `present row counts the delivered files`() {
+        val files = JSONObject().put(
+            "files",
+            org.json.JSONArray()
+                .put(JSONObject().put("path", "a.docx"))
+                .put(JSONObject().put("path", "b.png")),
+        )
+        assertEquals("已交付 2 个文件", line("present", files)?.label)
+        // 没带 files（畸形 args）也要有一行，不静默。
+        assertEquals("已交付文件", line("present")?.label)
+        assertEquals("没能交付文件", line("present", files, isError = true)?.label)
+    }
+
     @Test
     fun `group tools read the room name out of the result`() {
         val posted = line(
