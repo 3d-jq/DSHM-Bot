@@ -79,7 +79,34 @@ export function install(rt) {
   const roomProgress = new Map()
   /** @type {Map<string, {text:string, botId?:string, name?:string, reportBack?:boolean, kickoff?:boolean, references?:{labels:string[], text:string}[]}[]>} messages a room's next relay posts */
   const roomInbox = new Map()
-  const queueRoomMessage = (roomId, item) => roomInbox.set(roomId, [...(roomInbox.get(roomId) ?? []), item])
+  /** Per room, the counter behind queued user messages' stable ids. Memory-only,
+   * like the queue itself: the ids only ever name items a live client can see. */
+  const roomQueueSeq = new Map()
+  // `addressable`: the user's own post, which a client may withdraw (`room-queue`
+  // remove). It gets a stable id (`roomq:<roomId>:<n>`, monotone per room); a
+  // Bot's post, a kickoff, a resume and a schedule reminder stay id-less and are
+  // not addressable (the client shows no button for them).
+  const queueRoomMessage = (roomId, item, addressable = false) => {
+    if (!addressable) {
+      roomInbox.set(roomId, [...(roomInbox.get(roomId) ?? []), item])
+      return
+    }
+    const next = (roomQueueSeq.get(roomId) ?? 0) + 1
+    roomQueueSeq.set(roomId, next)
+    roomInbox.set(roomId, [...(roomInbox.get(roomId) ?? []), { ...item, id: `roomq:${roomId}:${next}` }])
+  }
+  // Withdraw one queued item by its stable id. Only the user's items carry an id;
+  // an unknown id (or a room with no queue) is not an error — nothing was removed.
+  const removeRoomQueued = (roomId, id) => {
+    const list = roomInbox.get(roomId)
+    if (list === undefined) return false
+    const index = list.findIndex(item => item?.id === id)
+    if (index < 0) return false
+    const next = list.slice()
+    next.splice(index, 1)
+    roomInbox.set(roomId, next)
+    return true
+  }
   // Member turns of a group round the user stopped: what they end with stays out of the group.
   const stoppedRoomTurns = new Set()
 
@@ -433,6 +460,7 @@ export function install(rt) {
           queueRoomMessage(id, {
             text: textOf(event.data.content).replace(/^\[Group post from (?:[^\r\n]*\]\r?\n|[^\]\r\n]*\])/, ''),
             ...(files.length > 0 ? { files } : {}),
+            sourceKind: 'bot',
             botId: source.senderSessionId,
             name: source.senderName,
             reportBack: source.reportBack === true,
@@ -452,9 +480,9 @@ export function install(rt) {
             ...(source.logged !== undefined ? { logged: source.logged } : {}),
           })
         } else if (source?.kind === SOURCE_KIND && source.role === 'kickoff' && rt.roomOf(id)) {
-          queueRoomMessage(id, { text: '', kickoff: true })
+          queueRoomMessage(id, { text: '', sourceKind: 'bot', kickoff: true })
         } else if (source?.kind === SOURCE_KIND && source.role === 'resume' && rt.roomOf(id)) {
-          queueRoomMessage(id, { text: '', resume: true })
+          queueRoomMessage(id, { text: '', sourceKind: 'bot', resume: true })
         } else if (source?.kind === SOURCE_KIND) {
           if (entry.turn === undefined) entry.pending = source
           else if (!opened) claimTrigger(id, entry, source)
@@ -476,7 +504,7 @@ export function install(rt) {
           // claims the running turn nor queues as the next one's trigger.
         } else if (source?.kind === 'schedule' && rt.roomOf(id)) {
           // A group's scheduled task reaches the group as the user's message.
-          queueRoomMessage(id, { text: reminderText(textOf(event.data.content)) })
+          queueRoomMessage(id, { text: reminderText(textOf(event.data.content)), sourceKind: 'schedule' })
         } else if (source?.kind === REFERENCE_KIND && rt.roomOf(id)) {
           attachReference(roomInbox.get(id), source, textOf(event.data.content))
         } else if (source?.kind === 'user' || source?.kind === REPLY_KIND) {
@@ -484,7 +512,9 @@ export function install(rt) {
             const content = Array.isArray(event.data.content) ? event.data.content : []
             const images = content.filter(block => block?.type === 'image' && !block.offloaded).map(block => block.attachment)
             const files = content.filter(block => block?.type === 'file' && block.attachment !== undefined).map(block => block.attachment)
-            queueRoomMessage(id, { text: textOf(event.data.content), ...(images.length > 0 ? { images } : {}), ...(files.length > 0 ? { files } : {}) })
+            const rpcId = typeof source.rpcId === 'string' && source.rpcId !== '' ? source.rpcId : undefined
+            // The user's own queued post: addressable, so a client can withdraw it.
+            queueRoomMessage(id, { ...(rpcId ? { rpcId } : {}), sourceKind: 'user', text: textOf(event.data.content), ...(images.length > 0 ? { images } : {}), ...(files.length > 0 ? { files } : {}) }, true)
           }
           const own = rt.chatOwners.get(id)
           if (own !== undefined) rt.dropKickoff(own)
@@ -645,5 +675,5 @@ export function install(rt) {
     }
   })
 
-  Object.assign(rt, { live, liveOf, roomWaiters, roomProgress, roomInbox, activityView, workView, roomWorkView, turnsView, callDetail, doingOf, stopRoomTurn, releaseBot })
+  Object.assign(rt, { live, liveOf, roomWaiters, roomProgress, roomInbox, removeRoomQueued, activityView, workView, roomWorkView, turnsView, callDetail, doingOf, stopRoomTurn, releaseBot })
 }

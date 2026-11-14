@@ -17,7 +17,7 @@ import org.json.JSONObject
 
 /** 时间线的一行。 */
 data class TimelineRow(
-    /** 数据键，稳定、可去重（`user:<seq>` / `present:<turn>` / `inbox:<itemId>` …）。 */
+    /** 数据键，稳定、可去重（`user:<seq>` / `present:<turn>` / `inbox:<id>` …）。 */
     val key: String,
     /** 行种类；[KINDS] 之外的行解析器直接丢（向前兼容）。 */
     val kind: String,
@@ -109,13 +109,24 @@ sealed interface TimelineRowPayload {
 
     data class Answered(val answered: JSONObject) : TimelineRowPayload
 
-    /** 排队/插话行：seq=null，客户端只追加在已知 seq 段的尾部。 */
+    /**
+     * 排队/插话行：seq=null，客户端按行缓冲插入序排（不参与 seq 排序）。
+     *
+     * [sourceKind] 是队列项的来源：`user` = 用户自己排的（**可撤回**），其余
+     * （成员 / 系统项）只显示不给操作。群聊的排队项在插件的 roomInbox 里，宿主
+     * 已给它稳定 [itemId]（行 key = `inbox:<id>`，如 `inbox:roomq:<roomId>:3`）。
+     */
     data class Inbox(
         val text: String,
         /** `next-turn` / `next-step`。 */
         val slot: String,
         val requestId: String?,
         val itemId: String,
+        /** `user` / 成员 / 系统；只有 `user` 的项可撤回。 */
+        val sourceKind: String?,
+        /** 群聊里这条排队项属于谁（显示用）。 */
+        val botId: String?,
+        val name: String?,
     ) : TimelineRowPayload
 
     /** 已认识但 1a 不展开的 kind（`turntail` 等）：载荷原样带走，不丢行。 */
@@ -306,6 +317,9 @@ private fun parseRowPayload(kind: String, payload: JSONObject): TimelineRowPaylo
         slot = payload.optString("slot").ifEmpty { "next-turn" },
         requestId = payload.optString("requestId").takeIf { it.isNotEmpty() },
         itemId = payload.optString("itemId"),
+        sourceKind = payload.optString("sourceKind").takeIf { it.isNotEmpty() },
+        botId = payload.optString("botId").takeIf { it.isNotEmpty() },
+        name = payload.optString("name").takeIf { it.isNotEmpty() },
     )
 
     // turntail / streaming 等 1c 才展开的行：原样保留。

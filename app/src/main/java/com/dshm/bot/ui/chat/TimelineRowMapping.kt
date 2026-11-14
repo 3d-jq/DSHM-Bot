@@ -134,33 +134,18 @@ internal fun chatEntryOf(
             id = id,
             kind = ChatEntryKind.PENDING,
             text = payload.text,
+            author = payload.name,
+            botId = payload.botId,
             timeMs = time,
             seq = null,
             pendingSlot = payload.slot,
             pendingRequestId = payload.requestId,
+            pendingSourceKind = payload.sourceKind,
+            pendingName = payload.name,
         )
 
         // turntail / streaming 等未展开 kind：1c 再接，不渲染。
         is TimelineRowPayload.Raw -> null
-    }
-}
-
-/**
- * 行序列 → entries 的排序规则。
- *
- * 单聊（设计 §2「无 seq 行只追加在已排序段的尾部」）：有 seq 的按 seq 升序稳定归位
- * （同 seq 保持原相对顺序），无 seq 的（echo/inbox）追加在尾部，保持插入顺序。
- *
- * 群聊（Phase 1c 宿主实现级口径）：**位置序，不按 seq 重排**——roomItems 官方顺序
- * 原样透传（relay 回复行 seq=null 也有自己的位置），live 行同 key 原位替换后顺序不变。
- */
-internal fun orderRowsAsEntries(rows: List<ChatEntry>, isGroup: Boolean): List<ChatEntry> {
-    if (isGroup) return rows
-    val ordered = rows.withIndex().filter { it.value.seq != null }.sortedBy { it.value.seq }
-    if (ordered.isEmpty()) return rows
-    var cursor = 0
-    return rows.map { entry ->
-        if (entry.seq != null) ordered[cursor++].value else entry
     }
 }
 

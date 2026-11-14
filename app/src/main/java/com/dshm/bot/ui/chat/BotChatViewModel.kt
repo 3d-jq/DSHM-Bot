@@ -201,6 +201,13 @@ data class ChatEntry(
     val pendingSlot: String? = null,
     /** [ChatEntryKind.PENDING] 行对应的发送 requestId（撤回 / 改插话回传给 `session/updateQueue`）。 */
     val pendingRequestId: String? = null,
+    /**
+     * [ChatEntryKind.PENDING] 行的来源：`user` = 用户自己排的（可撤回）；
+     * 群聊里成员/系统项为其它值（只显示、不给按钮）。
+     */
+    val pendingSourceKind: String? = null,
+    /** [ChatEntryKind.PENDING] 行在群聊里属于谁（显示用）。 */
+    val pendingName: String? = null,
     /** 群聊 live 行（round 进行中的回复占位）：`live===true` 画「发言中」态。 */
     val live: Boolean = false,
 )
@@ -827,19 +834,15 @@ class BotChatViewModel internal constructor(
                         return@onSuccess
                     }
                     parityCursor = snapshot.cursor
-                    if (isGroup) {
-                        // 位置序：更早的页插在前面。
-                        val rebuilt = LinkedHashMap<String, TimelineRow>()
-                        snapshot.rows.forEach { row ->
-                            rebuilt[row.key] = row
-                            absorbEchoRelationsOf(row)
-                        }
-                        parityRows.forEach { (key, row) -> rebuilt[key] = row }
-                        parityRows.clear()
-                        parityRows.putAll(rebuilt)
-                    } else {
-                        snapshot.rows.forEach { row -> absorbParityRow(row) }
+                    // 整页前插：新页 rows 先入，旧 rows 随后（同 key 以新页为准）。
+                    val rebuilt = LinkedHashMap<String, TimelineRow>()
+                    snapshot.rows.forEach { row ->
+                        rebuilt[row.key] = row
+                        absorbEchoRelationsOf(row)
                     }
+                    parityRows.forEach { (key, row) -> rebuilt[key] = row }
+                    parityRows.clear()
+                    parityRows.putAll(rebuilt)
                     parityLoadingEarlier = false
                     rebuildParityEntries(hasEarlier = snapshot.cursor != null)
                     logRowApplication("earlier", snapshot.rows)
@@ -1090,12 +1093,14 @@ class BotChatViewModel internal constructor(
     }
 
     /**
-     * 行缓冲 → entries 全量重建（parity 下唯一写 entries 的地方）。
+     * 行缓冲 → entries 全量重建（唯一写 entries 的地方）。
      *
-     * 排序：单聊有 seq 按升序归位、无 seq（echo/inbox/缩略图）追加尾部；**群聊保持
-     * 行缓冲的插入序**（宿主 roomItems 官方位置序原样透传，relay 回复行 seq=null，
-     * live 行同 key 原位替换，Phase 1c 实现级口径）。浏览器缩略图是客户端本地功能
-     * （宿主不投影），拼在最后。
+     * **渲染顺序 = 行缓冲的插入序**（`parityRows` 是 LinkedHashMap）：宿主按显示序
+     * 返回 rows（首屏单 part 内 seq 升序、更早的 part 整页前插、增量追加尾部），
+     * 客户端不再按 seq 全局排序 —— part 之间 seq 空间独立（每个 part 是独立 session），
+     * 按 seq 排序会在跨 part 时把老 part 的行插错位置。
+     *
+     * 本地 echo（`p:<requestId>`）与浏览器缩略图排在尾部（乐观位置 / 客户端本地功能）。
      */
     private fun rebuildParityEntries(loading: Boolean? = null, hasEarlier: Boolean? = null) {
         val mapped = ArrayList<ChatEntry>(parityRows.size + pendingEchoRows.size + browserShots.size)
@@ -1110,16 +1115,15 @@ class BotChatViewModel internal constructor(
                 attachmentItems = attachmentItems,
             )?.let(mapped::add)
         }
-        // 本地 echo 行：无 seq，追加在已排序段尾部（乐观位置）。
+        // 本地 echo 行：乐观位置，排在尾部。
         for (echoRow in pendingEchoRows.values) {
             chatEntryOf(echoRow, botName)?.let(mapped::add)
         }
-        // 浏览器缩略图：1c 换贴 turntail 行的 seq；本轮先贴尾部。
+        // 浏览器缩略图：客户端本地功能，拼在最后（1c 换贴 turntail 行 seq）。
         for (shotEntry in browserShots) mapped.add(shotEntry)
-        val ordered = orderRowsAsEntries(mapped, isGroup)
         _uiState.update { state ->
             state.copy(
-                entries = ordered,
+                entries = mapped,
                 loading = loading ?: state.loading,
                 engineOff = false,
                 hasEarlier = hasEarlier ?: state.hasEarlier,
@@ -1157,8 +1161,13 @@ class BotChatViewModel internal constructor(
         }
     }
 
-    /** parity 的 earlier 分页：timeline cursor 翻页。单聊行按 seq 排序自然插前；
-     *  群聊是位置序，新页的行要**前插**进行缓冲（LinkedHashMap 重建保序）。 */
+    /**
+     * earlier 分页：timeline cursor 翻页，新的一页**整页前插**进行缓冲
+     * （LinkedHashMap 重建保持「新页 rows + 旧 rows」的插入序）。
+     *
+     * 单聊 / 群聊同一做法：part 之间 seq 空间独立，靠 seq 排序会插错位置；
+     * 宿主已按显示序返回每页 rows，客户端只做前插。
+     */
     private fun parityLoadEarlier() {
         val connection = client ?: return
         val cursor = parityCursor ?: return
@@ -1203,7 +1212,7 @@ class BotChatViewModel internal constructor(
         }
     }
 
-    /** 群聊 earlier 前插时只做行替换，不走 absorbParityRow（避免动 echo 认领以外的状态）。 */
+    /** earlier 前插时只做行替换与 echo 认领，不走 absorbParityRow（后者会去重排队行）。 */
     private fun absorbEchoRelationsOf(row: TimelineRow) {
         val requestId = when (val payload = row.payload) {
             is TimelineRowPayload.User -> payload.requestId
@@ -1226,10 +1235,18 @@ class BotChatViewModel internal constructor(
     }
 
     /**
-     * 撤回一条排队消息：`session/updateQueue {kind:'remove'}`（契约已锁）。
-     * 提交即本地摘行（引擎随后用行流确认），失败不回滚——重拉快照自愈。
+     * 撤回一条排队项（只有 `sourceKind == "user"` 的项该有按钮）。
+     *
+     * 单聊走 `session/updateQueue {kind:'remove'}`（契约已锁）；群聊的排队真身
+     * 在插件的 roomInbox 里，走 `room-queue {roomId, id, action:'remove'}`。
+     * 两条都是「提交即乐观摘行，服务端下一份快照/增量给出真相」。
      */
     fun recallPending(entry: ChatEntry) {
+        if (isGroup) recallRoomPending(entry) else recallPrivatePending(entry)
+    }
+
+    /** 单聊：`session/updateQueue {kind:'remove'}`。 */
+    private fun recallPrivatePending(entry: ChatEntry) {
         val itemId = entry.id.removePrefix("inbox:")
         if (itemId.isEmpty()) return
         val connection = client ?: return
@@ -1252,8 +1269,36 @@ class BotChatViewModel internal constructor(
         }
     }
 
-    /** 把一条排队消息改成插话：`session/updateQueue {kind:'steer'}`（契约已锁）。 */
+    /**
+     * 群聊：`room-queue {roomId, id, action:'remove'}`（mutating 端点，不在 READS）。
+     * 只撤自己排的（[ChatEntry.pendingSourceKind] == `user`）；成员/系统项不调。
+     */
+    private fun recallRoomPending(entry: ChatEntry) {
+        if (entry.pendingSourceKind != "user") return
+        val id = entry.id.removePrefix("inbox:")
+        if (id.isEmpty()) return
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching {
+                connection.botValue(
+                    "room-queue",
+                    JSONObject().put("roomId", botId).put("id", id).put("action", "remove"),
+                )
+            }
+            // 乐观摘行：宿主下一份快照/增量给出真相。
+            parityRows.remove(entry.id)
+            rebuildParityEntries()
+        }
+    }
+
+    /**
+     * 把一条排队消息改成插话：`session/updateQueue {kind:'steer'}`（契约已锁）。
+     *
+     * 只对单聊有意义：群队列要等下一个 relay 才 drain，没有「插进当前回合」的语义，
+     * 所以群聊不提供这个动作（UI 也不给按钮）。
+     */
     fun steerPending(entry: ChatEntry) {
+        if (isGroup) return
         val itemId = entry.id.removePrefix("inbox:")
         if (itemId.isEmpty()) return
         val connection = client ?: return

@@ -51,6 +51,7 @@ class BotChatParityPipelineTest {
         val timelineRequests = mutableListOf<TimelineRequest>()
         val chatEndpoints = mutableListOf<String>()
         val rpcCalls = mutableListOf<Pair<String, JSONObject>>()
+        val botValueCalls = mutableListOf<Pair<String, JSONObject>>()
         val sendRequestIds = mutableListOf<String>()
 
         /** 首屏快照（reset）与翻页（cursor）分别给的行。 */
@@ -58,6 +59,8 @@ class BotChatParityPipelineTest {
         var earlierRows: List<TimelineRow> = emptyList()
         var snapshotCursor: JSONObject? = null
         var earlierCursor: JSONObject? = null
+        /** 多页翻页脚本（非空时优先，按顺序弹出；用尽后回落到 earlierRows/earlierCursor）。 */
+        val earlierPages = ArrayDeque<Pair<List<TimelineRow>, JSONObject?>>()
         var snapshotSeq: Long = 40
 
         /**
@@ -86,16 +89,19 @@ class BotChatParityPipelineTest {
             timelineRequests += request
             val paging = request.cursor != null
             val replaying = !paging && request.since != null
+            val scripted = if (paging) earlierPages.removeFirstOrNull() else null
             return TimelineSnapshot(
                 sessionId = "s-1",
                 roomId = null,
                 seq = snapshotSeq,
                 rows = when {
+                    scripted != null -> scripted.first
                     paging -> earlierRows
                     replaying -> replayRows
                     else -> snapshotRows
                 },
                 cursor = when {
+                    scripted != null -> scripted.second
                     paging -> earlierCursor
                     replaying -> replayCursor
                     else -> snapshotCursor
@@ -110,21 +116,42 @@ class BotChatParityPipelineTest {
             return JSONObject()
         }
 
-        override suspend fun botValue(endpoint: String, payload: JSONObject): Any? = JSONObject()
+        override suspend fun botValue(endpoint: String, payload: JSONObject): Any? {
+            botValueCalls += endpoint to payload
+            return JSONObject().put("ok", true).put("removed", true)
+        }
         override fun feed(): Flow<BotFeedEvent> = feedEvents
 
-        fun row(key: String, kind: String, seq: Long?, requestId: String? = null, slot: String? = null) =
-            TimelineRow(
-                key = key,
-                kind = kind,
-                seq = seq,
-                turn = null,
-                timeMs = null,
-                payload = when (kind) {
-                    "inbox" -> TimelineRowPayload.Inbox("排队消息", slot ?: "next-turn", requestId, key.removePrefix("inbox:"))
-                    else -> TimelineRowPayload.User("消息 $key", emptyList(), 0, requestId, live = false)
-                },
-            )
+        fun row(
+            key: String,
+            kind: String,
+            seq: Long?,
+            requestId: String? = null,
+            slot: String? = null,
+            sourceKind: String? = "user",
+            name: String? = null,
+            botId: String? = null,
+        ) = TimelineRow(
+            key = key,
+            kind = kind,
+            seq = seq,
+            turn = null,
+            timeMs = null,
+            payload = when (kind) {
+                "inbox" -> TimelineRowPayload.Inbox(
+                    text = "排队消息",
+                    slot = slot ?: "next-turn",
+                    requestId = requestId,
+                    itemId = key.removePrefix("inbox:"),
+                    sourceKind = sourceKind,
+                    botId = botId,
+                    name = name,
+                )
+
+                "divider" -> TimelineRowPayload.Divider(timeMs = null)
+                else -> TimelineRowPayload.User("消息 $key", emptyList(), 0, requestId, live = false)
+            },
+        )
 
         /** feed `timeline` 增量帧（走真实数据形状：JSON → 解析器）。 */
         fun emitTimeline(vararg rows: TimelineRow, isGroup: Boolean = false, running: Boolean? = null) {
@@ -146,7 +173,12 @@ class BotChatParityPipelineTest {
                             is TimelineRowPayload.Inbox -> {
                                 payloadJson.put("text", payload.text).put("slot", payload.slot).put("itemId", payload.itemId)
                                 payload.requestId?.let { payloadJson.put("requestId", it) }
+                                payload.sourceKind?.let { payloadJson.put("sourceKind", it) }
+                                payload.botId?.let { payloadJson.put("botId", it) }
+                                payload.name?.let { payloadJson.put("name", it) }
                             }
+
+                            is TimelineRowPayload.Divider -> payload.timeMs?.let { payloadJson.put("timeMs", it) }
 
                             else -> {}
                         }
@@ -363,6 +395,121 @@ class BotChatParityPipelineTest {
             listOf("bot:5", "user:10", "bot:11", "bot:12"),
             viewModel.uiState.value.entries.map { it.id },
         )
+    }
+
+    /**
+     * ② 跨 part earlier：part 之间 seq 空间独立，更早的 part 页必须**整页前插**
+     * （不能按 seq 归位——老 part 的 seq 可能比当前 part 大）。
+     * page1（当前 part）seq 10/11 → 翻页回更早 part（divider:part:0 + seq 1/2）。
+     */
+    @Test
+    fun earlierAcrossPartsPrependsTheWholePageByInsertionOrder() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        // 当前 part：seq 10/11，游标指向更早的 part 页。
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L), api.row("bot:11", "bot", 11L))
+        api.snapshotCursor = JSONObject().put("part", 1).put("beforeSeq", 10)
+        api.earlierPages.addLast(
+            listOf(
+                api.row("divider:part:0", "divider", null),
+                api.row("user:1", "user", 1L),
+                api.row("bot:2", "bot", 2L),
+            ) to null,
+        )
+
+        val viewModel = viewModel(api, scheduler)
+        assertEquals(listOf("user:10", "bot:11"), viewModel.uiState.value.entries.map { it.id })
+
+        viewModel.loadEarlier()
+        scheduler.runCurrent()
+
+        // 显示序：老 part 整页在前（divider → 老行），不被 seq 排序打乱。
+        assertEquals(
+            listOf("divider:part:0", "user:1", "bot:2", "user:10", "bot:11"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+        assertFalse("游标收口后 hasEarlier 应关掉", viewModel.uiState.value.hasEarlier)
+    }
+
+    /** 同一 part 内多次翻页：仍按宿主给的显示序正序（插入序 == seq 升序）。 */
+    @Test
+    fun multipleEarlierPagesWithinOnePartStayAscending() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L), api.row("bot:11", "bot", 11L))
+        api.snapshotCursor = JSONObject().put("part", 0).put("beforeSeq", 10)
+        api.earlierPages.addLast(
+            listOf(api.row("user:5", "user", 5L), api.row("bot:6", "bot", 6L)) to
+                JSONObject().put("part", 0).put("beforeSeq", 5),
+        )
+        api.earlierPages.addLast(
+            listOf(api.row("user:1", "user", 1L), api.row("bot:2", "bot", 2L)) to null,
+        )
+
+        val viewModel = viewModel(api, scheduler)
+
+        viewModel.loadEarlier()
+        scheduler.runCurrent()
+        assertEquals(
+            listOf("user:5", "bot:6", "user:10", "bot:11"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+
+        viewModel.loadEarlier()
+        scheduler.runCurrent()
+        assertEquals(
+            listOf("user:1", "bot:2", "user:5", "bot:6", "user:10", "bot:11"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+        assertFalse(viewModel.uiState.value.hasEarlier)
+    }
+
+    /**
+     * ① 群排队项撤回：`sourceKind == "user"` 的行走 `room-queue {roomId, id, action:remove}`，
+     * 提交即乐观摘行；成员项（sourceKind != user）不发请求。
+     */
+    @Test
+    fun groupPendingRecallGoesThroughRoomQueueRemove() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(
+            api.row("inbox:roomq:room-1:3", "inbox", null, sourceKind = "user", name = "我"),
+        )
+        val viewModel = viewModel(api, scheduler, isGroup = true)
+        scheduler.runCurrent()
+
+        val pending = viewModel.uiState.value.entries.single()
+        assertEquals(ChatEntryKind.PENDING, pending.kind)
+        assertEquals("user", pending.pendingSourceKind)
+
+        viewModel.recallPending(pending)
+        scheduler.runCurrent()
+
+        val (endpoint, payload) = api.botValueCalls.single()
+        assertEquals("room-queue", endpoint)
+        assertEquals("room-1", payload.optString("roomId"))
+        assertEquals("roomq:room-1:3", payload.optString("id"))
+        assertEquals("remove", payload.optString("action"))
+        assertTrue("撤回后乐观摘行", viewModel.uiState.value.entries.isEmpty())
+        assertTrue("群聊不提供改为插话", api.rpcCalls.none { it.first == "session/updateQueue" })
+    }
+
+    /** 群成员/系统排队项：不给操作，调 recall 也不发请求。 */
+    @Test
+    fun groupPendingRecallIsNoOpForNonUserItems() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(
+            api.row("inbox:roomq:room-1:4", "inbox", null, sourceKind = "member", name = "研究员", botId = "bot-9"),
+        )
+        val viewModel = viewModel(api, scheduler, isGroup = true)
+        scheduler.runCurrent()
+
+        viewModel.recallPending(viewModel.uiState.value.entries.single())
+        scheduler.runCurrent()
+
+        assertTrue("成员项不该发 room-queue 请求", api.botValueCalls.isEmpty())
+        assertEquals("成员项仍留在列表里", 1, viewModel.uiState.value.entries.size)
     }
 
     private fun lastRequestId(api: FakeApi): String =

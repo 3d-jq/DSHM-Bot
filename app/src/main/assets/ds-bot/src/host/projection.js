@@ -549,7 +549,9 @@ export function roomInboxRowsOf(posts, { roomId } = {}) {
     rows.push(row(`inbox:${id}`, 'inbox', null, null, null, {
       slot: 'next-turn', itemId: id,
       requestId: typeof post?.rpcId === 'string' ? post.rpcId : null,
-      sourceKind: post?.botId ? 'bot' : 'user',
+      // The producer stamps it (a schedule reminder is neither the user's nor a
+      // Bot's); the fallback keeps an older in-memory item readable.
+      sourceKind: typeof post?.sourceKind === 'string' ? post.sourceKind : (post?.botId ? 'bot' : 'user'),
       ...(post?.botId ? { botId: post.botId } : {}),
       ...(post?.name ? { name: post.name } : {}),
       text: String(post?.text ?? ''),
@@ -650,7 +652,8 @@ export function install(rt) {
       baseItems: rt.displayItems(sessionId, events, session),
       exchangeTurns: state.exchangeTurns[sessionId] ?? [],
       resolveBot: ref => rt.botOf(ref)?.name ?? (typeof ref === 'string' && ref !== '' ? ref : undefined),
-      botName: botId !== undefined ? rt.botOf(botId)?.name : undefined,
+      // An earlier part is not in chatOwners; the caller passes the Bot's name.
+      botName: extra.botName ?? (botId !== undefined ? rt.botOf(botId)?.name : undefined),
       cwd: extra.cwd,
       inbox: extra.inbox,
     })
@@ -708,6 +711,20 @@ export function install(rt) {
    * snapshot answer (`room-progress` read through the projection's own face). */
   rt.timelineRoomState = roomId => roomStateOf(roomId)
 
+  /** A Session's rows changed in a way a delta cannot carry (a withdrawn queue row:
+   * rows are keyed, and a delta only ever names new seqs or new keys — a removal is
+   * neither). One frame telling clients to re-read the snapshot converges them. */
+  rt.timelineResync = sessionId => {
+    const buffer = buffers.get(sessionId)
+    const seq = buffer !== undefined && buffer.events.size > 0 ? [...buffer.events.keys()].at(-1) : 0
+    const room = rt.roomOf(sessionId) !== undefined
+    rt.publishFeed?.('timeline', {
+      ...(room ? { roomId: sessionId } : { sessionId }),
+      seq, from: seq, ...(room ? roomStateOf(sessionId) : {}), reset: true,
+    })
+    logLine(sessionId, `resync asked after a queue change (snapshot re-read)`)
+  }
+
   /** The `timeline` endpoint. Request `{botId|roomId, since?, cursor?, max?}`;
    * the answer carries ascending rows, the Session's top seq, and (rooms) the
    * round's running/speaking state. */
@@ -715,7 +732,15 @@ export function install(rt) {
     await rt.load()
     const roomId = typeof body.roomId === 'string' && body.roomId !== '' ? body.roomId : undefined
     const since = Number.isInteger(body.since) && body.since >= 0 ? body.since : undefined
-    const cursor = isRecord(body.cursor) && Number.isInteger(body.cursor.beforeSeq) ? { beforeSeq: body.cursor.beforeSeq } : undefined
+    // Pagination cursor (frozen): `{part?, beforeSeq?}`. `part` walks a Bot's parts
+    // (each part is its own Session with its own seq space); `beforeSeq` walks back
+    // inside one part. Both may be absent, which asks for the newest page.
+    const cursor = isRecord(body.cursor) && (Number.isInteger(body.cursor.part) || Number.isInteger(body.cursor.beforeSeq))
+      ? {
+        ...(Number.isInteger(body.cursor.part) ? { part: body.cursor.part } : {}),
+        ...(Number.isInteger(body.cursor.beforeSeq) ? { beforeSeq: body.cursor.beforeSeq } : {}),
+      }
+      : undefined
     const max = Number.isInteger(body.max) && body.max > 0 && body.max <= 400 ? body.max : TIMELINE_PAGE
     if (roomId !== undefined) {
       const room = rt.roomOf(roomId)
@@ -724,7 +749,8 @@ export function install(rt) {
       const page = await ctx.sessionController.page({
         address: { kind: 'session', sessionId: room.id },
         throughSeq: Number(agent.session.seq) - 1,
-        ...(cursor ?? {}),
+        // Rooms paginate one Session; a `part` cursor is not theirs (their parts wait).
+        ...(Number.isInteger(cursor?.beforeSeq) ? { beforeSeq: cursor.beforeSeq } : {}),
         maxMessages: max,
       }, signal ?? AbortSignal.timeout(HISTORY_TIMEOUT_MS))
       const events = page.records.map(record => record.event)
@@ -762,7 +788,7 @@ export function install(rt) {
     const inbox = agent.inbox === undefined ? undefined : { nextTurn: agent.inbox.nextTurn, nextStep: agent.inbox.nextStep }
     // A `since` the buffer still reaches bridges without touching the Session log;
     // anything older replays from the log (capped — a client that far behind just
-    // re-reads from the top and merges by key).
+    // re-reads from the top and merges by key). It covers the current part only.
     if (since !== undefined && cursor === undefined) {
       const buffer = buffers.get(sessionId)
       if (buffer !== undefined && buffer.events.size > 0) {
@@ -773,19 +799,47 @@ export function install(rt) {
         }
       }
     }
+    // A Bot's own chat is a list of parts (each its own Session, oldest first, the
+    // last current). `cursor.part` walks them; `cursor.beforeSeq` walks one part.
+    // The cursor advances exactly like the official `partPage`: more in this part →
+    // `{part, beforeSeq}`, this part exhausted → `{part: index-1}`, nothing older →
+    // null. Each part has its own seq space, so rows are this part's display order,
+    // not a global seq order.
+    const parts = typeof rt.partsOf === 'function' ? rt.partsOf(bot.id) : []
+    const index = Number.isInteger(cursor?.part) ? cursor.part : parts.length - 1
+    if (parts.length === 0 || index < 0 || index >= parts.length) {
+      return { sessionId, seq: Number(agent.session.seq) - 1, rows: [], cursor: null }
+    }
+    const part = parts[index]
+    const isCurrent = index === parts.length - 1
+    const partAgent = isCurrent ? agent : await rt.resolveAgent(part.sessionId).catch(() => undefined)
+    const partSession = partAgent?.session
     const page = await ctx.sessionController.page({
-      address: { kind: 'session', sessionId },
-      throughSeq: Number(agent.session.seq) - 1,
-      ...(cursor ?? {}),
+      address: { kind: 'session', sessionId: part.sessionId },
+      ...(partSession !== undefined ? { throughSeq: Number(partSession.seq) - 1 } : {}),
+      ...(Number.isInteger(cursor?.beforeSeq) ? { beforeSeq: cursor.beforeSeq } : {}),
       maxMessages: max,
     }, signal ?? AbortSignal.timeout(HISTORY_TIMEOUT_MS))
     const events = page.records.map(record => record.event)
-    const rows = rowsOf(sessionId, events, agent.session, { cwd, inbox })
+    const more = page.hasMore && events.length > 0
+    const rows = rowsOf(part.sessionId, events, partSession, {
+      cwd: partSession?.header?.cwd ?? cwd,
+      botName: bot.name,
+      ...(isCurrent ? { inbox } : {}),
+    })
+    // The part's opening line (official partPage): unshifted onto the page that
+    // holds its oldest message, so a client prepending older pages keeps it at the
+    // top of that part.
+    if (!more && index > 0) {
+      rows.unshift(row(`divider:part:${index}`, 'divider', null, null, Number.isFinite(part.startedAt) ? part.startedAt : null, {}))
+    }
     return {
-      sessionId,
+      // The current part names the chat (and the delta baseline); a page of an
+      // earlier part still answers with it.
+      sessionId: parts.at(-1)?.sessionId ?? sessionId,
       seq: Number(agent.session.seq) - 1,
       rows,
-      cursor: page.hasMore && events.length > 0 ? { beforeSeq: events[0].seq } : null,
+      cursor: more ? { part: index, beforeSeq: events[0].seq } : index > 0 ? { part: index - 1 } : null,
       ...(since !== undefined && events.length > 0 && events[0].seq > since + 1 ? { partial: true } : {}),
     }
   }

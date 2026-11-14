@@ -1427,10 +1427,12 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
 }
 
 /**
- * inbox 行（timeline 行管线）：排队（`next-turn`）/ 插话（`next-step`）中的消息。
+ * inbox 行（timeline 行管线）：排队（`next-turn`）中的消息。
  *
- * 单聊带行内小动作（撤回 / 改插话，走 `session/updateQueue`）；群聊的排队真身在
- * 插件 roomInbox、行没有稳定 itemId，只显示「谁在排队」不做操作。
+ * - 单聊：行内「改为插话 / 撤回」（走 `session/updateQueue`）。
+ * - 群聊：只有**自己排的项**（`sourceKind == "user"`）给「撤回」（走 `room-queue`）；
+ *   成员/系统项只显示。**群聊不给「改为插话」**——群队列要等下一个 relay 才 drain，
+ *   没有「插进当前回合」的语义。
  */
 @Composable
 private fun PendingRow(
@@ -1457,17 +1459,23 @@ private fun PendingRow(
             style = Dshm.typography.composerText,
             color = Dshm.colors.textSecondary,
         )
-        if (!isGroup) {
+        val canRecall = if (isGroup) entry.pendingSourceKind == "user" else true
+        val canSteer = !isGroup
+        if (canSteer || canRecall) {
             Row {
-                TextButton(onClick = { onSteer(entry) }) {
-                    Text(stringResource(R.string.chat_pending_steer), style = Dshm.typography.rowPreview)
+                if (canSteer) {
+                    TextButton(onClick = { onSteer(entry) }) {
+                        Text(stringResource(R.string.chat_pending_steer), style = Dshm.typography.rowPreview)
+                    }
                 }
-                TextButton(onClick = { onRecall(entry) }) {
-                    Text(
-                        stringResource(R.string.chat_pending_recall),
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.danger,
-                    )
+                if (canRecall) {
+                    TextButton(onClick = { onRecall(entry) }) {
+                        Text(
+                            stringResource(R.string.chat_pending_recall),
+                            style = Dshm.typography.rowPreview,
+                            color = Dshm.colors.danger,
+                        )
+                    }
                 }
             }
         }

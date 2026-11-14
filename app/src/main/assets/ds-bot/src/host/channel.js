@@ -233,6 +233,33 @@ export function install(rt) {
           return ok(await rt.usageView({ timeZone: typeof body.timeZone === 'string' ? body.timeZone.slice(0, 64) : undefined }))
         case 'room-progress':
           return ok([...rt.roomProgress.entries()].filter(([, entry]) => entry.roomId === body.roomId).map(([callId, entry]) => ({ callId, replies: entry.replies, speaking: entry.speaking ?? null })))
+        // The group chat's queued posts (turns.js roomInbox): withdraw one the user
+        // posted. Mutating, so a read-only host refuses it (it is not in READS).
+        // A group queue has no steer — an item is drained into the next relay — so
+        // any action but `remove` fails with that reason instead of silently doing
+        // nothing. The answer is `{ok:true, value:{removed}}`; an unknown id is not
+        // an error (removed:false).
+        case 'room-queue': {
+          await rt.load()
+          const roomId = String(body.roomId ?? '')
+          const id = String(body.id ?? '')
+          const action = String(body.action ?? '')
+          if (roomId === '' || id === '') return fail('Which queued message?', 'bot/invalid')
+          if (rt.roomOf(roomId) === undefined) return fail('Unknown group chat', 'bot/not-found')
+          if (action !== 'remove') {
+            return fail(
+              action === 'steer'
+                ? 'A group queue has no steer: a queued post only leaves it when the next relay drains it'
+                : `A group queue has no "${action}" action; only "remove" is supported`,
+              'bot/unsupported',
+            )
+          }
+          const removed = rt.removeRoomQueued(roomId, id)
+          // A delta cannot carry a removal (rows are keyed; a delta only names new
+          // seqs or new keys), so ask clients to re-read the snapshot.
+          if (removed) rt.timelineResync?.(roomId)
+          return ok({ removed })
+        }
         case 'create-bot': {
           await rt.bootstrap()
           const bot = await rt.createBot({ name: body.name, role: body.role, color: body.color, instructions: body.instructions, brief: body.brief, avatar: body.avatar, model: body.model, effort: body.effort, workDir: body.workDir })

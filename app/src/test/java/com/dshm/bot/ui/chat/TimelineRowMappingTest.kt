@@ -156,14 +156,38 @@ class TimelineRowMappingTest {
         val inbox = chatEntryOf(
             TimelineRow(
                 "inbox:i-1", "inbox", null, null, null,
-                TimelineRowPayload.Inbox("排队消息", "next-turn", "req-9", "i-1"),
+                TimelineRowPayload.Inbox("排队消息", "next-turn", "req-9", "i-1", sourceKind = "user", botId = null, name = null),
             ),
             botName = "小助手",
         )!!
         assertEquals(ChatEntryKind.PENDING, inbox.kind)
         assertEquals("next-turn", inbox.pendingSlot)
         assertEquals("req-9", inbox.pendingRequestId)
+        assertEquals("user", inbox.pendingSourceKind)
         assertNull(inbox.seq)
+    }
+
+    /** 群聊排队行：key `inbox:<id>`，项带 sourceKind 与「谁在排队」。 */
+    @Test
+    fun groupInboxRowCarriesStableIdSourceKindAndSpeaker() {
+        val row = TimelineRow(
+            "inbox:roomq:room-1:3", "inbox", null, null, null,
+            TimelineRowPayload.Inbox(
+                text = "排队发言",
+                slot = "next-turn",
+                requestId = null,
+                itemId = "roomq:room-1:3",
+                sourceKind = "user",
+                botId = "bot-9",
+                name = "研究员",
+            ),
+        )
+        val mapped = chatEntryOf(row, botName = "小助手")!!
+        assertEquals(ChatEntryKind.PENDING, mapped.kind)
+        assertEquals("inbox:roomq:room-1:3", mapped.id)
+        assertEquals("user", mapped.pendingSourceKind)
+        assertEquals("研究员", mapped.pendingName)
+        assertEquals("bot-9", mapped.botId)
     }
 
     @Test
@@ -176,27 +200,4 @@ class TimelineRowMappingTest {
         )
     }
 
-    @Test
-    fun singleChatRowsSortBySeqWithNullSeqAppendedInInsertionOrder() {
-        val rows = listOf(
-            chatEntryOf(userRow(key = "user:9", seq = 9L), "小助手")!!,
-            chatEntryOf(userRow(key = "user:2", seq = 2L), "小助手")!!,
-            chatEntryOf(userRow(key = "p:x", seq = null), "小助手")!!,
-        )
-        val ordered = orderRowsAsEntries(rows, isGroup = false)
-        assertEquals(listOf("user:2", "user:9", "p:x"), ordered.map { it.id })
-    }
-
-    @Test
-    fun groupChatRowsKeepHostPositionOrderVerbatim() {
-        // 宿主群聊行是位置序（roomItems 官方顺序透传，relay 行 seq=null）：
-        // 不按 seq 重排，原样保留。
-        val rows = listOf(
-            chatEntryOf(userRow(key = "user:1", seq = 1L), "小助手")!!,
-            chatEntryOf(userRow(key = "user:relay-9:0", seq = null), "小助手")!!,
-            chatEntryOf(userRow(key = "user:0", seq = 0L), "小助手")!!,
-        )
-        val ordered = orderRowsAsEntries(rows, isGroup = true)
-        assertEquals(rows.map { it.id }, ordered.map { it.id })
-    }
 }

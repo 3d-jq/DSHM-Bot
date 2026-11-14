@@ -279,3 +279,142 @@ test('channel wiring: timeline is a READ endpoint answered by case timeline', ()
   const channel = readFileSync(`${pluginRoot}src/host/channel.js`, 'utf8')
   assert.ok(/case 'room-progress':/.test(channel) && /case 'room-chat':/.test(channel), 'channel 的旧群聊端点丢了')
 })
+
+// ---------------------------------------------------------------------------
+// ② Parts pagination (private chat): `cursor.part` walks a Bot's parts, each its
+// own Session with its own seq space; `cursor.beforeSeq` walks inside one part.
+
+const PARTS = [
+  { sessionId: 's0', number: 1, startedAt: 1000 },
+  { sessionId: 's1', number: 2, startedAt: 2000 },
+  { sessionId: 's2', number: 3, startedAt: 3000 },
+]
+
+const PART_EVENTS = {
+  s0: [
+    { type: 'user/message', seq: 1, time: 1001, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '最早的问题' }] } },
+    { type: 'assistant/message', seq: 2, time: 1002, data: { turn: 1, message: { content: [{ type: 'text', text: '最早的回复' }] } } },
+  ],
+  s1: [
+    { type: 'user/message', seq: 10, time: 2001, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '第二轮问题' }] } },
+    { type: 'assistant/message', seq: 11, time: 2002, data: { turn: 2, message: { content: [{ type: 'text', text: '第二轮回复' }] } } },
+  ],
+  s2: [
+    { type: 'user/message', seq: 20, time: 3001, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '当前问题' }] } },
+    { type: 'assistant/message', seq: 21, time: 3002, data: { turn: 3, message: { content: [{ type: 'text', text: '当前回复' }] } } },
+  ],
+}
+
+/** A Bot with several parts: each part is its own Session/log. */
+function fakePartsRt(parts = PARTS) {
+  const sessionListeners = []
+  const ctx = {
+    on(name, handler) { if (name === 'session/event') sessionListeners.push(handler) },
+    effect() {},
+    get() { return undefined },
+    logger: { info() {}, warn() {} },
+    sessionController: {
+      page: async (request) => {
+        const all = PART_EVENTS[request.address.sessionId] ?? []
+        const through = request.throughSeq ?? Infinity
+        const before = request.beforeSeq ?? Infinity
+        const visible = all.filter(item => item.seq <= through && item.seq < before)
+        const window = visible.slice(-request.maxMessages)
+        return { records: window.map(event => ({ event })), hasMore: visible.length > window.length }
+      },
+    },
+  }
+  const state = { exchangeTurns: {}, questions: {}, views: {}, bots: {}, rooms: {}, exchanges: [], prefs: {} }
+  const rt = {
+    ctx,
+    config: {},
+    state,
+    warn() {},
+    save: async () => {},
+    load: async () => {},
+    refresh: async () => {},
+    readOnly: () => undefined,
+    isBotSession: id => id in PART_EVENTS,
+    roomOf: () => undefined,
+    chatOf: () => 's2',
+    chatOwners: new Map([['s2', 'bot-1']]),
+    pastOwners: new Map(),
+    botOf: id => (id === 'bot-1' ? { id: 'bot-1', name: '小助手' } : undefined),
+    selfOf: () => undefined,
+    resolveAgent: async id => ({
+      session: { seq: (PART_EVENTS[id]?.at(-1)?.seq ?? 0) + 1, header: { cwd: '/root/w' } },
+      inbox: { nextTurn: [], nextStep: [] },
+    }),
+    roomProgress: new Map(),
+    roomInbox: new Map(),
+    workDirOf: () => '/root/w',
+    switchJobs: () => [],
+  }
+  installParts(rt)
+  // The fake's part list, standing in for bot.segments-derived partsOf.
+  rt.partsOf = () => parts
+  installProjection(rt)
+  return { rt, sessionListeners }
+}
+
+test('parts pagination: the current part, then each earlier part behind a divider, then null', async () => {
+  const { rt } = fakePartsRt()
+  // Current part (index 2): its page carries its own opening line (index > 0).
+  const first = await rt.timelineEndpoint({ botId: 'bot-1' })
+  assert.equal(first.sessionId, 's2', 'the chat is still named by its current part')
+  assert.deepEqual(first.rows.map(row => row.key), ['divider:part:2', 'user:20', 'bot:21'])
+  assert.equal(first.rows[0].kind, 'divider')
+  assert.equal(first.rows[0].seq, null)
+  assert.equal(first.rows[0].timeMs, 3000, '分隔行带该 part 的 startedAt')
+  assert.deepEqual(first.cursor, { part: 1 }, '当前 part 翻完 → 上一个 part')
+
+  // Entering the middle part: its own divider first (the frozen key), its rows.
+  const middle = await rt.timelineEndpoint({ botId: 'bot-1', cursor: { part: 1 } })
+  assert.deepEqual(middle.rows.map(row => row.key), ['divider:part:1', 'user:10', 'bot:11'])
+  assert.equal(middle.rows[0].timeMs, 2000)
+  assert.deepEqual(middle.cursor, { part: 0 })
+
+  // The oldest part: nothing before it, so no divider and no cursor.
+  const oldest = await rt.timelineEndpoint({ botId: 'bot-1', cursor: { part: 0 } })
+  assert.deepEqual(oldest.rows.map(row => row.key), ['user:1', 'bot:2'])
+  assert.equal(oldest.rows[0].payload.text, '最早的问题')
+  assert.equal(oldest.cursor, null, '没有更早的 part 了')
+})
+
+test('parts pagination: beforeSeq walks one part first, then the cursor steps to the previous part', async () => {
+  const { rt } = fakePartsRt([
+    { sessionId: 's0', number: 1, startedAt: 1000 },
+    { sessionId: 's2', number: 2, startedAt: 3000 },
+  ])
+  // A page of one event: the current part has two, so the first page is partial.
+  const page1 = await rt.timelineEndpoint({ botId: 'bot-1', max: 1 })
+  assert.deepEqual(page1.rows.map(row => row.key), ['bot:21'], '本页只给最后一条')
+  assert.deepEqual(page1.cursor, { part: 1, beforeSeq: 21 }, '同一 part 内继续往前')
+
+  // Walking back inside the part lands on its oldest event and closes the part:
+  // now its opening line appears, and the cursor steps to the previous part.
+  const page2 = await rt.timelineEndpoint({ botId: 'bot-1', max: 1, cursor: { part: 1, beforeSeq: 21 } })
+  assert.deepEqual(page2.rows.map(row => row.key), ['divider:part:1', 'user:20'])
+  assert.deepEqual(page2.cursor, { part: 0 })
+})
+
+test('parts pagination: a cursor pointing outside the parts is an empty, terminal page', async () => {
+  const { rt } = fakePartsRt()
+  for (const part of [-1, 3, 99]) {
+    const answer = await rt.timelineEndpoint({ botId: 'bot-1', cursor: { part } })
+    assert.deepEqual(answer.rows, [])
+    assert.equal(answer.cursor, null)
+  }
+})
+
+test('parts pagination: an earlier part is its own seq space and its own history', async () => {
+  const { rt, sessionListeners } = fakePartsRt()
+  // The live buffer (and therefore `since`) covers the current part only.
+  for (const item of PART_EVENTS.s2) for (const handler of sessionListeners) handler({ id: 's2' }, item)
+  const replayed = await rt.timelineEndpoint({ botId: 'bot-1', since: 20 })
+  assert.equal(replayed.replayed, true)
+  assert.deepEqual(replayed.rows.map(row => row.key), ['bot:21'], 'since 只覆盖当前 part')
+  // Earlier parts never appear in a `since` replay, only through a part cursor.
+  const page = await rt.timelineEndpoint({ botId: 'bot-1', cursor: { part: 0 } })
+  assert.deepEqual(page.rows.map(row => row.key), ['user:1', 'bot:2'])
+})
