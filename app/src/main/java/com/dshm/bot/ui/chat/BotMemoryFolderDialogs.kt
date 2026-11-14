@@ -932,6 +932,21 @@ internal fun SchedulesSheet(
                         modifier = Modifier.fillMaxWidth().padding(vertical = Dshm.spacing.sm),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // 与密钥 / 能力列表同款首字母方块：底部面板和 Bot 设置共用这个列表。
+                        Box(
+                            modifier = Modifier
+                                .size(Dshm.spacing.avatar)
+                                .clip(RoundedCornerShape(Dshm.radius.sm))
+                                .background(Dshm.colors.surfaceMuted),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = task.title.trim().take(1).uppercase().ifEmpty { "?" },
+                                style = Dshm.typography.rowTitle,
+                                color = Dshm.colors.textSecondary,
+                            )
+                        }
+                        Spacer(Modifier.width(Dshm.spacing.md))
                         Column(Modifier.weight(1f)) {
                             Text(task.title, style = Dshm.typography.rowTitle, color = Dshm.colors.textPrimary)
                             Text(task.prompt, style = Dshm.typography.rowPreview, color = Dshm.colors.textSecondary)

@@ -66,6 +66,35 @@ data class BotScheduleTask(
     val prompt: String,
 )
 
+/**
+ * 从 `schedules` 端点响应里挑出某个 Bot 的任务。
+ *
+ * 端点的 `schedules` / `schedule-create` / `schedule-delete` 都返回**同一形状的
+ * 完整列表**（`{available, tasks}`）。创建/删除直接用它替换本地状态，不能再另发
+ * 一次 `schedules` 去二次拉取 —— 那次异步慢返回会把新列表盖回旧的，就是
+ * 「删掉旧的才显示新建的 / 新任务填到旧位置」的根因。
+ */
+internal fun schedulesOf(raw: JSONObject?, botId: String): List<BotScheduleTask> {
+    val array = raw?.optJSONArray("tasks") ?: return emptyList()
+    return buildList {
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val id = item.optString("id")
+            // 端点偶发的畸形条目（没 id）不能进列表：LazyColumn 会拿到空 key，
+            // 删除/新建时又是一条「幽灵行」。
+            if (id.isEmpty() || item.optString("botId") != botId) continue
+            add(
+                BotScheduleTask(
+                    id = id,
+                    sessionId = item.optString("sessionId"),
+                    title = item.optString("title").ifEmpty { "Task" },
+                    prompt = item.optString("prompt"),
+                ),
+            )
+        }
+    }
+}
+
 data class BotDetailsInfo(
     val id: String,
     val name: String,
@@ -286,24 +315,10 @@ class BotDetailsViewModel(
             connection.bot("memory-view", JSONObject().put("botId", botId))
         }.getOrNull()?.let { applyMemoryView(it) }
 
-        val schedules = runCatching { connection.bot("schedules") }.getOrNull()
-            ?.optJSONArray("tasks")?.let { array ->
-                buildList {
-                    for (index in 0 until array.length()) {
-                        val item = array.optJSONObject(index) ?: continue
-                        if (item.optString("botId") != botId) continue
-                        add(
-                            BotScheduleTask(
-                                id = item.optString("id"),
-                                sessionId = item.optString("sessionId"),
-                                title = item.optString("title").ifEmpty { "Task" },
-                                prompt = item.optString("prompt"),
-                            ),
-                        )
-                    }
-                }
-            }.orEmpty()
-
+        // 端点返回的 `tasks` 就是权威列表（schedule-create / delete 也返回同一形状）。
+        // 创建/删除直接用它替换，不再另发一次 loadExtras —— 二次拉取是异步的，
+        // 慢返回会把新列表盖回旧的（用户看到的「删掉才显示新建的 / 位置串了」）。
+        val schedules = schedulesOf(runCatching { connection.bot("schedules") }.getOrNull())
         _ui.update { it.copy(schedules = schedules) }
 
         // DS Bot 的 `run-stats`：DSH 状态栏那一行的原始数字（轮数 / 速度 / 缓存 / 上下文）。
@@ -567,9 +582,11 @@ class BotDetailsViewModel(
                         .put("prompt", prompt)
                         .put("when", whenSpec),
                 )
-            }.onSuccess {
-                _ui.update { it.copy(saving = false) }
-                loadExtras(connection)
+            }.onSuccess { value ->
+                // schedule-create 直接回最新列表：立刻上屏，不去二次拉 loadExtras。
+                _ui.update {
+                    it.copy(saving = false, schedules = schedulesOf(value))
+                }
                 onDone(null)
             }.onFailure {
                 _ui.update { state -> state.copy(saving = false) }
@@ -586,8 +603,9 @@ class BotDetailsViewModel(
                     "schedule-delete",
                     JSONObject().put("sessionId", task.sessionId).put("id", task.id),
                 )
-            }.onSuccess {
-                loadExtras(connection)
+            }.onSuccess { value ->
+                // schedule-delete 同样回最新列表，直接替换（不要等 loadExtras）。
+                _ui.update { it.copy(schedules = schedulesOf(value)) }
                 onDone(null)
             }.onFailure {
                 onDone(it.message ?: "删除定时任务失败")
@@ -799,6 +817,9 @@ class BotDetailsViewModel(
                 }
         }
     }
+
+    private fun schedulesOf(raw: JSONObject?): List<BotScheduleTask> =
+        schedulesOf(raw, botId)
 
     companion object {
         fun factory(botId: String, endpoint: RuntimeEndpoint?): ViewModelProvider.Factory = viewModelFactory {

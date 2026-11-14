@@ -141,7 +141,9 @@ fun ScheduledTasksScreen(
                     item { SettingsEmpty(stringResource(R.string.schedules_empty)) }
                 }
                 groups.forEach { (target, tasks) ->
-                    item {
+                    // 按分组身份给 key：列表变化时不再按「位置」复用旧 item，
+                    // 杜绝「删掉旧的、新的填到旧位置」看起来像两层叠着。
+                    item(key = "group-${target?.id ?: "orphans"}") {
                         SettingsSection(
                             title = target?.name ?: stringResource(R.string.schedules_unknown_target),
                         ) {
