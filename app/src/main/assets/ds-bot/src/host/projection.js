@@ -22,7 +22,7 @@
 // the per-session event buffer, the `timeline` endpoint and the feed delta.
 import { HISTORY_TIMEOUT_MS } from './constants.js'
 import { textOf } from './text.js'
-import { roomItems } from './mobile.js'
+import { replyItem, roomItems } from './mobile.js'
 
 // Events a timeline page covers, and the ring sizes of the per-session buffer.
 export const TIMELINE_PAGE = 200
@@ -512,8 +512,8 @@ export function composeTimelineRows({ events, baseItems, exchangeTurns = [], res
 /** A group chat's own Session as rows (official `roomItems` wrapped): the round's
  * replies are rows already. The official order here is positional — a running
  * round's live replies splice in at their relay call — so the base order passes
- * through untouched; failure rows join at the end. A round's artifacts live in
- * the member Sessions (`room-artifacts`) — a later phase folds them in here. */
+ * through untouched; failure rows join at the end. Member identity rides the
+ * payload (`botId`/`name`, as roomItems carries it). */
 export function composeRoomRows({ events, baseItems, botName }) {
   const rows = []
   for (const item of baseItems) {
@@ -521,19 +521,70 @@ export function composeRoomRows({ events, baseItems, botName }) {
     const timeMs = item.time ?? null
     switch (item.kind) {
       case 'user':
-        rows.push(row(`user:${item.id}`, 'user', seq, null, timeMs, { text: item.text, images: item.images ?? 0, ...(item.rpcId ? { requestId: item.rpcId } : {}) }))
+        rows.push(row(`user:${item.id}`, 'user', seq, null, timeMs, { text: item.text, images: item.images ?? 0, ...(item.rpcId ? { requestId: item.rpcId } : {}), ...(item.live ? { live: true } : {}) }))
         break
       case 'bot':
-        rows.push(row(`bot:${item.id}`, 'bot', seq, null, timeMs, { text: item.text, ...(item.botId ? { botId: item.botId } : {}), ...(item.name ? { name: item.name } : {}), ...(item.whole ? { whole: item.whole } : {}) }))
+        rows.push(row(`bot:${item.id}`, 'bot', seq, null, timeMs, { text: item.text, ...(item.botId ? { botId: item.botId } : {}), ...(item.name ? { name: item.name } : {}), ...(item.whole ? { whole: item.whole } : {}), ...(item.live ? { live: true } : {}) }))
         break
       case 'event':
-        rows.push(row(`event:${item.id}`, 'event', seq, null, timeMs, { eventKind: item.event ?? null, ...(item.code ? { code: item.code } : {}), ...(item.botId ? { botId: item.botId } : {}), ...(item.name ? { name: item.name } : {}), ...(item.text !== undefined ? { text: item.text } : {}) }))
+        rows.push(row(`event:${item.id}`, 'event', seq, null, timeMs, { eventKind: item.event ?? null, ...(item.code ? { code: item.code } : {}), ...(item.botId ? { botId: item.botId } : {}), ...(item.name ? { name: item.name } : {}), ...(item.text !== undefined ? { text: item.text } : {}), ...(item.live ? { live: true } : {}) }))
         break
       default:
         break
     }
   }
   rows.push(...failureRowsOf(events, { botName }))
+  return rows
+}
+
+/** The group's deliverable card (frozen key `present:<roomId>:<turn>`): one card
+ * aggregating what the round delivered — members' `present` declarations collected
+ * off the member Sessions (`rt.roomArtifacts`) first, then the files the round's
+ * own Session folder saw change. `turn` is the room Session's latest turn; the
+ * card sits at that turn's end (or its start while the round runs). */
+export function roomArtifactRow({ roomId, events, artifacts }) {
+  const traces = turnTracesOf(events)
+  const latest = traces.at(-1)
+  const turn = latest?.turn ?? 0
+  const seq = latest?.endSeq ?? latest?.startSeq ?? (events.length > 0 ? events.at(-1).seq : null)
+  const files = []
+  const seen = new Set()
+  for (const file of [...(artifacts?.files ?? []), ...(artifacts?.changed ?? [])]) {
+    if (typeof file?.path !== 'string' || file.path.trim() === '' || seen.has(file.path)) continue
+    seen.add(file.path)
+    files.push({
+      path: file.path,
+      description: typeof file.description === 'string' && file.description.trim() !== '' ? file.description.trim() : null,
+      ...(file.botId ? { botId: file.botId } : {}),
+      ...(file.name ? { name: file.name } : {}),
+    })
+  }
+  if (files.length === 0) return null
+  return row(`present:${roomId}:${turn}`, 'artifact', seq, turn, null, {
+    files,
+    delivered: (artifacts?.files ?? []).length > 0,
+    collapsedCount: COLLAPSED_ARTIFACTS,
+  })
+}
+
+/** What a group still waits to relay, as tail rows. A room's queued posts live in
+ * the plugin's own `roomInbox` (they drain into the next `group_relay`); the room
+ * Session's agent inbox joins when it holds anything. */
+export function roomInboxRowsOf(posts, { roomId } = {}) {
+  const rows = []
+  const list = Array.isArray(posts) ? posts : []
+  list.forEach((post, index) => {
+    if (post?.kickoff || post?.resume) return
+    const id = typeof post?.id === 'string' && post.id !== '' ? post.id : `roominx:${roomId ?? ''}:${index}`
+    rows.push(row(`inbox:${id}`, 'inbox', null, null, null, {
+      slot: 'next-turn', itemId: id,
+      requestId: typeof post?.rpcId === 'string' ? post.rpcId : null,
+      sourceKind: post?.botId ? 'bot' : 'user',
+      ...(post?.botId ? { botId: post.botId } : {}),
+      ...(post?.name ? { name: post.name } : {}),
+      text: String(post?.text ?? ''),
+    }))
+  })
   return rows
 }
 
@@ -575,10 +626,32 @@ export function install(rt) {
 
   const eventsOf = buffer => [...buffer.events.values()]
 
+  /** A running round's replies so far, spliced at their relay call exactly the way
+   * `mobile.js roomChat` places them (same item ids, so a client swaps the live
+   * row for the settled one by key). */
+  const withLiveReplies = (events, cursorless) => {
+    const { items, open } = roomItems(events)
+    if (cursorless) {
+      for (const { callId, at } of open.reverse()) {
+        const round = rt.roomProgress.get(callId)
+        if (round === undefined) continue
+        const live = round.replies.map((reply, index) => replyItem(reply, `${callId}:${index}`, { live: true })).filter(Boolean)
+        items.splice(at, 0, ...live)
+      }
+    }
+    return items
+  }
+
+  /** The round a room is running right now (`room-progress`). */
+  const roomStateOf = roomId => {
+    const rounds = [...rt.roomProgress.entries()].filter(([, entry]) => entry.roomId === roomId)
+    return { running: rounds.length > 0, speaking: rounds.map(([, entry]) => entry.speaking).find(Boolean) ?? null }
+  }
+
   /** Rows of one event list, the way this Session shows them. */
-  const rowsOf = (sessionId, events, session, extra = {}) => {
+  const rowsOf = (sessionId, events, session, extra = {}, { cursorless = false } = {}) => {
     if (rt.roomOf(sessionId) !== undefined) {
-      return composeRoomRows({ events, baseItems: roomItems(events).items })
+      return composeRoomRows({ events, baseItems: withLiveReplies(events, cursorless) })
     }
     const botId = rt.chatOwners.get(sessionId)
     return composeTimelineRows({
@@ -594,19 +667,34 @@ export function install(rt) {
 
   /** Rows the feed has not carried yet, plus the buffer's reach. A client that
    * cannot bridge its own cursor to `from` re-reads the snapshot; one that cannot
-   * bridge at all (the buffer rotated) gets `reset`. */
+   * bridge at all (the buffer rotated) gets `reset`. Rows without a seq (a room's
+   * live round replies) ride along while their key is new — the client swaps them
+   * in place when the settled row lands under the same key. */
   rt.timelineDelta = sessionId => {
     const buffer = buffers.get(sessionId)
     if (buffer === undefined) return { rows: [], seq: 0, from: 0, bufferFrom: 0 }
     const events = eventsOf(buffer)
     const bufferFrom = events.length > 0 ? events[0].seq : 0
     const seq = events.length > 0 ? events.at(-1).seq : 0
-    const last = published.get(sessionId) ?? 0
-    published.set(sessionId, Math.max(last, seq))
-    if (last > 0 && last < bufferFrom - 1) return { rows: [], seq, from: last, bufferFrom, reset: true }
-    const rows = rowsOf(sessionId, events, undefined).filter(entry => typeof entry.seq === 'number' && entry.seq > last)
-    return { rows, seq, from: last, bufferFrom }
+    const last = published.get(sessionId) ?? { seq: 0, keys: new Set() }
+    published.set(sessionId, { seq: Math.max(last.seq, seq), keys: last.keys })
+    if (last.seq > 0 && last.seq < bufferFrom - 1) {
+      const base = { rows: [], seq, from: last.seq, bufferFrom, reset: true }
+      return rt.roomOf(sessionId) !== undefined ? { ...base, ...roomStateOf(sessionId) } : base
+    }
+    const rows = rowsOf(sessionId, events, undefined).filter(entry => {
+      if (typeof entry.seq === 'number') return entry.seq > last.seq
+      if (last.keys.has(entry.key)) return false
+      last.keys.add(entry.key)
+      return true
+    })
+    if (rt.roomOf(sessionId) !== undefined) return { rows, seq, from: last.seq, bufferFrom, ...roomStateOf(sessionId) }
+    return { rows, seq, from: last.seq, bufferFrom }
   }
+
+  /** The round a group chat is running right now, for the delta frames and the
+   * snapshot answer (`room-progress` read through the projection's own face). */
+  rt.timelineRoomState = roomId => roomStateOf(roomId)
 
   /** The `timeline` endpoint. Request `{botId|roomId, since?, cursor?, max?}`;
    * the answer carries ascending rows, the Session's top seq, and (rooms) the
@@ -628,14 +716,35 @@ export function install(rt) {
         maxMessages: max,
       }, signal ?? AbortSignal.timeout(HISTORY_TIMEOUT_MS))
       const events = page.records.map(record => record.event)
-      const rounds = [...rt.roomProgress.entries()].filter(([, entry]) => entry.roomId === room.id)
+      // A running round's replies so far, spliced at their relay call (same ids as
+      // the settled rows, so the client swaps them in place when the result logs).
+      const baseItems = withLiveReplies(events, cursor === undefined)
+      const rows = composeRoomRows({ events, baseItems })
+      // What the round queued for its next relay (the plugin's own room inbox), and
+      // anything the room Session's agent inbox holds, as tail rows.
+      const queued = typeof rt.roomInbox?.get === 'function' ? rt.roomInbox.get(room.id) : undefined
+      rows.push(...roomInboxRowsOf(queued, { roomId: room.id }))
+      rows.push(...inboxRowsOf(agent.inbox === undefined ? undefined : { nextTurn: agent.inbox.nextTurn, nextStep: agent.inbox.nextStep }))
+      // The round's deliverables: members' `present` declarations (they live in the
+      // member Sessions) plus the files the round wrote without presenting — the
+      // `room-artifacts` aggregation, as one card at the latest room turn.
+      if (cursor === undefined && typeof rt.roomArtifacts === 'function') {
+        try {
+          const artifacts = await rt.roomArtifacts(room.id, Number.isInteger(body.artifactSince) ? body.artifactSince : 0)
+          const card = roomArtifactRow({ roomId: room.id, events, artifacts })
+          if (card !== null) rows.push(card)
+        } catch (error) {
+          rt.warn?.('ds-bot: timeline artifacts for %s failed: %s', room.name ?? room.id, error?.message ?? error)
+        }
+      }
+      const roundState = roomStateOf(room.id)
       return {
         roomId: room.id,
         seq: Number(agent.session.seq) - 1,
-        rows: composeRoomRows({ events, baseItems: roomItems(events).items }),
+        rows,
         cursor: page.hasMore && events.length > 0 ? { beforeSeq: events[0].seq } : null,
-        running: rounds.length > 0,
-        speaking: rounds.map(([, entry]) => entry.speaking).find(Boolean) ?? null,
+        running: roundState.running,
+        speaking: roundState.speaking,
       }
     }
     const bot = rt.botOf(String(body.botId ?? ''))

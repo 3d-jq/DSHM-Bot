@@ -101,9 +101,11 @@ class DshSessionRepository(private val client: DshClient) : SessionModelCatalogS
         require(text.isNotBlank() || fileReceiptIds.isNotEmpty()) {
             "session/prompt 需要非空文本或附件"
         }
+        // 附件块在前、文本在后（官方 conversation runtime 的 content 顺序，
+        // conv:4724-4731）；timeline 的 user 行 blocks[] 也是这个顺序（宪章 ⑤）。
         val content = JSONArray().apply {
-            if (text.isNotEmpty()) put(JSONObject().put("type", "text").put("text", text))
             fileReceiptIds.forEach { put(JSONObject().put("type", "file").put("receiptId", it)) }
+            if (text.isNotEmpty()) put(JSONObject().put("type", "text").put("text", text))
         }
         client.rpc(
             "session/prompt",

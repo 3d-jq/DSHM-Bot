@@ -63,6 +63,8 @@ sealed interface TimelineRowPayload {
         val images: Int,
         /** `source.rpcId`：回显认领用（设计 §2 key 规则 1）。 */
         val requestId: String?,
+        /** 群聊 live 行（round 进行中的回复，同 key settled 后原位替换）。 */
+        val live: Boolean,
     ) : TimelineRowPayload
 
     data class Bot(
@@ -72,6 +74,8 @@ sealed interface TimelineRowPayload {
         val durationMs: Long?,
         /** 长文附件（`whole`），原样保留，1b 再映射内部模型。 */
         val whole: JSONObject?,
+        /** 群聊 live 行：round 进行中的回复占位，settled 后同 key 原位替换。 */
+        val live: Boolean,
     ) : TimelineRowPayload
 
     /** `state`: running / ok / error。 */
@@ -94,6 +98,8 @@ sealed interface TimelineRowPayload {
         val code: String?,
         val botId: String?,
         val name: String?,
+        /** 载荷原样（text 等扩展字段从这里读，向前兼容）。 */
+        val raw: JSONObject,
     ) : TimelineRowPayload
 
     data class Divider(val timeMs: Long?) : TimelineRowPayload
@@ -158,6 +164,12 @@ data class TimelineFeedFrame(
     val roomId: String?,
     val seq: Long?,
     val rows: List<TimelineRow>,
+    /**
+     * 群聊帧的 round 状态（单聊缺席）：running 的 true→false 边沿触发快照重拉
+     * （群产物卡只在 snapshot 里聚合，宿主侧 room-artifacts 是异步聚合不进帧）。
+     */
+    val running: Boolean?,
+    val speaking: String?,
 )
 
 /** 解析一行；残缺/未知 kind 返回 null（调用方跳过，不抛）。 */
@@ -220,7 +232,10 @@ fun parseTimelineFeedFrame(data: JSONObject?): TimelineFeedFrame? {
         val reset = data.optBoolean("reset", false)
         if (reset) {
             // reset 帧：行流追不上了，客户端丢缓冲重拉快照；行字段可以缺席。
-            TimelineFeedFrame(reset = true, botId = null, roomId = null, seq = null, rows = emptyList())
+            TimelineFeedFrame(
+                reset = true, botId = null, roomId = null, seq = null,
+                rows = emptyList(), running = null, speaking = null,
+            )
         } else {
             // 非 reset 帧的 rows 存在但不是数组：骨架残缺，整体作废。
             if (data.has("rows") && !data.isNull("rows") && data.optJSONArray("rows") == null) {
@@ -232,6 +247,8 @@ fun parseTimelineFeedFrame(data: JSONObject?): TimelineFeedFrame? {
                 roomId = data.optString("roomId").takeIf { it.isNotEmpty() },
                 seq = optionalLong(data, "seq"),
                 rows = parseTimelineRows(data.optJSONArray("rows")),
+                running = if (data.has("running") && !data.isNull("running")) data.optBoolean("running") else null,
+                speaking = data.optString("speaking").takeIf { it.isNotEmpty() },
             )
         }
     }.getOrNull()
@@ -244,6 +261,7 @@ private fun parseRowPayload(kind: String, payload: JSONObject): TimelineRowPaylo
         blocks = payload.optJSONArray("blocks").orEmpty().objectList(),
         images = payload.optInt("images", 0),
         requestId = payload.optString("requestId").takeIf { it.isNotEmpty() },
+        live = payload.optBoolean("live", false),
     )
 
     TimelineRow.KIND_BOT -> TimelineRowPayload.Bot(
@@ -252,6 +270,7 @@ private fun parseRowPayload(kind: String, payload: JSONObject): TimelineRowPaylo
         botId = payload.optString("botId").takeIf { it.isNotEmpty() },
         durationMs = optionalLong(payload, "durationMs"),
         whole = payload.optJSONObject("whole"),
+        live = payload.optBoolean("live", false),
     )
 
     TimelineRow.KIND_TOOL -> TimelineRowPayload.Tool(
@@ -273,6 +292,7 @@ private fun parseRowPayload(kind: String, payload: JSONObject): TimelineRowPaylo
         code = payload.optString("code").takeIf { it.isNotEmpty() },
         botId = payload.optString("botId").takeIf { it.isNotEmpty() },
         name = payload.optString("name").takeIf { it.isNotEmpty() },
+        raw = payload,
     )
 
     TimelineRow.KIND_DIVIDER -> TimelineRowPayload.Divider(

@@ -64,6 +64,12 @@ fun conversationMarkdown(
                 out.append("> 浏览器：").append(shot.title.ifBlank { shot.url }).append('\n')
                 out.append("> ").append(shot.url).append("\n\n")
             }
+
+            ChatEntryKind.PENDING -> {
+                out.append("> ").append(
+                    if (entry.pendingSlot == "next-step") "插话中" else "排队中",
+                ).append("：").append(entry.text).append("\n\n")
+            }
         }
     }
     return out.toString().trimEnd() + "\n"

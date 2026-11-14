@@ -97,6 +97,7 @@ import com.dshm.bot.ui.settings.PrivacySettingsScreen
 import com.dshm.bot.ui.settings.SettingsPageId
 import com.dshm.bot.ui.settings.BotPrefsViewModel
 import com.dshm.bot.ui.settings.SettingsScreen
+import com.dshm.bot.ui.settings.TimelineSettingsScreen
 import com.dshm.bot.ui.settings.SettingsViewModel
 import com.dshm.bot.ui.settings.VoiceSettingsScreen
 import com.dshm.bot.ui.settings.WebHostScreen
@@ -888,6 +889,12 @@ fun DshmBotApp(
                     SettingsPageId.PRIVACY -> PrivacySettingsScreen(
                         engineSettings = engineSettingsViewModel,
                         onBack = close,
+                    )
+
+                    SettingsPageId.TIMELINE -> TimelineSettingsScreen(
+                        dshGo = settingsUiState.dshGo,
+                        onBack = close,
+                        onSetPreference = settingsViewModel::setDshGoPreference,
                     )
 
                     SettingsPageId.LICENSES -> LicensesScreen(onBack = close)

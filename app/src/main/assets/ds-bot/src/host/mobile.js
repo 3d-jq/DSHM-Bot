@@ -57,7 +57,8 @@ function reminderText(text) {
 // One reply of a round as an item: a member's message, the user's message that came in
 // while the round ran, or an event of the round. `id` names it the same while the round
 // runs and once its result is logged, so a client can swap the one for the other.
-function replyItem(reply, id, extra = {}) {
+// Exported for the timeline projection, which splices the same live replies.
+export function replyItem(reply, id, extra = {}) {
   const who = { ...(reply.botId ? { botId: reply.botId } : {}), ...(reply.name ? { name: reply.name } : {}), ...(reply.color ? { color: reply.color } : {}) }
   const time = Number.isFinite(reply.time) ? reply.time : null
   if (reply.kind === 'user') return { id, kind: 'user', text: String(reply.text ?? ''), ...(reply.rpcId ? { rpcId: reply.rpcId } : {}), time, ...extra }

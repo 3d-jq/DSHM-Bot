@@ -57,6 +57,11 @@
     <string name="chat_load_failed">对话加载失败</string>
     <string name="chat_retry">重试</string>
     <string name="chat_send_failed">消息发送失败：%1$s</string>
+    <string name="chat_pending_queued">排队中</string>
+    <string name="chat_pending_steering">插话中…</string>
+    <string name="chat_pending_steer">改为插话</string>
+    <string name="chat_pending_recall">撤回</string>
+    <string name="chat_live_speaking">发言中…</string>
     <string name="approval_waiting">等你确认</string>
     <string name="approval_reject">拒绝</string>
     <string name="approval_allow_once">允许一次</string>
@@ -525,7 +530,13 @@
     <string name="voice_engine">语音模型</string>
     <string name="info_engine_required">连接本机引擎后可配置。</string>
     <string name="settings_privacy">隐私与分享</string>
-    <string name="notify_channel_chat">对话</string>
+    <string name="settings_timeline">对话时间线</string>
+    <string name="settings_timeline_pipeline">管线</string>
+    <string name="settings_timeline_hint">统一投影跑在宿主插件里；关掉即回旧管线（load + feed + follow），仅供调试排查，无特殊情况请保持开启。</string>
+    <string name="settings_timeline_parity">统一时间线投影</string>
+    <string name="settings_timeline_parity_hint">对话行来自宿主投影（快照 + feed 增量 + 本地乐观气泡）。</string>
+    <string name="settings_timeline_shadow">shadow 对比（调试）</string>
+    <string name="settings_timeline_shadow_hint">双跑两套管线并输出差异日志。只在关掉统一投影后才有意义。</string>    <string name="notify_channel_chat">对话</string>
     <string name="notify_channel_attention">待处理</string>
     <string name="notify_done_title">%1$s 回复好了</string>
     <string name="notify_done_body">点开查看回复</string>

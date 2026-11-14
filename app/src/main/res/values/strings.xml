@@ -57,6 +57,11 @@
     <string name="chat_load_failed">Couldn’t load this conversation</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_send_failed">Message not sent: %1$s</string>
+    <string name="chat_pending_queued">Queued</string>
+    <string name="chat_pending_steering">Steering into the running turn…</string>
+    <string name="chat_pending_steer">Steer now</string>
+    <string name="chat_pending_recall">Recall</string>
+    <string name="chat_live_speaking">Speaking…</string>
     <string name="approval_waiting">Waiting for your approval</string>
     <string name="approval_reject">Reject</string>
     <string name="approval_allow_once">Allow once</string>
@@ -525,6 +530,13 @@
     <string name="voice_engine">Voice model</string>
     <string name="info_engine_required">Connect the local engine to configure this.</string>
     <string name="settings_privacy">Privacy &amp; sharing</string>
+    <string name="settings_timeline">Conversation timeline</string>
+    <string name="settings_timeline_pipeline">Pipeline</string>
+    <string name="settings_timeline_hint">The unified projection runs on the host plugin; turning it off falls back to the legacy pipeline (load + feed + follow). Debug only — keep it on unless asked.</string>
+    <string name="settings_timeline_parity">Unified timeline projection</string>
+    <string name="settings_timeline_parity_hint">Chat rows come from the host plugin’s timeline (snapshot + feed increments + local echo).</string>
+    <string name="settings_timeline_shadow">Shadow comparison (debug)</string>
+    <string name="settings_timeline_shadow_hint">Runs both pipelines and logs divergences. Only meaningful while the unified projection is off.</string>
     <string name="notify_channel_chat">Chat</string>
     <string name="notify_channel_attention">Needs attention</string>
     <string name="notify_done_title">%1$s finished</string>

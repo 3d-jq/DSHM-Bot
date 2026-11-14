@@ -22,6 +22,9 @@ class DshGoPreferencesTest {
         // timeline shadow（Phase 1a debug 双跑）默认关：主管线零影响。
         assertFalse(value.timelineShadow)
         assertFalse(DshGoPreferences().flag(DshGoPreferences.KEY_TIMELINE_SHADOW))
+        // timeline 主管线 kill-switch（Phase 1b）默认开：生产走新管线。
+        assertTrue(value.timelineParity)
+        assertTrue(DshGoPreferences().flag(DshGoPreferences.KEY_TIMELINE_PARITY))
     }
 
     @Test

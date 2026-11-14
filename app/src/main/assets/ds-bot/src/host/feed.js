@@ -76,7 +76,18 @@ export function install(rt) {
   ctx.on('session/event', (session, event) => {
     if (!watched()) return
     const botId = rt.chatOwners.get(session.id)
-    if (botId === undefined) return
+    if (botId === undefined) {
+      // A group chat's own Session: the room feed signal (mobile.js) tells old
+      // clients to re-read `room-chat`; the timeline delta carries the rows the
+      // event produced, with the round's running/speaking state alongside.
+      if (rt.roomOf(session.id) !== undefined && rt.timelineDelta !== undefined) {
+        const delta = rt.timelineDelta(session.id)
+        if (delta.rows.length > 0 || delta.reset === true) {
+          publish('timeline', { roomId: session.id, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows, running: delta.running === true, speaking: delta.speaking ?? null })
+        }
+      }
+      return
+    }
     for (const item of rt.displayItems(session.id, [event])) publish('message', { botId, sessionId: session.id, item })
     if (event.type === 'tool/call') live()
     // The unified timeline projection (projection.js): the rows the event produced,

@@ -76,9 +76,10 @@ class DshSessionRepositoryContractTest {
             assertEquals("s1", sent.optString("sessionId"))
             assertEquals(DshSessionRepository.PROMPT_MODE_QUEUE, sent.optString("mode"))
             assertEquals("Asia/Shanghai", sent.optString("clientTimeZone"))
+            // 附件块在前、文本在后（官方 conversation runtime 的 content 顺序，宪章 ⑤）。
             val content = sent.getJSONArray("content")
-            assertEquals("你好", content.getJSONObject(0).optString("text"))
-            assertEquals("receipt-a", content.getJSONObject(1).optString("receiptId"))
+            assertEquals("receipt-a", content.getJSONObject(0).optString("receiptId"))
+            assertEquals("你好", content.getJSONObject(1).optString("text"))
         }
     }
 

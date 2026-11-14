@@ -30,6 +30,7 @@ import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.remote.TimelineRequest
 import com.dshm.bot.data.remote.TimelineRow
+import com.dshm.bot.data.remote.TimelineRowPayload
 import com.dshm.bot.data.remote.TimelineSnapshot
 import com.dshm.bot.data.remote.parseTimelineFeedFrame
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -71,6 +72,12 @@ enum class ChatEntryKind {
 
     /** `answer`：用户回答过的提问（`AnsweredCell`：问题 + 选了哪些）。 */
     ANSWERED,
+
+    /**
+     * `inbox` 行（timeline 投影，Phase 1b）：排队（`next-turn`）/ 插话（`next-step`）
+     * 中的消息，可撤回 / 改插话（`session/updateQueue`）。认领后由 `user` 行接替。
+     */
+    PENDING,
 }
 
 /** 历史里「用户回答过的提问」。 */
@@ -189,6 +196,12 @@ data class ChatEntry(
     val images: Int = 0,
     /** 长文消息（`whole`）：正文折起，完整内容在附件里。 */
     val whole: ChatWholePost? = null,
+    /** [ChatEntryKind.PENDING] 行的队列槽位（`next-turn` 排队 / `next-step` 插话）。 */
+    val pendingSlot: String? = null,
+    /** [ChatEntryKind.PENDING] 行对应的发送 requestId（撤回 / 改插话回传给 `session/updateQueue`）。 */
+    val pendingRequestId: String? = null,
+    /** 群聊 live 行（round 进行中的回复占位）：`live===true` 画「发言中」态。 */
+    val live: Boolean = false,
 )
 
 /** 待发送的本地附件。 */
@@ -331,9 +344,9 @@ class BotChatViewModel internal constructor(
                     .collect { (enabled, prefs) ->
                         notifyEnabled = enabled
                         notifyPrefs = prefs
-                        // timeline shadow 的开关随偏好走（Phase 1a debug 双跑；
-                        // 没配 prefs 的测试/进程里保持关闭，主管线零影响）。
-                        applyTimelineShadowPref(prefs.timelineShadow)
+                        // timeline 模式随偏好走（Phase 1b parity 主开关 + 1a shadow 对比）；
+                        // 没配 prefs 的测试/进程里保持关闭，主管线零影响。
+                        applyTimelineMode()
                     }
             }
         }
@@ -391,8 +404,12 @@ class BotChatViewModel internal constructor(
     // region ---- timeline shadow（Phase 1a，debug 双跑；设计 docs/phase1-design.md §6）----
     // 同时跑旧管线（本类现状）与新管线（timeline 快照 + feed timeline 增量），对比器输出
     // 差异日志。**只读**：shadow 状态全在下面这组字段里，绝不写 _uiState / 主管线集合。
+    // Phase 1b 起行管线切主（parity）：parity 开着 shadow 自动关（两路合一，对比无意义）；
+    // parity 关掉回旧管线后它才重新有对比价值。
     private var shadowEnabled = false
     private var shadowJob: Job? = null
+    /** shadow 已点亮但快照还没拉：等旧管线首屏（load）完成后再拉，对比才有意义。 */
+    private var shadowPendingSnapshot = false
     /** 已见到的最大服务端 seq（断线重放游标）。 */
     private var shadowSeq = 0L
     private var shadowSnapshot: TimelineSnapshot? = null
@@ -400,6 +417,34 @@ class BotChatViewModel internal constructor(
     /** 行缓冲（key → row）；上限对齐设计 §3 的 ~600 行环形，超出丢最旧。 */
     private val shadowRows = LinkedHashMap<String, TimelineRow>()
     private val shadowComparator = TimelineShadowComparator()
+    // endregion
+
+    // region ---- timeline 主管线（Phase 1b/1c：parity 开启时 entries 的唯一来源）----
+    // entries = timeline 快照 + feed timeline 增量 + 本地乐观 echo，经 TimelineRowMapping
+    // 映射成 ChatEntry（TimelineRowMapping.kt）。旧管线的 load/feed message/follow 全部
+    // 保留为回滚路径，parity 关闭（kill-switch）或能力缺席时接管。
+    private var parityActive = false
+    private var parityTimelineJob: Job? = null
+    /** 已见到的最大服务端 seq（feed 断线重连的 since 重放游标）。 */
+    private var paritySeq = 0L
+    private var paritySnapshot: TimelineSnapshot? = null
+    private var paritySessionId: String? = null
+    /** 服务端投影的行缓冲（key → row）；earlier 分页的行按 seq 排序自然插前。 */
+    private val parityRows = LinkedHashMap<String, TimelineRow>()
+    /** earlier 分页游标（timeline 响应的 cursor），null = 没有更早的了。 */
+    private var parityCursor: JSONObject? = null
+    private var parityLoadingEarlier = false
+    /**
+     * 渲染键映射（数据键 → 渲染键）：user 行认领本地 echo 后渲染键保留 `p:<requestId>`，
+     * LazyColumn 元素原地过渡不换 key（设计 §2 规则 1）。
+     */
+    private val parityRenderKeys = HashMap<String, String>()
+    /** 本地乐观 echo 行（key = `p:<requestId>`）；认领（user 行）/ 失败时摘掉。 */
+    private val pendingEchoRows = LinkedHashMap<String, TimelineRow>()
+    /** echo 行的本地附件（缓存路径），认领后搬给 user 行，图片预览不闪。 */
+    private val pendingEchoAttachments = HashMap<String, List<ChatAttachmentItem>>()
+    /** 群聊帧的上一帧 running（true→false 边沿触发快照重拉收群产物卡）。 */
+    private var parityRoundRunning = false
     // endregion
 
     private val toolEvents = LinkedHashMap<Long, ChatEntry>()
@@ -541,11 +586,11 @@ class BotChatViewModel internal constructor(
                     }
                 }
             }
-            // 先读历史，别让补模型/探测目录的 state 调用挡住对话首屏。
+            // timeline 模式开关先算：parity 决定 load 是否短路（主路径不发旧历史请求）。
+            applyTimelineMode()
+            viewModelScope.launch { DsBotCapabilities.hello.collect { applyTimelineMode() } }
+            // 先读历史（parity 下短路）；shadow 的首拉也挂在它完成之后（旧侧先就位）。
             load(initial = true)
-            // shadow 的另一个开关来源：依赖注入位（JVM 测试用；生产恒 false，
-            // 真开关是 DshGoPreferences.timelineShadow，由上面 prefs 的 collect 驱动）。
-            applyTimelineShadowPref(dependencies.timelineShadow)
             viewModelScope.launch { repairModelIfNeeded() }
             refreshBotStatus()
             feedJob = viewModelScope.launch {
@@ -594,6 +639,9 @@ class BotChatViewModel internal constructor(
     /** 单聊订阅会话事件，把 DS Bot 网页端画在消息流里的 tool/call 事件补回来。 */
     private fun ensureFollow(session: String) {
         if (isGroup) return
+        // parity 主路径：tool/event 行由宿主投影承担，不再订阅 session/follow
+        // （回滚路径：kill-switch 关掉 parity 后这里恢复订阅）。
+        if (parityActive) return
         if (followSessionId == session && followStreamId != null) return
         followStreamId?.let { mux?.closeStream(it) }
         followSessionId = session
@@ -882,6 +930,11 @@ class BotChatViewModel internal constructor(
         )
         browserShotStore?.add(browserShotSessionId ?: sessionId ?: botId, shot, seq)
         while (browserShots.size > MAX_BROWSER_SHOTS) browserShots.removeAt(0)
+        // parity 主路径：缩略图拼在行管线 entries 的尾部（1c 换贴 turntail 行 seq）。
+        if (parityActive) {
+            rebuildParityEntries()
+            return
+        }
         mergeSessionEvents()
     }
 
@@ -947,6 +1000,8 @@ class BotChatViewModel internal constructor(
     }
 
     private fun mergeSessionEvents() {
+        // parity 主路径：tool/event/产物行由宿主投影的行流承担，旧拼装不跑（回滚路径）。
+        if (parityActive) return
         if (toolEvents.isEmpty() && browserShots.isEmpty() && sessionEvents.isEmpty()) return
         _uiState.update { state ->
             // 事件行都由下面的 incoming 重新灌入，base 里要把旧的同 id 行剥掉，
@@ -1214,13 +1269,25 @@ class BotChatViewModel internal constructor(
             attachmentCache?.save(sentAttachments)
         }
         seen.add(bubble.id)
-        // 点击那一帧就画出来，不等 HTTP / SSE 回显。
-        _uiState.update { state ->
-            state.copy(
-                sending = true,
-                error = null,
-                entries = state.entries + bubble,
-            )
+        if (parityActive) {
+            // parity 主路径：乐观行数据键 `p:<requestId>`（设计 §4），本地附件字节
+            // 预览留在 echo 行上（官方「本地字节直到回显」）。认领由 user 行的
+            // requestId 完成（渲染键保留 p: 前缀，元素原地过渡）。
+            pendingEchoRows[echoKeyOf(requestId)] = echoRowOf(requestId, text, bubble.attachmentItems, attachments)
+            pendingEchoAttachments[requestId] = bubble.attachmentItems
+            _uiState.update { state ->
+                state.copy(sending = true, error = null)
+            }
+            rebuildParityEntries()
+        } else {
+            // 点击那一帧就画出来，不等 HTTP / SSE 回显。
+            _uiState.update { state ->
+                state.copy(
+                    sending = true,
+                    error = null,
+                    entries = state.entries + bubble,
+                )
+            }
         }
         viewModelScope.launch {
             runCatching {
@@ -1260,6 +1327,11 @@ class BotChatViewModel internal constructor(
                 localUserEntries.remove(requestId)
                 unclaimedRequests.remove(requestId)
                 seen.remove(bubble.id)
+                if (parityActive) {
+                    pendingEchoRows.remove(echoKeyOf(requestId))
+                    pendingEchoAttachments.remove(requestId)
+                    rebuildParityEntries()
+                }
                 _uiState.update { state ->
                     state.copy(
                         sending = false,
@@ -1275,6 +1347,9 @@ class BotChatViewModel internal constructor(
 
     private fun load(initial: Boolean) {
         val connection = client ?: return
+        // parity 主路径：历史行走 timeline 快照/增量（applyTimelineMode 已拉过首屏快照）；
+        // notice/relay 触发的静默刷新也由行流承担。旧管线整个保留为回滚路径。
+        if (parityActive) return
         _uiState.update { state ->
             state.copy(
                 // 已有缓存或已加载内容时静默刷新，不回骨架屏。
@@ -1365,6 +1440,11 @@ class BotChatViewModel internal constructor(
      */
     fun loadEarlier() {
         val connection = client ?: return
+        // parity 主路径：timeline cursor 翻页（行按 seq 排序自然插前）。
+        if (parityActive) {
+            parityLoadEarlier()
+            return
+        }
         val current = cursor ?: return
         if (_uiState.value.loadingEarlier) return
         _uiState.update { it.copy(loadingEarlier = true, error = null) }
@@ -1405,6 +1485,12 @@ class BotChatViewModel internal constructor(
 
     private fun scheduleReload() {
         if (client == null) return
+        // parity 主路径：feed 的 room/hello/revision 触发的重拉 = seq 游标重放
+        // （断线重连丢的增量由宿主行缓冲按 since 补齐，设计 §3）。
+        if (parityActive) {
+            refreshTimelineSnapshot(reset = false)
+            return
+        }
         reloadJob?.cancel()
         reloadJob = viewModelScope.launch {
             delay(400)
@@ -1416,6 +1502,8 @@ class BotChatViewModel internal constructor(
         val data = runCatching { JSONObject(event.data) }.getOrNull() ?: return
         when (event.event) {
             "message" -> {
+                // parity 主路径：消息行走 feed `timeline` 增量，这里只留给回滚路径。
+                if (parityActive) return
                 val belongs = data.optString("botId") == botId || data.optString("sessionId") == sessionId
                 if (!belongs) return
                 val item = data.optJSONObject("item") ?: return
@@ -1534,11 +1622,14 @@ class BotChatViewModel internal constructor(
      * 偏好/能力变化时开关 shadow 双跑。
      *
      * 生效条件（设计 §6）：偏好或测试注入位请求 + 私聊先行（1a 不做群聊）+ 宿主 hello
-     * 声明了 `timeline` 能力。任一不满足 → 关（默认态），主管线照旧。
+     * 声明了 `timeline` 能力 + **parity 没开**（Phase 1b 起行管线切主，两路合一后
+     * shadow 无意义；关掉 parity 回旧管线后它才重新有对比价值）。
+     * 任一不满足 → 关（默认态），主管线照旧。
      */
     private fun applyTimelineShadowPref(prefOn: Boolean) {
         val want = (prefOn || dependencies.timelineShadow) &&
             !isGroup &&
+            !parityActive &&
             client != null &&
             DsBotCapabilities.timelineSupported()
         if (want == shadowEnabled) return
@@ -1546,13 +1637,16 @@ class BotChatViewModel internal constructor(
         if (!want) {
             shadowJob?.cancel()
             shadowJob = null
+            shadowPendingSnapshot = false
             shadowRows.clear()
             shadowSnapshot = null
             shadowSeq = 0L
             shadowSessionId = null
             return
         }
-        refreshShadowSnapshot(reset = true)
+        // 首拉延后：等旧管线首屏（load）把 entries 就位，shadow 对比才有意义
+        // （拉取点在 load onSuccess 的 refreshShadowSnapshotIfNeeded）。
+        shadowPendingSnapshot = true
     }
 
     /**
@@ -1579,16 +1673,22 @@ class BotChatViewModel internal constructor(
     /** load 学到会话 id 后补一次快照（shadow 开着且这个会话还没对齐过）。 */
     private fun refreshShadowSnapshotIfNeeded() {
         if (!shadowEnabled) return
+        val pending = shadowPendingSnapshot
         val current = sessionId ?: return
-        if (current == shadowSessionId) return
+        if (!pending && current == shadowSessionId) return
+        shadowPendingSnapshot = false
         refreshShadowSnapshot(reset = true)
     }
 
     /** feed `timeline` 增量：追行缓冲（按 key 去重）+ 对比；行流断档时重拉快照。 */
     private fun handleTimelineFeed(data: JSONObject) {
+        if (parityActive) {
+            handleParityTimelineFeed(data)
+            return
+        }
         if (!shadowEnabled) return
         val frame = parseTimelineFeedFrame(data) ?: return
-        frame.botId?.takeIf { it != botId }?.let { return }
+        if (!frameBelongsToSession(frame)) return
         if (frame.reset) {
             refreshShadowSnapshot(reset = true)
             return
@@ -1601,6 +1701,13 @@ class BotChatViewModel internal constructor(
         compareShadow()
     }
 
+    /** 增量帧的会话归属：单聊按 botId、群聊按 roomId（群聊行管线 1c 同构）。 */
+    private fun frameBelongsToSession(frame: com.dshm.bot.data.remote.TimelineFeedFrame): Boolean {
+        frame.botId?.takeIf { it != botId }?.let { return false }
+        frame.roomId?.takeIf { it != botId }?.let { return false }
+        return true
+    }
+
     /** 跑一次对比：旧管线当前 entries vs 行管线当前序列（均为只读快照）。 */
     private fun compareShadow() {
         shadowComparator.compare(
@@ -1609,6 +1716,343 @@ class BotChatViewModel internal constructor(
             newRows = shadowRows.values.sortedBy { it.seq ?: Long.MAX_VALUE },
             newSnapshot = shadowSnapshot,
         )
+    }
+
+    // endregion
+
+    // region ---- timeline 主管线（Phase 1b/1c：parity）----
+
+    /** 本地 echo 行的数据键（设计 §4：`p:<requestId>`）。 */
+    private fun echoKeyOf(requestId: String): String = "p:$requestId"
+
+    /** 构建本地乐观 echo 行（发送中态）：附件块在前文本在后，与官方 content 顺序一致。 */
+    private fun echoRowOf(
+        requestId: String,
+        text: String,
+        items: List<ChatAttachmentItem>,
+        drafts: List<ChatAttachmentDraft>,
+    ): TimelineRow = TimelineRow(
+        key = echoKeyOf(requestId),
+        kind = TimelineRow.KIND_USER,
+        seq = null,
+        turn = null,
+        timeMs = System.currentTimeMillis(),
+        payload = TimelineRowPayload.User(
+            text = text,
+            blocks = drafts.map { draft ->
+                JSONObject().put("type", if (draft.isImage) "image" else "file").put("name", draft.name)
+            },
+            images = drafts.count { it.isImage },
+            requestId = requestId,
+            live = false,
+        ),
+    )
+
+    /**
+     * 重算 timeline 模式开关（parity 主开关 + shadow 对比开关）。
+     *
+     * parity 生效条件（设计 §6）：`DshGoPreferences.timelineParity`（默认 true）或测试
+     * 注入位 + 宿主 hello 声明 `timeline` 能力。任一不满足 → 旧管线（回滚路径）。
+     * 切换即互相停开：parity 开 → 停 follow、拉快照；parity 关 → 清行缓冲、
+     * 恢复旧管线（load + ensureFollow），历史缓存照常重建，回滚数据无损。
+     */
+    private fun applyTimelineMode() {
+        // prefs 只在有设置存储时生效（JVM 测试无 appContext → 恒旧管线，
+        // 回滚路径的既有测试不被动）；测试用依赖注入位显式点亮。
+        val want = (dependencies.timelineParity ||
+            (settingsRepository != null && notifyPrefs.timelineParity)) &&
+            client != null &&
+            DsBotCapabilities.timelineSupported()
+        if (want != parityActive) {
+            parityActive = want
+            if (want) {
+                // 旧管线的输入停掉：follow 不再订阅（行流承担 tool/event 行）。
+                followStreamId?.let { mux?.closeStream(it) }
+                followStreamId = null
+                refreshTimelineSnapshot(reset = true)
+            } else {
+                parityTimelineJob?.cancel()
+                parityTimelineJob = null
+                parityRows.clear()
+                parityRenderKeys.clear()
+                pendingEchoRows.clear()
+                pendingEchoAttachments.clear()
+                paritySeq = 0L
+                parityCursor = null
+                paritySnapshot = null
+                paritySessionId = null
+                parityRoundRunning = false
+                // 回旧管线：重拉一次历史 + 重订 follow（回滚路径，代码保留）。
+                if (client != null) {
+                    load(initial = false)
+                    sessionId?.let { ensureFollow(it) }
+                }
+            }
+        }
+        // shadow 依赖 parity 的反面：无论 parity 是否翻转都重算一次
+        // （依赖注入位/hello 首次到达也要点亮 shadow）。
+        applyTimelineShadowPref(notifyPrefs.timelineShadow)
+    }
+
+    /**
+     * 拉一次 timeline 快照/重放：`reset` 全量重建行缓冲；否则带 `since` 做 feed 断线
+     * 重连的 seq 游标重放（设计 §3）。parity 下这是 entries 的唯一服务端来源。
+     */
+    private fun refreshTimelineSnapshot(reset: Boolean) {
+        val connection = client ?: return
+        parityTimelineJob?.cancel()
+        parityTimelineJob = viewModelScope.launch {
+            val request = TimelineRequest(
+                botId = botId.takeIf { !isGroup },
+                roomId = botId.takeIf { isGroup },
+                since = if (reset) null else paritySeq.takeIf { it > 0L },
+            )
+            val snapshot = runCatching { connection.timeline(request) }.getOrNull() ?: return@launch
+            paritySnapshot = snapshot
+            // 单聊快照带 sessionId：审批卡/附件发送的会话寻址跟着对齐。
+            snapshot.sessionId?.takeIf { it.isNotEmpty() }?.let { sessionId = it }
+            snapshot.seq?.let { if (it > paritySeq) paritySeq = it }
+            parityCursor = snapshot.cursor
+            if (reset) {
+                parityRows.clear()
+                parityRenderKeys.clear()
+            }
+            snapshot.rows.forEach { row -> absorbParityRow(row) }
+            rebuildParityEntries(
+                loading = false,
+                hasEarlier = snapshot.cursor != null,
+            )
+            if (reset) recomputeApprovals()
+        }
+    }
+
+    /**
+     * 吸收一行进行缓冲。
+     *
+     * 认领语义（设计 §2 规则 1 + §4）：`user` 行带 `requestId` 且本地有对应 echo 行 →
+     * 渲染键保留 `p:<requestId>`（元素原地过渡），本地附件预览搬过去；`inbox` 行带
+     * `requestId` → 替换掉同 requestId 的 echo 行（发送中 → 排队/插话）。
+     */
+    private fun absorbParityRow(row: TimelineRow) {
+        parityRows[row.key] = row
+        val requestId = when (val payload = row.payload) {
+            is TimelineRowPayload.User -> payload.requestId
+            is TimelineRowPayload.Inbox -> payload.requestId
+            else -> null
+        } ?: return
+        val echoKey = "p:$requestId"
+        if (row.kind == TimelineRow.KIND_USER) {
+            // 认领（设计 §4）：user 行接替发送中（p:）/排队/插话（inbox）行。
+            // echo 可能已被 inbox 行顶掉，所以本地归属用 pendingEchoAttachments 判定
+            // （send 记、失败清），两条来路都收口。
+            val hadEcho = pendingEchoRows.remove(echoKey) != null
+            if (hadEcho || pendingEchoAttachments.containsKey(requestId)) {
+                dropPendingInboxRowsOf(requestId)
+                parityRenderKeys[row.key] = echoKey
+                unclaimedRequests.remove(requestId)
+            }
+        } else if (row.kind == TimelineRow.KIND_INBOX) {
+            // 排队/插话行到达：替换掉同 requestId 的发送中 echo 行。
+            if (pendingEchoRows.remove(echoKey) != null) {
+                unclaimedRequests.remove(requestId)
+            }
+        }
+    }
+
+    /** 摘掉同 requestId 的排队/插话行（认领或撤回后它们就没有意义了）。 */
+    private fun dropPendingInboxRowsOf(requestId: String) {
+        val iterator = parityRows.entries.iterator()
+        while (iterator.hasNext()) {
+            val (key, existing) = iterator.next()
+            val payload = existing.payload as? TimelineRowPayload.Inbox ?: continue
+            if (payload.requestId == requestId) {
+                iterator.remove()
+                parityRenderKeys.remove(key)
+            }
+        }
+    }
+
+    /**
+     * 行缓冲 → entries 全量重建（parity 下唯一写 entries 的地方）。
+     *
+     * 排序：单聊有 seq 按升序归位、无 seq（echo/inbox/缩略图）追加尾部；**群聊保持
+     * 行缓冲的插入序**（宿主 roomItems 官方位置序原样透传，relay 回复行 seq=null，
+     * live 行同 key 原位替换，Phase 1c 实现级口径）。浏览器缩略图是客户端本地功能
+     * （宿主不投影），拼在最后。
+     */
+    private fun rebuildParityEntries(loading: Boolean? = null, hasEarlier: Boolean? = null) {
+        val mapped = ArrayList<ChatEntry>(parityRows.size + pendingEchoRows.size + browserShots.size)
+        for ((key, row) in parityRows) {
+            val renderKey = parityRenderKeys[key]
+            val echoRequestId = (row.payload as? TimelineRowPayload.User)?.requestId
+            val attachmentItems = echoRequestId?.let { pendingEchoAttachments[it] } ?: emptyList()
+            chatEntryOf(
+                row = row,
+                botName = botName,
+                renderKey = renderKey,
+                attachmentItems = attachmentItems,
+            )?.let(mapped::add)
+        }
+        // 本地 echo 行：无 seq，追加在已排序段尾部（乐观位置）。
+        for (echoRow in pendingEchoRows.values) {
+            chatEntryOf(echoRow, botName)?.let(mapped::add)
+        }
+        // 浏览器缩略图：1c 换贴 turntail 行的 seq；本轮先贴尾部。
+        for (shotEntry in browserShots) mapped.add(shotEntry)
+        val ordered = orderRowsAsEntries(mapped, isGroup)
+        _uiState.update { state ->
+            state.copy(
+                entries = ordered,
+                loading = loading ?: state.loading,
+                engineOff = false,
+                hasEarlier = hasEarlier ?: state.hasEarlier,
+                loadingEarlier = parityLoadingEarlier,
+            )
+        }
+    }
+
+    /** feed `timeline` 增量（parity 主路径）：吸收行 + 重建 entries；断档重拉快照。 */
+    private fun handleParityTimelineFeed(data: JSONObject) {
+        val frame = parseTimelineFeedFrame(data) ?: return
+        if (!frameBelongsToSession(frame)) return
+        if (frame.reset) {
+            refreshTimelineSnapshot(reset = true)
+            return
+        }
+        frame.seq?.let { if (it > paritySeq) paritySeq = it }
+        frame.rows.forEach { row -> absorbParityRow(row) }
+        while (parityRows.size > SHADOW_ROW_BUFFER_MAX * 2) {
+            parityRows.remove(parityRows.keys.first())
+        }
+        rebuildParityEntries()
+        // 群聊帧带 round 状态：活动状态行实时刷新（旧 room-progress 轮询保留为兜底，
+        // 设计 §5）。running 的 true→false 边沿 = 本轮收口：群产物卡只在 snapshot 里
+        // 聚合（宿主 room-artifacts 异步聚合不进帧），全量重拉快照拿新卡。
+        if (isGroup && frame.running != null) {
+            val wasRunning = parityRoundRunning
+            noteGroupRound(frame.running)
+            frame.speaking?.let { groupSpeakingId = it }
+            if (wasRunning && !frame.running) {
+                refreshTimelineSnapshot(reset = true)
+            }
+            parityRoundRunning = frame.running
+        }
+    }
+
+    /** parity 的 earlier 分页：timeline cursor 翻页。单聊行按 seq 排序自然插前；
+     *  群聊是位置序，新页的行要**前插**进行缓冲（LinkedHashMap 重建保序）。 */
+    private fun parityLoadEarlier() {
+        val connection = client ?: return
+        val cursor = parityCursor ?: return
+        if (parityLoadingEarlier) return
+        parityLoadingEarlier = true
+        rebuildParityEntries()
+        viewModelScope.launch {
+            val request = TimelineRequest(
+                botId = botId.takeIf { !isGroup },
+                roomId = botId.takeIf { isGroup },
+                cursor = cursor,
+            )
+            runCatching { connection.timeline(request) }
+                .onSuccess { snapshot ->
+                    if (snapshot == null) {
+                        // 接口默认实现 = 不支持（能力/接线缺位），静默收场。
+                        parityLoadingEarlier = false
+                        rebuildParityEntries()
+                        return@onSuccess
+                    }
+                    parityCursor = snapshot.cursor
+                    if (isGroup) {
+                        // 位置序：更早的页插在前面。
+                        val rebuilt = LinkedHashMap<String, TimelineRow>()
+                        snapshot.rows.forEach { row ->
+                            rebuilt[row.key] = row
+                            absorbEchoRelationsOf(row)
+                        }
+                        parityRows.forEach { (key, row) -> rebuilt[key] = row }
+                        parityRows.clear()
+                        parityRows.putAll(rebuilt)
+                    } else {
+                        snapshot.rows.forEach { row -> absorbParityRow(row) }
+                    }
+                    parityLoadingEarlier = false
+                    rebuildParityEntries(hasEarlier = snapshot.cursor != null)
+                }
+                .onFailure {
+                    parityLoadingEarlier = false
+                    rebuildParityEntries()
+                }
+        }
+    }
+
+    /** 群聊 earlier 前插时只做行替换，不走 absorbParityRow（避免动 echo 认领以外的状态）。 */
+    private fun absorbEchoRelationsOf(row: TimelineRow) {
+        val requestId = when (val payload = row.payload) {
+            is TimelineRowPayload.User -> payload.requestId
+            is TimelineRowPayload.Inbox -> payload.requestId
+            else -> null
+        } ?: return
+        if (row.kind == TimelineRow.KIND_USER) {
+            val echoKey = "p:$requestId"
+            val hadEcho = pendingEchoRows.remove(echoKey) != null
+            if (hadEcho || pendingEchoAttachments.containsKey(requestId)) {
+                dropPendingInboxRowsOf(requestId)
+                parityRenderKeys[row.key] = echoKey
+                unclaimedRequests.remove(requestId)
+            }
+        } else if (row.kind == TimelineRow.KIND_INBOX) {
+            if (pendingEchoRows.remove("p:$requestId") != null) {
+                unclaimedRequests.remove(requestId)
+            }
+        }
+    }
+
+    /**
+     * 撤回一条排队消息：`session/updateQueue {kind:'remove'}`（契约已锁）。
+     * 提交即本地摘行（引擎随后用行流确认），失败不回滚——重拉快照自愈。
+     */
+    fun recallPending(entry: ChatEntry) {
+        val itemId = entry.id.removePrefix("inbox:")
+        if (itemId.isEmpty()) return
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching {
+                connection.rpc(
+                    "session/updateQueue",
+                    JSONObject().put(
+                        "request",
+                        JSONObject()
+                            .put("sessionId", sessionId ?: botId)
+                            .put("itemId", itemId)
+                            .put("action", JSONObject().put("kind", "remove")),
+                    ),
+                )
+            }
+            // 乐观摘行：服务端的下一份快照/增量会给出真相。
+            parityRows.remove(entry.id)
+            rebuildParityEntries()
+        }
+    }
+
+    /** 把一条排队消息改成插话：`session/updateQueue {kind:'steer'}`（契约已锁）。 */
+    fun steerPending(entry: ChatEntry) {
+        val itemId = entry.id.removePrefix("inbox:")
+        if (itemId.isEmpty()) return
+        val connection = client ?: return
+        viewModelScope.launch {
+            runCatching {
+                connection.rpc(
+                    "session/updateQueue",
+                    JSONObject().put(
+                        "request",
+                        JSONObject()
+                            .put("sessionId", sessionId ?: botId)
+                            .put("itemId", itemId)
+                            .put("action", JSONObject().put("kind", "steer")),
+                    ),
+                )
+            }
+        }
     }
 
     // endregion
@@ -2080,11 +2524,16 @@ class BotChatViewModel internal constructor(
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
             // 本轮结束了还有没等到回显的本地气泡（feed 漏投、SSE 断流）：重拉一次历史，
             // 让正主把它换下来。自愈窗口从「下次任意重载」缩到「本轮结束」。
-            if (unclaimedRequests.isNotEmpty()) scheduleReload()
+            // 轮末自愈：还有没等到认领的本地气泡（echo 漏认领）→ parity 下重放游标
+            // 快照，旧管线走 scheduleReload。
+            if (unclaimedRequests.isNotEmpty()) {
+                if (parityActive) refreshTimelineSnapshot(reset = false) else scheduleReload()
+            }
             val phoneTaskDone = PhoneControlSession.consumeFor(botId)
             // 群成员跑在自己会话里，产物（`present`）也就落在那边：这一轮结束后
             // 去插件收一次，没人 `present` 时就退回「本轮被改动的文件」。
-            if (isGroup) {
+            // parity 主路径：群产物卡在 running→false 边沿的快照重拉里（宿主聚合）。
+            if (isGroup && !parityActive) {
                 refreshGroupArtifacts(connection, groupRoundStartedAt.takeIf { it > 0 } ?: watchStartedAt)
             }
             // 这一轮有没有产出都要判失败：DS Bot 的模型调用失败只写诊断不写 chat，
@@ -2096,8 +2545,9 @@ class BotChatViewModel internal constructor(
                 DshmAccessibilityService.current != null
             // 对齐 dsh-Go：无论这一轮有没有产出都查一次失败诊断（模型中途失败也
             // 不算「正常做完」，必须补一条错误行，不让失败静默）。已按 time 去重。
+            // parity 主路径：turnfail 行由宿主投影的 event 行承担，诊断行只留给回滚路径。
             var turnFailure: String? = null
-            if (!userStoppedRun) {
+            if (!userStoppedRun && !parityActive) {
                 turnFailure = reportTurnFailure(connection, watchStartedAt)
             }
             if (context != null && !showPhoneResult && turnFailure != null) {

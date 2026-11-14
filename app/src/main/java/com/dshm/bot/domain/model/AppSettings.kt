@@ -43,8 +43,17 @@ data class DshGoPreferences(
      * Phase 1a 的 timeline shadow 双跑开关（`docs/phase1-design.md` §6，debug 用）：
      * 开启后对话页同时跑旧管线与 timeline 行管线并输出对比日志，**不改变主管线行为**。
      * 生效还需引擎 hello 声明 `timeline` 能力（`DsBotCapabilities.timelineSupported()`）。
+     * Phase 1b 起主管线就是行管线，parity 开着时 shadow 无意义（自动关）；
+     * 只在关掉 parity 回旧管线后它才重新有对比价值。
      */
     val timelineShadow: Boolean = false,
+    /**
+     * Phase 1b 的 timeline 主管线 kill-switch（`docs/phase1-design.md` §6，默认 true）：
+     * true = 对话 entries 走「timeline 快照 + feed 增量 + 本地 echo」；false = 整条回
+     * 旧管线（load + feed message + session/follow，回滚路径，代码保留）。
+     * 生效还需引擎 hello 声明 `timeline` 能力；能力缺席一律旧管线。
+     */
+    val timelineParity: Boolean = true,
 ) {
     fun flag(key: String): Boolean = when (key) {
         KEY_NOTIFY_TURN_DONE -> notifyTurnDone
@@ -54,6 +63,7 @@ data class DshGoPreferences(
         KEY_FOLD_PROCESS -> foldProcess
         KEY_AUTO_START_LOCAL -> autoStartLocal
         KEY_TIMELINE_SHADOW -> timelineShadow
+        KEY_TIMELINE_PARITY -> timelineParity
         else -> error("未知的设置偏好 key: $key")
     }
 
@@ -68,6 +78,7 @@ data class DshGoPreferences(
             KEY_FOLD_PROCESS -> copy(foldProcess = value)
             KEY_AUTO_START_LOCAL -> copy(autoStartLocal = value)
             KEY_TIMELINE_SHADOW -> copy(timelineShadow = value)
+            KEY_TIMELINE_PARITY -> copy(timelineParity = value)
             else -> error("未知的设置偏好 key: $key")
         }
     }
@@ -80,6 +91,7 @@ data class DshGoPreferences(
         const val KEY_FOLD_PROCESS = "fold_process"
         const val KEY_AUTO_START_LOCAL = "auto_start_local"
         const val KEY_TIMELINE_SHADOW = "timeline_shadow"
+        const val KEY_TIMELINE_PARITY = "timeline_parity"
 
         val BOOLEAN_KEYS = listOf(
             KEY_NOTIFY_TURN_DONE,
@@ -89,6 +101,7 @@ data class DshGoPreferences(
             KEY_FOLD_PROCESS,
             KEY_AUTO_START_LOCAL,
             KEY_TIMELINE_SHADOW,
+            KEY_TIMELINE_PARITY,
         )
     }
 }

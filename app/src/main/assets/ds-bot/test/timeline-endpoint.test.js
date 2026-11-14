@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import { install as installFeed } from '../src/host/feed.js'
 import { install as installParts } from '../src/host/parts.js'
 import { install as installProjection } from '../src/host/projection.js'
 
@@ -63,13 +64,20 @@ function fakeRt() {
     botOf: id => (id === 'bot-1' ? { id: 'bot-1', name: '小助手' } : undefined),
     resolveAgent: async id => ({
       session: { seq: 15, header: { cwd: '/root/w' } },
-      inbox: { nextTurn: [{ id: 'q-1', message: { content: [{ type: 'text', text: '排队的问题' }], source: { kind: 'user', rpcId: 'r-9' } } }], nextStep: [] },
+      // Only the Bot's own chat queues through its agent inbox; a room's queue is
+      // the plugin's roomInbox (see the room tests).
+      inbox: id === 'sess-1'
+        ? { nextTurn: [{ id: 'q-1', message: { content: [{ type: 'text', text: '排队的问题' }], source: { kind: 'user', rpcId: 'r-9' } } }], nextStep: [] }
+        : { nextTurn: [], nextStep: [] },
     }),
     roomProgress: new Map([['call-x', { roomId: 'room-1', replies: [], speaking: 'b2' }]]),
+    // The plugin's own room queue (turns.js): posts waiting for the next relay.
+    roomInbox: new Map(),
     workDirOf: () => '/root/w',
   }
   installParts(rt)
   installProjection(rt)
+  installFeed(rt)
   return { rt, sessionListeners }
 }
 
@@ -167,6 +175,54 @@ test('a room answers with room rows and the round state; unknown bots are refuse
   await assert.rejects(() => rt.timelineEndpoint({ botId: 'ghost' }), /Unknown Bot/)
 })
 
+test('a running room splices its live replies, queues roomInbox rows, and parks the artifact card at the latest turn', async () => {
+  const { rt } = fakeRt()
+  // The round is still running: the relay call is in the log, its result is not,
+  // and two posts wait in the plugin's room inbox for the next relay.
+  const roomEvents = [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 4 } },
+    { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '大家看一下' }] } },
+    { type: 'tool/call', seq: 3, time: 1200, data: { turn: 4, callId: 'relay-9', name: 'group_relay', arguments: {} } },
+  ]
+  rt.ctx.sessionController.page = async () => ({ records: roomEvents.map(event => ({ event })), hasMore: false })
+  rt.roomProgress.set('relay-9', { roomId: 'room-1', replies: [{ kind: undefined, botId: 'b2', name: '写手', text: '先说结论', time: 1300 }], speaking: 'b2' })
+  rt.roomInbox.set('room-1', [{ text: '排队的第二条', rpcId: 'r-11' }])
+  rt.roomArtifacts = async () => ({ files: [{ path: '/root/w/报告.pptx', description: '定稿', botId: 'b2', name: '写手' }], changed: [] })
+  try {
+    const answer = await rt.timelineEndpoint({ roomId: 'room-1' })
+    assert.deepEqual(answer.rows.map(row => row.key), ['user:2', 'bot:relay-9:0', 'inbox:roominx:room-1:0', 'present:room-1:4'])
+    const live = answer.rows[1]
+    assert.equal(live.payload.live, true)
+    assert.equal(live.payload.text, '先说结论')
+    assert.equal(answer.rows[2].payload.slot, 'next-turn')
+    const card = answer.rows[3]
+    assert.equal(card.seq, 1, 'round 还在跑：卡停在最新轮的 turn/start')
+    assert.equal(card.payload.delivered, true)
+    assert.equal(card.payload.files[0].name, '写手')
+    assert.equal(answer.running, true)
+    assert.equal(answer.speaking, 'b2')
+  } finally {
+    rt.roomProgress.delete('relay-9')
+    rt.roomInbox.delete('room-1')
+    delete rt.roomArtifacts
+  }
+})
+
+test('a room feed delta carries the live rows plus the round state', async () => {
+  const { rt, sessionListeners } = fakeRt()
+  const seen = []
+  rt.subscribeFeed?.((event, data) => { if (event === 'timeline') seen.push(data) })
+  for (const handler of sessionListeners) handler({ id: 'room-1' }, { type: 'user/message', seq: 1, time: 1000, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '大家看一下' }] } })
+  const frames = seen.filter(frame => frame.roomId === 'room-1')
+  assert.ok(frames.length > 0, '房间事件没有发 timeline 增量')
+  const last = frames.at(-1)
+  assert.deepEqual(last.rows.map(row => row.key), ['user:1'])
+  // The fake rt's roomProgress keeps a round for room-1 (speaking 'b2'): the frame
+  // carries that state alongside the rows.
+  assert.equal(last.running, true)
+  assert.equal(last.speaking, 'b2')
+})
+
 test('channel wiring: timeline is a READ endpoint answered by case timeline', () => {
   const source = readFileSync(`${pluginRoot}src/host/channel.js`, 'utf8')
   const reads = /const READS = new Set\(\[([^\]]*)\]\)/.exec(source)?.[1] ?? ''
@@ -174,6 +230,12 @@ test('channel wiring: timeline is a READ endpoint answered by case timeline', ()
   assert.ok(/case 'timeline':/.test(source), 'handle 没有分流 timeline 端点')
   const mobile = readFileSync(`${pluginRoot}src/host/mobile.js`, 'utf8')
   assert.ok(/'timeline'/.test(mobile), 'mobile CAPABILITIES 没有声明 timeline')
+  // 兼容自证：旧群聊端点原样保留（官方网页端与旧管线都还在用它们）。
+  assert.ok(/async function roomChat\(/.test(mobile), 'room-chat 端点丢了')
+  assert.ok(/case 'room-chat': return roomChat\(body\)/.test(mobile), 'room-chat 分流丢了')
   const feed = readFileSync(`${pluginRoot}src/host/feed.js`, 'utf8')
   assert.ok(/publish\('timeline'/.test(feed), 'feed 没有发布 timeline 事件')
+  assert.ok(/roomId: session\.id/.test(feed), 'feed 的房间分支没有发群聊 timeline 增量')
+  const channel = readFileSync(`${pluginRoot}src/host/channel.js`, 'utf8')
+  assert.ok(/case 'room-progress':/.test(channel) && /case 'room-chat':/.test(channel), 'channel 的旧群聊端点丢了')
 })

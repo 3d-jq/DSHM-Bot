@@ -473,6 +473,8 @@ fun BotChatScreen(
                         onOpenExchange = { id -> exchangeWith = id },
                         onOpenBrowser = onOpenBrowser,
                         onEditMessage = { text -> draft = text },
+                        onRecallPending = viewModel::recallPending,
+                        onSteerPending = viewModel::steerPending,
                     )
                 }
             }
@@ -743,6 +745,10 @@ private fun ChatMessages(
     onLoadEarlier: () -> Unit = {},
     /** 长按用户气泡 → 编辑：把内容填回输入框。 */
     onEditMessage: (String) -> Unit = {},
+    /** 撤回一条排队中的消息（timeline 行管线的 `session/updateQueue {remove}`）。 */
+    onRecallPending: (ChatEntry) -> Unit = {},
+    /** 把一条排队中的消息改成插话（`session/updateQueue {steer}`）。 */
+    onSteerPending: (ChatEntry) -> Unit = {},
 ) {
     // 普通引用，不用 `mutableStateOf`：`onGloballyPositioned` 每帧都会触发，
     // 写快照状态会让滑动时整页跟着无效重组。
@@ -1016,21 +1022,33 @@ private fun ChatMessages(
                             )
                         },
                     )
-                    ChatEntryKind.BOT -> BotBubble(
-                        text = entry.text,
-                        author = entry.author,
-                        fontScale = fontScale,
-                        isGroup = bot.isGroup,
-                        showName = spacing.groupStart,
-                        botId = entry.botId,
-                        members = bot.roomMembers,
-                        adminId = bot.roomAdmin,
-                        onOpenMember = onOpenMember,
-                        timeMs = null,
-                        durationMs = null,
-                        whole = entry.whole,
-                        endpoint = endpoint,
-                    )
+                    ChatEntryKind.BOT -> Column {
+                        // 群聊 live 行（round 进行中的回复占位，settled 后同 key 原位替换）：
+                        // 画「发言中」小徽标，正文照常显示。
+                        if (entry.live) {
+                            Text(
+                                text = stringResource(R.string.chat_live_speaking),
+                                style = Dshm.typography.rowPreview,
+                                color = Dshm.colors.textTertiary,
+                                modifier = Modifier.padding(bottom = Dshm.spacing.xs),
+                            )
+                        }
+                        BotBubble(
+                            text = entry.text,
+                            author = entry.author,
+                            fontScale = fontScale,
+                            isGroup = bot.isGroup,
+                            showName = spacing.groupStart,
+                            botId = entry.botId,
+                            members = bot.roomMembers,
+                            adminId = bot.roomAdmin,
+                            onOpenMember = onOpenMember,
+                            timeMs = null,
+                            durationMs = null,
+                            whole = entry.whole,
+                            endpoint = endpoint,
+                        )
+                    }
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
                         // 点开的是目标（`openExchange`）。relay 事件的目标是发件人（`botId`）。
@@ -1090,6 +1108,16 @@ private fun ChatMessages(
                     } else {
                         AnsweredQuestionCard(answered = entry.answered)
                     }
+
+                    // inbox 行（timeline 行管线）：排队 / 插话中的消息。撤回与改插话
+                    // 只在单聊提供——群聊的排队真身在插件 roomInbox，行没有稳定
+                    // itemId，本轮只显示「谁在排队」（Phase 1c 实现级口径）。
+                    ChatEntryKind.PENDING -> PendingRow(
+                        entry = entry,
+                        isGroup = bot.isGroup,
+                        onRecall = onRecallPending,
+                        onSteer = onSteerPending,
+                    )
                 }
                 }
             }
@@ -1395,6 +1423,54 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
                 .clickable(onClick = onRetry)
                 .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
         )
+    }
+}
+
+/**
+ * inbox 行（timeline 行管线）：排队（`next-turn`）/ 插话（`next-step`）中的消息。
+ *
+ * 单聊带行内小动作（撤回 / 改插话，走 `session/updateQueue`）；群聊的排队真身在
+ * 插件 roomInbox、行没有稳定 itemId，只显示「谁在排队」不做操作。
+ */
+@Composable
+private fun PendingRow(
+    entry: ChatEntry,
+    isGroup: Boolean,
+    onRecall: (ChatEntry) -> Unit = {},
+    onSteer: (ChatEntry) -> Unit = {},
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.End,
+    ) {
+        Text(
+            text = if (entry.pendingSlot == "next-step") {
+                stringResource(R.string.chat_pending_steering)
+            } else {
+                stringResource(R.string.chat_pending_queued)
+            },
+            style = Dshm.typography.rowPreview,
+            color = Dshm.colors.textTertiary,
+        )
+        Text(
+            text = entry.text,
+            style = Dshm.typography.composerText,
+            color = Dshm.colors.textSecondary,
+        )
+        if (!isGroup) {
+            Row {
+                TextButton(onClick = { onSteer(entry) }) {
+                    Text(stringResource(R.string.chat_pending_steer), style = Dshm.typography.rowPreview)
+                }
+                TextButton(onClick = { onRecall(entry) }) {
+                    Text(
+                        stringResource(R.string.chat_pending_recall),
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.danger,
+                    )
+                }
+            }
+        }
     }
 }
 
