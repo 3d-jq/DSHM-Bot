@@ -529,6 +529,10 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   `BotChatDependencies`（remote / transport / speech / mux）与 `EngineSettingsRepositoryFactory`；
   「事件流 → 缓存 → 卡片」接线已由 `BotChatViewModelWiringTest` 覆盖，不再只靠插桩测。
 - 提问卡片已接选项与 `userQuestions/answer`；`ViewCard` / `BtwCard` 仍未接。
+- ☐ **群聊排队项撤回未做**（2026-11-14，新管线遗留）：单聊排队项可「改为插话 / 撤回」，
+  群聊 inbox 行只显示——群排队真身在插件 `roomInbox`（非 `agent.inbox`），行 key
+  `inbox:roominx:<roomId>:<i>` 是按位置生成的、**没有稳定 itemId**，无法定位到具体一条做撤回。
+  要做需要宿主侧给群排队项补稳定 id（`roomInbox` 存 posts 时带上）再透出行；属后续轮次。
 - 用 `java -cp` 手跑单测时**必须先 `cd app`**：`AppIconResourcesTest` /
   `LucideIconResourcesTest` 按相对路径找 `src/main/res`，在仓库根目录跑会假报缺资源。
 
