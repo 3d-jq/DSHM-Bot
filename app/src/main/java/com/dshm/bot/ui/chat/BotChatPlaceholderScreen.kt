@@ -879,6 +879,8 @@ private fun ChatMessages(
 
     // 长按已全部走 MessageActionSheet（面板里用系统 SelectionContainer 选字），
     // 聊天列表不再挂任何自定义选区层。
+    // 连续相同的事件行（retry 重灾区）折叠成一条「 ×N」，见 [foldRepeatedEventLines]。
+    val displayEntries = remember(entries) { foldRepeatedEventLines(entries) }
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
@@ -960,11 +962,13 @@ private fun ChatMessages(
                     }
                 }
             }
-            items(entries.size, key = { index -> entries[entries.size - 1 - index].id }) { index ->
-                val chrono = entries.size - 1 - index
-                val entry = entries[chrono]
+            items(displayEntries.size, key = { index -> displayEntries[displayEntries.size - 1 - index].entry.id }) { index ->
+                val chrono = displayEntries.size - 1 - index
+                val display = displayEntries[chrono]
+                val entry = display.entry
                 // 视觉相邻：older 在上面，newer 在下面（chronological 顺序）。
-                val older = entries.getOrNull(chrono - 1)
+                // 折叠组以代表条目参与间距规则（组内全是同款事件行，间距一致）。
+                val older = displayEntries.getOrNull(chrono - 1)?.entry
                 // 间距 / 分组只有一套规则：见 `chatItemSpacing`（流式态也用它）。
                 val spacing = chatItemSpacing(
                     spacing = Dshm.spacing,
@@ -1051,6 +1055,7 @@ private fun ChatMessages(
                             code = entry.eventCode,
                             timeMs = null,
                             botId = clickId,
+                            repeatCount = display.repeatCount,
                             // 工具事件行画的是「目标」，不套本对话 Bot 自己的头像。
                             bot = if (bot.isGroup || entry.tool != null) null else bot,
                             members = members,
@@ -1758,6 +1763,8 @@ private fun EventLine(
     code: String? = null,
     timeMs: Long? = null,
     botId: String? = null,
+    /** 连续相同事件行的折叠计数（>1 时文案尾部追加「 ×N」），见 [foldRepeatedEventLines]。 */
+    repeatCount: Int = 1,
     bot: ChatRowUi? = null,
     members: List<RoomMemberUi> = emptyList(),
     room: TeamRoomUi? = null,
@@ -1783,7 +1790,9 @@ private fun EventLine(
         is ChatRowUi -> subject.name
         else -> relaySenderName(name)
     }
-    val label = eventLineLabel(kind, subjectName, text, code)
+    val label = eventLineLabel(kind, subjectName, text, code).let { resolved ->
+        if (repeatCount > 1) "$resolved ×$repeatCount" else resolved
+    }
     // 失败类事件（failed / missed / cut）用危险色，跟普通事件行分开 ——
     // 否则「没能回答」看起来跟「查阅了自己的对话」一模一样，等于静默。
     val tone = chatEventTone(kind)
@@ -1869,7 +1878,7 @@ private fun EventLine(
 }
 
 /** relay 事件的种类：这些行的「谁」是对方 Bot，不是本对话的 Bot。 */
-private val RELAY_EVENT_KINDS = setOf("request", "reply", "report", "stopped")
+internal val RELAY_EVENT_KINDS = setOf("request", "reply", "report", "stopped")
 
 /**
  * 这些工具事件行是「跟别的 Bot / 群聊打了交道」，点得开对方对话。
