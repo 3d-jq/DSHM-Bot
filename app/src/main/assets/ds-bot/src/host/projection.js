@@ -326,18 +326,6 @@ export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } =
   return rows.filter(entry => !(entry.payload.state === 'running' && settled.has(entry.payload.callId)))
 }
 
-/** When the page's latest round began (the newest `turn/start` time), for
-    scoping the room artifacts window. 0 when the page holds no turn (callers
-    treat 0 as "no window", the old unbounded behaviour). */
-function roundStartMs(events) {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event?.type !== 'turn/start') continue
-    if (typeof event.time === 'number') return event.time
-  }
-  return 0
-}
-
 /** Rows a finished turn's deliverables make (official `deliverablesDefinition`
  * accumulator + `presentedForClosing`): declarations win over produced files;
  * within a turn each path appears once at its first declaration, carrying the
@@ -541,35 +529,13 @@ export function composeRoomRows({ events, baseItems, botName }) {
   return rows
 }
 
-/** The group's deliverable card (frozen key `present:<roomId>:<turn>`): one card
- * aggregating what the round delivered — members' `present` declarations collected
- * off the member Sessions (`rt.roomArtifacts`) first, then the files the round's
- * own Session folder saw change. `turn` is the room Session's latest turn; the
- * card sits at that turn's end (or its start while the round runs). */
-export function roomArtifactRow({ roomId, events, artifacts }) {
-  const traces = turnTracesOf(events)
-  const latest = traces.at(-1)
-  const turn = latest?.turn ?? 0
-  const seq = latest?.endSeq ?? latest?.startSeq ?? (events.length > 0 ? events.at(-1).seq : null)
-  const files = []
-  const seen = new Set()
-  for (const file of [...(artifacts?.files ?? []), ...(artifacts?.changed ?? [])]) {
-    if (typeof file?.path !== 'string' || file.path.trim() === '' || seen.has(file.path)) continue
-    seen.add(file.path)
-    files.push({
-      path: file.path,
-      description: typeof file.description === 'string' && file.description.trim() !== '' ? file.description.trim() : null,
-      ...(file.botId ? { botId: file.botId } : {}),
-      ...(file.name ? { name: file.name } : {}),
-    })
-  }
-  if (files.length === 0) return null
-  return row(`present:${roomId}:${turn}`, 'artifact', seq, turn, null, {
-    files,
-    delivered: (artifacts?.files ?? []).length > 0,
-    collapsedCount: COLLAPSED_ARTIFACTS,
-  })
-}
+/** The group's deliverable card was removed (2026-11-14): the official UI never
+ * renders one (the upstream `room-artifacts` endpoint has no consumer anywhere in
+ * DS-Bot, web client included), and its feeders cannot tell group work from a Bot's
+ * private work in the shared workspace. Group members' deliveries show in their own
+ * private chats, exactly as officially. */
+
+
 
 /** What a group still waits to relay, as tail rows. A room's queued posts live in
  * the plugin's own `roomInbox` (they drain into the next `group_relay`); the room
@@ -771,26 +737,13 @@ export function install(rt) {
       const queued = typeof rt.roomInbox?.get === 'function' ? rt.roomInbox.get(room.id) : undefined
       rows.push(...roomInboxRowsOf(queued, { roomId: room.id }))
       rows.push(...inboxRowsOf(agent.inbox === undefined ? undefined : { nextTurn: agent.inbox.nextTurn, nextStep: agent.inbox.nextStep }))
-      // The round's deliverables: members' `present` declarations (they live in the
-      // member Sessions) plus the files the round wrote without presenting — the
-      // `room-artifacts` aggregation, as one card at the latest room turn.
-      //
-      // The window matters: with `since = 0` both feeders go unbounded — member
-      // Sessions contribute *every* `deliverables/presented` in their newest page,
-      // and `recentFiles` walks the whole working folder, which is the shared team
-      // workspace (exactly where a Bot's private work lands). The card then lists the
-      // Bot's private-chat artifacts. Default the window to this round's start (the
-      // latest `turn/start`), the same scoping the official group window uses.
-      if (cursor === undefined && typeof rt.roomArtifacts === 'function') {
-        try {
-          const declared = Number.isInteger(body.artifactSince) && body.artifactSince > 0 ? body.artifactSince : undefined
-          const artifacts = await rt.roomArtifacts(room.id, declared ?? roundStartMs(events))
-          const card = roomArtifactRow({ roomId: room.id, events, artifacts })
-          if (card !== null) rows.push(card)
-        } catch (error) {
-          rt.warn?.('ds-bot: timeline artifacts for %s failed: %s', room.name ?? room.id, error?.message ?? error)
-        }
-      }
+      // 群聊**不画产物卡**（2026-11-14 定案，对齐官方）。上游 `room-artifacts` 端点
+      // 在 DS-Bot 全仓（含网页端 client.js）没有任何消费方 —— 官方群聊界面根本不显示
+      // 群级产物卡，所以是我们接上去的额外 UI。它的两条喂料在共用工作区上都不可信：
+      // 成员会话取最新一页里**每一个** present；`recentFiles` 按 mtime 扫
+      // `/root/.dsh/bot/workspace` —— 那是私聊与群聊**共用**的目录，谁写的分不出来。
+      // 结果就是把 Bot 私聊做的文档/图片全列进群卡（真机实证：6 个文件 mtime 全在
+      // 房间最后一轮之后、`delivered=false`）。群成员交付的文件看各自的私聊（官方同）。
       const roundState = roomStateOf(room.id)
       return {
         roomId: room.id,

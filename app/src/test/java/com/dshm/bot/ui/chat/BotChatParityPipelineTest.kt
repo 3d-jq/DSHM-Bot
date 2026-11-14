@@ -288,7 +288,7 @@ class BotChatParityPipelineTest {
         scheduler.runCurrent()
         assertEquals(1, api.timelineRequests.size)
 
-        // round 收口（true→false 边沿）：全量重拉快照（群产物卡只在 snapshot 里聚合）。
+        // round 收口（true→false 边沿）：全量重拉一次快照，把落定行对齐。
         api.emitTimeline(api.row("event:12", "event", 12L), isGroup = true, running = false)
         scheduler.runCurrent()
         assertEquals(2, api.timelineRequests.size)

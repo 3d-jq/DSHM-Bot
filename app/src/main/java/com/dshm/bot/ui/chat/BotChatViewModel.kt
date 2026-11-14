@@ -242,9 +242,6 @@ private data class PendingArtifactCall(
 /** 密钥卡答完后在 dock 里多留一会儿，让「已保存 / 已允许 / 已取消」看得见。 */
 private const val secretCardLingerMs = 20_000L
 
-/** 群产物卡在时间线里的固定 id（重载后按它替换，不重复贴）。 */
-private const val ROOM_ARTIFACTS_ID = "room-artifacts"
-
 /** DS Bot `secrets.js` 的 `MIN_VALUE`：一把钥匙至少 4 个字符。 */
 private const val SECRET_MIN_LENGTH = 4
 
@@ -416,7 +413,7 @@ class BotChatViewModel internal constructor(
     private val pendingEchoRows = LinkedHashMap<String, TimelineRow>()
     /** echo 行的本地附件（缓存路径），认领后搬给 user 行，图片预览不闪。 */
     private val pendingEchoAttachments = HashMap<String, List<ChatAttachmentItem>>()
-    /** 群聊帧的上一帧 running（true→false 边沿触发快照重拉收群产物卡）。 */
+    /** 群聊帧的上一帧 running（true→false 边沿 = 本轮收口，触发快照重拉对齐新行）。 */
     private var parityRoundRunning = false
     /** 诊断日志限频：同一会话两次「行应用」日志的最小间隔。 */
     private var lastParityLogAt = 0L
@@ -1147,8 +1144,8 @@ class BotChatViewModel internal constructor(
         rebuildParityEntries()
         logRowApplication("increment", frame.rows)
         // 群聊帧带 round 状态：活动状态行实时刷新（旧 room-progress 轮询保留为兜底，
-        // 设计 §5）。running 的 true→false 边沿 = 本轮收口：群产物卡只在 snapshot 里
-        // 聚合（宿主 room-artifacts 异步聚合不进帧），全量重拉快照拿新卡。
+        // 设计 §5）。running 的 true→false 边沿 = 本轮收口：全量重拉一次快照，
+        // 把这一轮的落定行（relay 回复从 live 换 settled 等）对齐。
         if (isGroup && frame.running != null) {
             val wasRunning = parityRoundRunning
             noteGroupRound(frame.running)
@@ -1285,7 +1282,7 @@ class BotChatViewModel internal constructor(
         groupSpeakingId = value.optString("speaking").takeIf { it.isNotEmpty() }
     }
 
-    /** 记下这一轮什么时候开始的：群产物只收这之后声明的文件。 */
+    /** 记下群聊这一轮在不在跑（帧里的 running）。 */
     private fun noteGroupRound(running: Boolean) {
         groupRoundRunning = running
     }

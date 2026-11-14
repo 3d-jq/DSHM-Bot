@@ -174,7 +174,7 @@ test('a room answers with room rows and the round state; unknown bots are refuse
   await assert.rejects(() => rt.timelineEndpoint({ botId: 'ghost' }), /Unknown Bot/)
 })
 
-test('a running room splices its live replies, queues roomInbox rows, and parks the artifact card at the latest turn', async () => {
+test('a running room splices its live replies and queues roomInbox rows, and paints no deliverable card', async () => {
   const { rt } = fakeRt()
   // The round is still running: the relay call is in the log, its result is not,
   // and two posts wait in the plugin's room inbox for the next relay.
@@ -186,44 +186,23 @@ test('a running room splices its live replies, queues roomInbox rows, and parks 
   rt.ctx.sessionController.page = async () => ({ records: roomEvents.map(event => ({ event })), hasMore: false })
   rt.roomProgress.set('relay-9', { roomId: 'room-1', replies: [{ kind: undefined, botId: 'b2', name: '写手', text: '先说结论', time: 1300 }], speaking: 'b2' })
   rt.roomInbox.set('room-1', [{ text: '排队的第二条', rpcId: 'r-11' }])
-  rt.roomArtifacts = async () => ({ files: [{ path: '/root/w/报告.pptx', description: '定稿', botId: 'b2', name: '写手' }], changed: [] })
+  // 群聊不画产物卡（2026-11-14）：端点也不该再被咨询分页产物。
+  const consulted = []
+  rt.roomArtifacts = async (roomId, since) => { consulted.push([roomId, since]); return { files: [], changed: [] } }
   try {
     const answer = await rt.timelineEndpoint({ roomId: 'room-1' })
-    assert.deepEqual(answer.rows.map(row => row.key), ['user:2', 'bot:relay-9:0', 'inbox:roominx:room-1:0', 'present:room-1:4'])
+    assert.deepEqual(answer.rows.map(row => row.key), ['user:2', 'bot:relay-9:0', 'inbox:roominx:room-1:0'])
+    assert.ok(answer.rows.every(row => row.kind !== 'artifact'), '群聊不该有产物卡行')
+    assert.deepEqual(consulted, [], '群聊不该再调 room-artifacts 聚合')
     const live = answer.rows[1]
     assert.equal(live.payload.live, true)
     assert.equal(live.payload.text, '先说结论')
     assert.equal(answer.rows[2].payload.slot, 'next-turn')
-    const card = answer.rows[3]
-    assert.equal(card.seq, 1, 'round 还在跑：卡停在最新轮的 turn/start')
-    assert.equal(card.payload.delivered, true)
-    assert.equal(card.payload.files[0].name, '写手')
     assert.equal(answer.running, true)
     assert.equal(answer.speaking, 'b2')
   } finally {
     rt.roomProgress.delete('relay-9')
     rt.roomInbox.delete('room-1')
-    delete rt.roomArtifacts
-  }
-})
-
-test('the room artifacts window defaults to the round start, keeping private-chat files out', async () => {
-  const { rt } = fakeRt()
-  // Two rounds in the page; the card sits at the latest one (turn 5, from 5000ms).
-  const roomEvents = [
-    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 4 } },
-    { type: 'turn/end', seq: 5, time: 1500, data: { turn: 4 } },
-    { type: 'turn/start', seq: 6, time: 5000, data: { turn: 5 } },
-  ]
-  rt.ctx.sessionController.page = async () => ({ records: roomEvents.map(event => ({ event })), hasMore: false })
-  const seen = []
-  rt.roomArtifacts = async (roomId, since) => { seen.push(since); return { files: [], changed: [] } }
-  try {
-    await rt.timelineEndpoint({ roomId: 'room-1' })
-    assert.deepEqual(seen, [5000], '窗口应默认成最新轮的 turn/start：0 会把私聊产物（共用工作区里更早的文件）也捞进来')
-    await rt.timelineEndpoint({ roomId: 'room-1', artifactSince: 2000 })
-    assert.equal(seen[1], 2000, '显式给的窗口优先')
-  } finally {
     delete rt.roomArtifacts
   }
 })

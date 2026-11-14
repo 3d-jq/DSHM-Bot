@@ -165,8 +165,8 @@ data class TimelineFeedFrame(
     val seq: Long?,
     val rows: List<TimelineRow>,
     /**
-     * 群聊帧的 round 状态（单聊缺席）：running 的 true→false 边沿触发快照重拉
-     * （群产物卡只在 snapshot 里聚合，宿主侧 room-artifacts 是异步聚合不进帧）。
+     * 群聊帧的 round 状态（单聊缺席）：running 的 true→false 边沿 = 本轮收口，
+     * 客户端重拉一次快照把落定行对齐（群聊不画产物卡，2026-11-14 对齐官方）。
      */
     val running: Boolean?,
     val speaking: String?,

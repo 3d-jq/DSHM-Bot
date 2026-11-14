@@ -1,7 +1,7 @@
 // Phase 1b/1c group-chat projection tests (frozen schema: room rows share the
-// private-chat kind set and key rules; the deliverable card is
-// `present:<roomId>:<turn>`; round events map to event rows with the shared
-// eventKind vocabulary). Fixtures use the real room-session event shapes
+// private-chat kind set and key rules; the group paints **no** deliverable card —
+// 2026-11-14, the official UI has none; round events map to event rows with the
+// shared eventKind vocabulary). Fixtures use the real room-session event shapes
 // (docs/timeline-parity.md rule ⑩).
 //
 // Run:  node --test --import ./test/stub-resolve.mjs test/room-projection.test.js
@@ -11,7 +11,6 @@ import { install as installParts } from '../src/host/parts.js'
 import {
   composeRoomRows,
   inboxRowsOf,
-  roomArtifactRow,
   roomInboxRowsOf,
 } from '../src/host/projection.js'
 import { replyItem, roomItems } from '../src/host/mobile.js'
@@ -103,32 +102,19 @@ test('round events never fold into a tool row: group_relay speaks through its re
   assert.ok(rows.every(row => row.kind !== 'tool'), '群聊不该有 group_relay 工具行')
 })
 
-test('the room deliverable card uses the frozen key present:<roomId>:<turn>', () => {
+test('the room paints no deliverable card at all (official UI has none)', () => {
   reset()
+  // 2026-11-14: the group card was removed — the upstream `room-artifacts` endpoint
+  // has no consumer in DS-Bot (web client included) and its feeders cannot tell
+  // group work from a Bot's private work in the shared workspace. The room rows must
+  // therefore never carry an `artifact` row, whatever the endpoint would return.
   const events = [
     event('turn/start', { turn: 3 }),
     event('user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: '做吧' }] }),
     event('turn/end', { turn: 3, reason: { kind: 'completed' } }),
   ]
-  const card = roomArtifactRow({
-    roomId: 'room-1',
-    events,
-    artifacts: {
-      files: [{ path: '/root/w/报告.pptx', description: '定稿', botId: 'b2', name: '写手' }],
-      changed: [{ path: '/root/w/报告.pptx' }, { path: '/root/w/笔记.md' }],
-    },
-  })
-  assert.equal(card.key, 'present:room-1:3')
-  assert.equal(card.seq, 3, '卡贴在该轮 turn/end')
-  assert.equal(card.payload.delivered, true)
-  assert.deepEqual(card.payload.files.map(file => file.path), ['/root/w/报告.pptx', '/root/w/笔记.md'])
-  assert.deepEqual(card.payload.files.map(file => file.name), ['写手', undefined])
-  // Nothing delivered and nothing changed: no card.
-  assert.equal(roomArtifactRow({ roomId: 'room-1', events, artifacts: { files: [], changed: [] } }), null)
-  // A room without turns still gets a card (turn 0), parked at the last event.
-  const card0 = roomArtifactRow({ roomId: 'room-1', events: [], artifacts: { files: [{ path: '/root/w/x.docx' }] } })
-  assert.equal(card0.key, 'present:room-1:0')
-  assert.equal(card0.seq, null)
+  const rows = baseRows(events)
+  assert.ok(rows.every(row => row.kind !== 'artifact'), '群聊不该有产物卡行')
 })
 
 test('the room queue (roomInbox) projects as tail inbox rows; kickoff and resume posts do not', () => {
@@ -150,14 +136,7 @@ test('the room queue (roomInbox) projects as tail inbox rows; kickoff and resume
 
 test('the private chat keeps its own key vocabulary; the room adds the roomId form', () => {
   reset()
-  // (private card first — the seq counter restarts for the room rows below)
-  // Frozen rule: private `present:<turn>` never grows a roomId.
-  const privateEvents = [
-    event('turn/start', { turn: 1 }),
-    event('turn/end', { turn: 1, reason: { kind: 'completed' } }),
-  ]
-  const privateCard = roomArtifactRow({ roomId: 'sess-1', events: privateEvents, artifacts: { files: [{ path: '/w/a.docx' }] } })
-  assert.equal(privateCard.key, 'present:sess-1:1', '群卡键总是带 roomId——单聊卡由 composeTimelineRows 出（present:<turn>），不受此函数影响')
+  // 群聊没有产物卡（2026-11-14 删）：私聊的 `present:<turn>` 是唯一产物卡键来源。
   // User rows: private keys by seq, the room by its item id (numeric seq for plain
   // messages, relay-scoped for round replies) — both under the `user:` prefix.
   reset()
