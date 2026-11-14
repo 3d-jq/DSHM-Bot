@@ -132,9 +132,15 @@ object DsBotParser {
     /**
      * `state.work` → 每个 Bot / 群聊的实时状态。
      *
-     * 对齐 DS Bot 的 `busyMembers` / 侧栏状态点：
+     * 对齐 DS Bot：侧栏/头像的状态是**按会话**算的（官方 `useSessionStatus(map.get(sessionId))`，
+     * `client.js:10237`），所以：
      * - `waiting`：`work.approvals` 里有它（等你批准）；
-     * - `running`：`work.bots[id]` 或 `work.rooms[某群]` 里有它（在干活）。
+     * - `running`：`work.bots[id]` 里**没有 `roomId`** 的那条（= 它自己的会话在跑）。
+     *
+     * ⚠️ `work.bots[id]` 带 `roomId` 的是**群回合**挂上来的（宿主 workView 对 groupOwned
+     * 的 session 会写 roomId）；`work.rooms[roomId][*]` 也是群回合的成员。
+     * 这两类都**不能**点亮 Bot 自己的行 —— 否则群里有成员在干活时，私聊那个 Bot 的头像
+     * 也会出现运行圈（用户真机报过）。群回合的状态只点亮群行。
      */
     private fun liveStatusOf(state: JSONObject): LiveStatus {
         val work = state.optJSONObject("work") ?: return LiveStatus()
@@ -151,17 +157,14 @@ object DsBotParser {
         }
         work.optJSONObject("bots")?.let { running ->
             running.keys().forEach { id ->
+                // 带 roomId = 群回合的工作：不点亮这个 Bot 自己的行（群行单独亮）。
+                if (running.optJSONObject(id)?.optString("roomId").orEmpty().isNotEmpty()) return@forEach
                 if (bots[id] == null) bots[id] = "running"
             }
         }
         work.optJSONObject("rooms")?.let { byRoom ->
             byRoom.keys().forEach { roomId ->
-                byRoom.optJSONArray(roomId)?.let { entries ->
-                    for (index in 0 until entries.length()) {
-                        val botId = entries.optJSONObject(index)?.optString("botId").orEmpty()
-                        if (botId.isNotEmpty() && bots[botId] == null) bots[botId] = "running"
-                    }
-                }
+                // 群里忙碌的成员只点亮群行；不再回填到 bots（群工作 ≠ 该 Bot 自己的会话在跑）。
                 if (rooms[roomId] == null && (byRoom.optJSONArray(roomId)?.length() ?: 0) > 0) {
                     rooms[roomId] = "running"
                 }

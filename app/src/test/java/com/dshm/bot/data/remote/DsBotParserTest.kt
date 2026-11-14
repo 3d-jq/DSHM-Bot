@@ -13,6 +13,52 @@ import org.junit.Test
 /** DS Bot `state` → 列表行：形状、颜色、隐藏项、缺省值都不能悄悄漂移。 */
 class DsBotParserTest {
 
+    /** 群里的工作不能点亮 Bot 自己的行（官方按会话状态：`useSessionStatus`）。 */
+    @Test
+    fun groupWorkDoesNotLightTheBotsOwnRow() {
+        val state = JSONObject(
+            """
+            {
+              "bots": [{"id": "bot-a", "name": "A"}, {"id": "bot-b", "name": "B"}],
+              "rooms": [{"id": "room-1", "name": "群", "members": ["bot-a", "bot-b"]}],
+              "work": {
+                "bots": {
+                  "bot-a": {"since": 1},
+                  "bot-b": {"since": 1, "roomId": "room-1"}
+                },
+                "rooms": {"room-1": [{"botId": "bot-b", "since": 1}]}
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val rows = DsBotParser.parseState(state)
+        val botA = rows.first { it.id == "bot-a" }
+        val botB = rows.first { it.id == "bot-b" }
+        val room = rows.first { it.isGroup }
+
+        assertEquals("自己的会话在跑 → 亮", "running", botA.activity)
+        assertNull("仅在群里跑（work.bots 带 roomId）→ 不该亮", botB.activity)
+        assertEquals("群行自己亮", "running", room.activity)
+    }
+
+    @Test
+    fun groupRoundMembersAloneDoNotLightTheBotRow() {
+        val state = JSONObject(
+            """
+            {
+              "bots": [{"id": "bot-a", "name": "A"}],
+              "rooms": [{"id": "room-1", "name": "群", "members": ["bot-a"]}],
+              "work": {"bots": {}, "rooms": {"room-1": [{"botId": "bot-a", "since": 1}]}}
+            }
+            """.trimIndent(),
+        )
+
+        val rows = DsBotParser.parseState(state)
+        assertNull("群回合成员不算该 Bot 自己在跑", rows.first { it.id == "bot-a" }.activity)
+        assertEquals("running", rows.first { it.isGroup }.activity)
+    }
+
     @Test
     fun fallsBackToTheIdDefaultWhenABotHasNoColour() {
         val state = JSONObject(
