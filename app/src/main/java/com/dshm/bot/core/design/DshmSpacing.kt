@@ -100,6 +100,8 @@ data class DshmSpacing(
     val selectionTick: Dp = 20.dp,
     /** 引擎状态环的描边宽度（dsh-Go 的 EngineRing）。 */
     val ringStroke: Dp = 2.5.dp,
+    /** 强调色圆点 / 色板小底的直径（个性化强调色圆点、背景设置图标底）。 */
+    val accentSwatch: Dp = 28.dp,
     /** 日志井的最小高度。 */
     val logWellMin: Dp = 260.dp,
     /** 日志井的最大高度。 */

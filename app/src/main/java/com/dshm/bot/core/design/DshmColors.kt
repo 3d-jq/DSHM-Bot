@@ -56,6 +56,8 @@ data class DshmColors(
     val terminalBackground: Color,
     /** 终端文字。 */
     val terminalText: Color,
+    /** GitHub 品牌色（图标用，明暗主题同值——品牌色不随主题变）。 */
+    val githubBrand: Color,
 ) {
     companion object {
         val Light = DshmColors(
@@ -88,6 +90,7 @@ data class DshmColors(
             warning = Color(0xFFB26A00),
             terminalBackground = Color(0xFF15161A),
             terminalText = Color(0xFFE8E8EA),
+            githubBrand = Color(0xFF181717),
         )
 
         val Dark = DshmColors(
@@ -119,6 +122,7 @@ data class DshmColors(
             warning = Color(0xFFFFC46B),
             terminalBackground = Color(0xFF0B0C0E),
             terminalText = Color(0xFFE8E8EA),
+            githubBrand = Color(0xFF181717),
         )
     }
 }
