@@ -304,4 +304,141 @@ class DshMuxTest {
             settle()
         }
     }
+
+    /**
+     * 读线程（onFrame / onLinkLost / ready 重开）与 openStream / closeStream 并发操作
+     * streams：修复前读线程对 LinkedHashMap 的访问没有任何锁，会 CME / 结构损坏。
+     * 这条测试把 get、remove、遍历 fail、遍历重开四种访问搅在一起锁住并发语义。
+     */
+    @Test
+    fun streamBookkeepingSurvivesConcurrentFramesAndReconnects() = runBlocking {
+        val links = java.util.Collections.synchronizedList(mutableListOf<FakeMuxLink>())
+        val mux = newMux(this, links)
+        try {
+            mux.start()
+            settle()
+            links.last().deliverHostEvent(ready())
+            settle()
+
+            val errors = mutableListOf<Throwable>()
+            val liveIds = java.util.concurrent.ConcurrentLinkedQueue<String>()
+            // 模拟 OkHttp 读线程：FakeMuxLink 的 deliver 直接在调用线程上触发 onFrame。
+            val reader = Thread {
+                try {
+                    repeat(6_000) { round ->
+                        val link = synchronized(links) { links.lastOrNull() } ?: return@repeat
+                        if (round % 500 == 499) {
+                            // 触发 onLinkLost：快照遍历 streams 并 fail 全部逻辑流；
+                            // 对已被替代的旧链路重复 lose，顺带压到「令牌比较」守卫。
+                            link.lose("并发测试断链")
+                        } else {
+                            val known = liveIds.peek() ?: "ghost-$round"
+                            val type = if (round % 4 == 3) "end" else "item"
+                            link.deliver(
+                                JSONObject()
+                                    .put("type", type)
+                                    .put("streamId", known)
+                                    .put("value", JSONObject().put("n", round)),
+                            )
+                        }
+                    }
+                } catch (t: Throwable) {
+                    synchronized(errors) { errors += t }
+                }
+            }
+            reader.start()
+
+            // 主协程交替开流 / 关流；delay 让 closeStream 的 launch 体真正跑起来，
+            // 同时补 ready 让 ready 分支的「重开全部逻辑流」遍历跑起来。
+            repeat(120) { round ->
+                liveIds.add(mux.openStream("session/follow", JSONObject(), onFrame = {}, onEnd = {}))
+                delay(2)
+                if (round % 2 == 0) liveIds.poll()?.let { mux.closeStream(it) }
+                synchronized(links) { links.lastOrNull() }?.deliverHostEvent(ready("client-$round"))
+                delay(2)
+            }
+            reader.join(15_000)
+            assertTrue("读线程不该有异常：${errors.firstOrNull()}", errors.isEmpty())
+        } finally {
+            mux.close()
+            settle()
+        }
+    }
+
+    /** 断链 fail 与用户 closeStream 竞争同一条流时，onEnd 只能发一次。 */
+    @Test
+    fun aStreamEndsAtMostOnceWhenLostAndClosedRace() = runBlocking {
+        val links = mutableListOf<FakeMuxLink>()
+        val mux = newMux(this, links)
+        try {
+            mux.start()
+            settle()
+            links.last().deliverHostEvent(ready())
+            settle()
+
+            val ends = mutableListOf<String?>()
+            val streamId = mux.openStream(
+                endpoint = "session/follow",
+                args = JSONObject(),
+                onFrame = {},
+                onEnd = { reason -> synchronized(ends) { ends.add(reason) } },
+            )
+            settle()
+
+            // 先断链（fail("网络断了")，句柄仍留在表里等重开），紧接着用户关流再 fail 一次。
+            links.last().lose("网络断了")
+            mux.closeStream(streamId)
+            settle()
+
+            assertEquals("同一条流的 onEnd 只许发一次：$ends", 1, ends.size)
+            assertEquals("网络断了", ends.single())
+        } finally {
+            mux.close()
+            settle()
+        }
+    }
+
+    /** 旧链路迟到的失败回调不许清掉新一代（令牌比较挡在 linkLock 里）。 */
+    @Test
+    fun aStaleLinkLostCallbackDoesNotTearDownTheNewGeneration() = runBlocking {
+        val links = mutableListOf<FakeMuxLink>()
+        val mux = newMux(this, links)
+        try {
+            mux.start()
+            settle()
+            links.last().deliverHostEvent(ready("client-1"))
+            settle()
+
+            val firstLink = links.last()
+            val ends = mutableListOf<String?>()
+            mux.openStream(
+                endpoint = "session/follow",
+                args = JSONObject(),
+                onFrame = {},
+                onEnd = { reason -> synchronized(ends) { ends.add(reason) } },
+            )
+            settle()
+
+            // 第一代断开 → 重连出第二代（同一条流在新一代里重开）。
+            firstLink.lose("网络断了")
+            settle()
+            links.last().deliverHostEvent(ready("client-2"))
+            settle()
+            assertEquals("client-2", mux.generation!!.clientId)
+            assertEquals(2, mux.generation!!.number)
+            assertEquals(1, ends.size)
+
+            // 旧链路的 onLost 迟到再触发一次（FakeMuxLink 不做幂等，正合适）。
+            firstLink.lose("迟到的断链回调")
+            settle()
+
+            // 新一代必须完好：generation 没被顶掉，逻辑流没有被再次 fail。
+            assertEquals("client-2", mux.generation!!.clientId)
+            assertEquals(2, mux.generation!!.number)
+            assertEquals("迟到的回调不能再次 fail 逻辑流：$ends", 1, ends.size)
+        } finally {
+            mux.close()
+            settle()
+        }
+    }
 }

@@ -5,12 +5,30 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Before
 import org.junit.Test
 
 /** 冷启动时引擎接口可能还没就绪：要能自愈，但不能把真实故障吞掉。 */
 class DsBotRepositoryTest {
+
+    private val defaultSink = DshMuxLog.sink
+
+    /**
+     * feed 断线会写 DshMuxLog（logcat 埋点）：本测试的 FakeDshServer 对 feed 回 404，
+     * 断线重连路径必走。JVM 单测里 android.util.Log 没 mock，换掉 sink。
+     */
+    @Before
+    fun muteLogs() {
+        DshMuxLog.sink = { }
+    }
+
+    @After
+    fun restoreLogs() {
+        DshMuxLog.sink = defaultSink
+    }
 
     @Test
     fun retriesInitialFetchWhileEngineIsStarting() {

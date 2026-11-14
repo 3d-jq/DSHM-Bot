@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 
 /** mux 连接状态。 */
@@ -63,6 +64,13 @@ class DshMux(
     private val lock = Mutex()
     private val random = Random.Default
 
+    /**
+     * 链路字段的写锁：`link` 的赋值 / 令牌比较置空都必须在这把锁里做，
+     * 读线程（WebSocket 回调）与 runLoop 协程才不会看到中间态。
+     * 读侧只做 `@Volatile` 读，不进锁。
+     */
+    private val linkLock = Any()
+
     private val _state = MutableStateFlow(DshMuxState.IDLE)
     val state: StateFlow<DshMuxState> = _state.asStateFlow()
 
@@ -82,13 +90,28 @@ class DshMux(
     /** 当前代里还没被应答/取消的主机请求，按到达顺序。 */
     private val pending = LinkedHashMap<String, DshHostEvent>()
 
-    /** 本代已经打开的逻辑流（断线后要重开）。 */
+    /**
+     * 本代已经打开的逻辑流（断线后要重开）。
+     *
+     * 读写线程规则：openStream / closeStream / close 在协程里改它，onFrame /
+     * onLinkLost / ready 重开在读线程上读它 —— 两边共用 [streams] 这把监视锁，
+     * 回调一律在锁外执行，避免用户回调里再动 mux 时死锁。
+     */
     private val streams = LinkedHashMap<String, DshStreamHandle>()
 
+    /** 当前物理链路；写与「令牌比较后置空」都进 [linkLock]。 */
+    @Volatile
     private var link: DshMuxLink? = null
+
+    /** 当前链路的 `$events` 流 id；随 [link] 一起在 [linkLock] 里换。 */
+    @Volatile
     private var eventsStreamId: String? = null
+
     private var generationCounter = 0
     private var attempt = 0
+
+    /** 关闭标记：读线程在 onLinkLost 里也要看它，必须保证可见。 */
+    @Volatile
     private var closed = false
     private var everConnected = false
     private var connectJob: Job? = null
@@ -138,12 +161,15 @@ class DshMux(
                 closed = true
                 retryJob?.cancel()
                 connectJob?.cancel()
-                link?.close(1000, "client closed")
-                link = null
+                // link 的写与 onLinkLost 的令牌比较共用 linkLock，避免与读线程的收尾互踩。
+                synchronized(linkLock) {
+                    link?.close(1000, "client closed")
+                    link = null
+                    eventsStreamId = null
+                }
                 generation = null
-                eventsStreamId = null
                 synchronized(pending) { pending.clear() }
-                streams.clear()
+                synchronized(streams) { streams.clear() }
                 _state.value = DshMuxState.CLOSED
             }
         }
@@ -164,7 +190,7 @@ class DshMux(
         val handle = DshStreamHandle(streamId, endpoint, args, onFrame, onEnd)
         scope.launch {
             lock.withLock {
-                streams[streamId] = handle
+                synchronized(streams) { streams[streamId] = handle }
                 link?.let { sendOpen(it, handle) }
             }
         }
@@ -175,7 +201,9 @@ class DshMux(
     fun closeStream(streamId: String) {
         scope.launch {
             lock.withLock {
-                streams.remove(streamId)?.let { handle ->
+                // 锁内只做摘表，fail 回调（用户代码）在锁外发。
+                val handle = synchronized(streams) { streams.remove(streamId) }
+                if (handle != null) {
                     link?.cancel(handle.streamId)
                     handle.fail("stream closed")
                 }
@@ -208,8 +236,8 @@ class DshMux(
             awaitReadyOrLoss(newLink)
             if (closed) return
             if (generation == null) {
-                // 没等到 ready —— 重试。
-                scheduleRetry("ready 超时")
+                // 没等到 ready —— 链路已断。收尾（包括 ready 超时那条路）和重试
+                // 都已在 onLinkLost 里做完，这里再排一次会让 attempt 一口气涨两格。
                 return
             }
             // 拿到 ready 了 —— 这一代就交给 onLinkLost 管，
@@ -220,8 +248,10 @@ class DshMux(
 
     private suspend fun openLink(newLink: DshMuxLink): Boolean {
         val eventsId = UUID.randomUUID().toString()
-        link = newLink
-        eventsStreamId = eventsId
+        synchronized(linkLock) {
+            link = newLink
+            eventsStreamId = eventsId
+        }
         newLink.start(
             onFrame = { frame -> onFrame(newLink, frame) },
             onLost = { reason -> onLinkLost(newLink, reason) },
@@ -256,17 +286,19 @@ class DshMux(
             onEventsFrame(source, frame)
             return
         }
-        val handle = streams[streamId] ?: return
+        // 读线程与 openStream / closeStream / close 并发访问 streams：统一走同一把锁。
+        // handle 的回调在锁外发，用户回调里再动 mux（如 closeStream）也不会死锁。
+        val handle = synchronized(streams) { streams[streamId] } ?: return
         when (frame.optString("type")) {
             DshMuxFrame.TYPE_ITEM -> handle.onFrame(frame.opt("value") as? JSONObject ?: JSONObject())
             DshMuxFrame.TYPE_END -> {
-                streams.remove(streamId)
-                handle.onEnd(null)
+                synchronized(streams) { streams.remove(streamId) }
+                handle.end(null)
             }
 
             DshMuxFrame.TYPE_ERROR -> {
-                streams.remove(streamId)
-                handle.onEnd(DshMuxFrame.errorOf(frame))
+                synchronized(streams) { streams.remove(streamId) }
+                handle.end(DshMuxFrame.errorOf(frame))
             }
         }
     }
@@ -302,8 +334,8 @@ class DshMux(
             _state.value = DshMuxState.CONNECTED
             DshMuxLog.log("ready clientId=${event.clientId} gen=${newGeneration.number}")
             scope.launch { _generations.emit(newGeneration) }
-            // 重开上一代的逻辑流。
-            streams.values.toList().forEach { sendOpen(source, it) }
+            // 重开上一代的逻辑流：快照后再发送，遍历期间不与 openStream / closeStream 并发改表。
+            synchronized(streams) { streams.values.toList() }.forEach { sendOpen(source, it) }
             return
         }
         when (event) {
@@ -322,13 +354,18 @@ class DshMux(
 
     private fun onLinkLost(source: DshMuxLink, reason: String) {
         DshMuxLog.log("link lost: $reason")
-        if (source !== link) return
-        link = null
-        eventsStreamId = null
+        // 令牌比较后原子置空（linkLock 内一次做完）：只有「仍是当前链路」的丢失才触发收尾。
+        // 旧链路迟到的失败回调在这里被挡住，不会清掉新一代的 generation / streams。
+        synchronized(linkLock) {
+            if (link !== source) return
+            link = null
+            eventsStreamId = null
+        }
         generation = null
         synchronized(pending) { pending.clear() }
-        // 逻辑流全部失效 —— 重连后重开。
-        streams.values.toList().forEach { it.fail(reason) }
+        // 逻辑流全部失效 —— 重连后重开。快照后在锁外 fail（回调可能再进 mux）。
+        val stale = synchronized(streams) { streams.values.toList() }
+        stale.forEach { it.fail(reason) }
         if (closed) return
         if (!autoReconnect) {
             _state.value = DshMuxState.IDLE
@@ -375,6 +412,14 @@ class DshMux(
         val onFrame: (JSONObject) -> Unit,
         val onEnd: (String?) -> Unit,
     ) {
-        fun fail(reason: String) = onEnd(reason)
+        /** 终态只发一次：断链 fail 与后到的 end / error 帧可能指向同一条流。 */
+        private val finished = AtomicBoolean(false)
+
+        fun fail(reason: String) = end(reason)
+
+        fun end(reason: String?) {
+            if (!finished.compareAndSet(false, true)) return
+            onEnd(reason)
+        }
     }
 }

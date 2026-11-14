@@ -4,8 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
+import java.io.InputStream
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.util.UUID
 
@@ -140,6 +141,10 @@ class PluginMarketRepository(private val client: DshClient) {
     }
 
     private fun download(url: String): String {
+        // 索引地址可能是用户在 plugin-market 设置里配的：先把 scheme 挡住，
+        // file:// 之类会在下面强转 HttpURLConnection 时直接崩。
+        val scheme = runCatching { URI(url).scheme?.lowercase() }.getOrNull()
+        require(scheme == "http" || scheme == "https") { "索引地址必须是 http(s)：$url" }
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 60_000
@@ -149,13 +154,28 @@ class PluginMarketRepository(private val client: DshClient) {
         try {
             val code = connection.responseCode
             require(code in 200..299) { "HTTP $code" }
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-            require(text.length <= MAX_INDEX_CHARS) { "索引太大（${text.length} 字符）" }
-            return text
+            // 流式读取并逐块检查上限：先 readText 再查长度来不及 —— OOM 发生在检查之前。
+            return readWithLimit(connection.inputStream)
         } finally {
             connection.disconnect()
         }
+    }
+
+    /** 分块读取，累计超过 [MAX_INDEX_CHARS] 立即中断，不等全文进内存。 */
+    private fun readWithLimit(stream: InputStream): String {
+        val out = StringBuilder()
+        val buffer = CharArray(16 * 1024)
+        stream.bufferedReader(Charsets.UTF_8).use { reader ->
+            while (true) {
+                val count = reader.read(buffer)
+                if (count < 0) break
+                out.append(buffer, 0, count)
+                if (out.length > MAX_INDEX_CHARS) {
+                    throw IllegalStateException("索引太大（超过 ${MAX_INDEX_CHARS} 字符上限）")
+                }
+            }
+        }
+        return out.toString()
     }
 
     companion object {

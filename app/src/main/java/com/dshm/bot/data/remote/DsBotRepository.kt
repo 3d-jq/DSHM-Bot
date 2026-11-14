@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.ConcurrentHashMap
 
 /** 真实 DS Bot 数据源：`/api/bot` 的 `state` + `/api/bot/feed` 的 revision/live。 */
 class DsBotRepository(
@@ -28,7 +27,7 @@ class DsBotRepository(
         // ⚠️ 必须把持久化的预览一起贴回去：快照里 `bots[].preview` 是 `state` 的
         // role（角色描述），直接 emit 会把 `HomeViewModel` 用预览缓存拼好的那一版
         // 顶掉 —— 表现就是「界面早就画好了，预览却先显示角色标签、过一会儿才跳回来」。
-        cache?.load()?.takeIf { it.isNotEmpty() }?.let { emit(applyKnownPreviews(it, previews)) }
+        cache?.load()?.takeIf { it.isNotEmpty() }?.let { emit(applyKnownPreviews(it, previews.snapshot())) }
         var current = fetchWithRetry()
         emit(current)
         client.feed().collect { event ->
@@ -40,9 +39,9 @@ class DsBotRepository(
                 // 预览还是上一轮」。feed 已经把文本送到了，就地打补丁零网络。
                 EVENT_MESSAGE -> event.data.let(::previewFromFeed)?.let { (botId, text) ->
                     val preview = BotPreview.oneLine(text)
-                    if (previews[botId] != preview) {
-                        previews[botId] = preview
-                        previewCache?.save(previews)
+                    if (previews.get(botId) != preview) {
+                        previews.put(botId, preview)
+                        previewCache?.save(previews.snapshot(), liveBotIds(current))
                         patchBotPreview(current, botId, preview)?.let { patched ->
                             current = patched
                             emit(patched)
@@ -104,12 +103,12 @@ class DsBotRepository(
      */
     private suspend fun withPreviews(bots: List<BotSummary>): List<BotSummary> =
         coroutineScope {
-            val missing = bots.filter { !it.isGroup && previews[it.id].isNullOrBlank() }
+            val missing = bots.filter { !it.isGroup && previews.get(it.id).isNullOrBlank() }
             fillPreviews(missing.map { it.id })
-            previewCache?.save(previews)
+            previewCache?.save(previews.snapshot(), liveBotIds(bots))
             bots.map { bot ->
                 if (bot.isGroup) return@map bot
-                val preview = previews[bot.id]
+                val preview = previews.get(bot.id)
                 if (preview.isNullOrBlank()) {
                     // 还没有模型输出 —— 显示角色描述，别留空。
                     bot
@@ -121,17 +120,21 @@ class DsBotRepository(
 
     /** 并行问 `chat` 补预览；已经有缓存的直接跳过。 */
     private suspend fun fillPreviews(botIds: List<String>) = coroutineScope {
-        val missing = botIds.filter { previews[it].isNullOrBlank() }
+        val missing = botIds.filter { previews.get(it).isNullOrBlank() }
         if (missing.isEmpty()) return@coroutineScope
         missing.map { id ->
                 async {
                     val preview = runCatching {
                         BotPreview.fromChatPage(client.bot("chat", JSONObject().put("botId", id)))
                     }.getOrNull()
-                    if (!preview.isNullOrBlank()) previews[id] = BotPreview.oneLine(preview)
+                    if (!preview.isNullOrBlank()) previews.put(id, BotPreview.oneLine(preview))
                 }
             }.awaitAll()
     }
+
+    /** 还活着的单 Bot id（群聊预览以 `state.rooms[].preview` 为准，不进预览缓存）。 */
+    private fun liveBotIds(bots: List<BotSummary>): Set<String> =
+        bots.filter { !it.isGroup }.map { it.id }.toSet()
 
     suspend fun hello(offeredApi: List<Int>? = null): DsBotHello {
         val payload = JSONObject()
@@ -164,8 +167,11 @@ class DsBotRepository(
         throw lastFailure ?: IllegalStateException("拉取 Bot 列表失败")
     }
 
-    /** 每个 Bot 最新的模型输出（预览）。feed 推来的消息会更新它。 */
-    private val previews = ConcurrentHashMap<String, String>(
+    /**
+     * 每个 Bot 最新的模型输出（预览）。feed 推来的消息会更新它。
+     * LRU 上限 + 持久化按 [BotPreviewStore.prune] 清理（删 Bot 清条目、容量截断）。
+     */
+    private val previews = LruPreviewTable(
         previewCache?.load().orEmpty(),
     )
 

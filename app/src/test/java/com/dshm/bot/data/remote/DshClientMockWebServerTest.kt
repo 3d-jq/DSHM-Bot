@@ -29,15 +29,19 @@ import java.util.concurrent.atomic.AtomicInteger
 class DshClientMockWebServerTest {
 
     private lateinit var server: MockWebServer
+    private val defaultSink = DshMuxLog.sink
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
+        // feed 断线会写 DshMuxLog（logcat 埋点），JVM 测试里换掉 sink。
+        DshMuxLog.sink = { message -> println("[feed-log] $message") }
     }
 
     @After
     fun tearDown() {
+        DshMuxLog.sink = defaultSink
         runCatching { server.shutdown() }
     }
 
@@ -174,5 +178,96 @@ class DshClientMockWebServerTest {
         // 正常 EOF 会等 2s 再重连；取消后不应该再有第二条 feed 请求。
         delay(2_500)
         assertEquals(2, server.requestCount)
+    }
+
+    /** 同一条事件的多个 data: 行要按 SSE 规范用 \n 拼接。 */
+    @Test
+    fun multiLineDataIsJoinedWithNewlines() = runBlocking {
+        server.enqueue(loginResponse())
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("event: message\ndata: line-one\ndata: line-two\n\n"),
+        )
+
+        val event = withTimeout(5_000) { client().feed().first() }
+
+        assertEquals("message", event.event)
+        assertEquals("line-one\nline-two", event.data)
+    }
+
+    /** CRLF 行尾必须与 LF 等价。 */
+    @Test
+    fun crlfLineEndingsParseLikeLf() = runBlocking {
+        server.enqueue(loginResponse())
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(
+                    "event: revision\r\ndata: {\"n\":1}\r\n\r\n" +
+                        "event: live\r\ndata: {\"n\":2}\r\n\r\n",
+                ),
+        )
+
+        val events = withTimeout(5_000) { client().feed().take(2).toList() }
+
+        assertEquals(listOf("revision", "live"), events.map { it.event })
+        assertEquals("{\"n\":1}", events[0].data)
+        assertEquals("{\"n\":2}", events[1].data)
+    }
+
+    /** 注释 / 心跳行（: 开头）不算事件，也不能吞掉后面的真事件。 */
+    @Test
+    fun commentHeartbeatLinesProduceNoEvents() = runBlocking {
+        server.enqueue(loginResponse())
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(": heartbeat\n\n: keepalive\nevent: message\ndata: {\"c\":3}\n\n"),
+        )
+
+        val events = withTimeout(5_000) { client().feed().take(1).toList() }
+
+        assertEquals(1, events.size)
+        assertEquals("message", events[0].event)
+        assertEquals("{\"c\":3}", events[0].data)
+    }
+
+    /** feed 收到 401：清 cookie → 重新登录 → 恢复事件流，不许无限卡死。 */
+    @Test
+    fun feedReLoginsAfterAuthExpiredAndRecovers() = runBlocking {
+        val logins = AtomicInteger()
+        val feedRequests = AtomicInteger()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                return when {
+                    path.startsWith("/?token=") -> {
+                        logins.incrementAndGet()
+                        loginResponse()
+                    }
+                    path == "/api/bot/feed" -> {
+                        if (feedRequests.incrementAndGet() == 1) {
+                            MockResponse().setResponseCode(401)
+                        } else {
+                            MockResponse()
+                                .setResponseCode(200)
+                                .setHeader("Content-Type", "text/event-stream")
+                                .setBody("event: message\ndata: {\"recovered\":true}\n\n")
+                        }
+                    }
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
+
+        val event = withTimeout(15_000) { client().feed().first() }
+
+        assertEquals("{\"recovered\":true}", event.data)
+        assertTrue("401 后要重新登录：logins=${logins.get()}", logins.get() >= 2)
+        assertTrue("feed 要在重登后重试：feed=${feedRequests.get()}", feedRequests.get() >= 2)
     }
 }

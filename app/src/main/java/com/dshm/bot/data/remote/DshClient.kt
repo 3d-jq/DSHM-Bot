@@ -224,13 +224,14 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                 }
             try {
                 val code = connection.responseCode
-                if (code == HTTP_UNAUTHORIZED) throw AuthExpiredException(code)
+                // 与 botValue / rpcValue 对齐：401/403 都可能是 cookie 失效，
+                // 统一交给 withAuthRetry 重登一次再试。
+                checkAuthExpired(code)
                 if (code !in 200..299) {
                     val text = connection.errorStream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
                     throw DshRpcException(
                         code = when (code) {
                             404 -> "workspace-file/not-found"
-                            403 -> "workspace-file/not-allowed"
                             413 -> "workspace-file/too-large"
                             else -> "workspace-file/http-$code"
                         },
@@ -252,19 +253,27 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                 val auth = cookie ?: login()
                 val connection = (URL(endpoint.baseUrl + "api/bot/feed").openConnection() as HttpURLConnection).apply {
                     connectTimeout = 15_000
-                    readTimeout = 0
+                    // 读超时给有限值：引擎空闲时靠注释行 / 心跳维持连接，超过 [FEED_READ_TIMEOUT_MS]
+                    // 一个字节都没有就视为死链（进程被冻结、网络栈半开），断开走下面的重连，
+                    // 不再卡在无超时的 read 上永远不重连。
+                    readTimeout = FEED_READ_TIMEOUT_MS
                     setRequestProperty("Accept", "text/event-stream")
                     setRequestProperty("Cookie", auth)
                 }
                 try {
-                    connection.inputStream.bufferedReader().use { reader ->
+                    connection.inputStream.bufferedReader().use { source ->
+                        val lines = SseLineReader(source)
                         var event = "message"
                         val data = StringBuilder()
                         while (true) {
-                            val line = reader.readLine() ?: break
+                            val line = lines.readLine() ?: break
                             when {
                                 line.startsWith("event:") -> event = line.removePrefix("event:").trim()
                                 line.startsWith("data:") -> {
+                                    // 同一条事件的 data 累计也要设上限，防止多行拼接绕过单行限制。
+                                    if (data.length + line.length > MAX_SSE_EVENT_CHARS) {
+                                        throw IllegalStateException("SSE 事件超过 $MAX_SSE_EVENT_CHARS 字符上限，断开重连")
+                                    }
                                     if (data.isNotEmpty()) data.append("\n")
                                     data.append(line.removePrefix("data:").trim())
                                 }
@@ -288,13 +297,48 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 cookie = null
+                // 断线原因进 DshMuxLog 的统一出口（JVM 测试可换 sink），不再完全静默；
+                // 无限重试的语义保持不变。
+                DshMuxLog.log(
+                    "feed 断线，${RECONNECT_DELAY_MS}ms 后重连：" +
+                        (error.message ?: error::class.java.simpleName),
+                )
             }
             // 无论异常断线还是被服务端正常关闭，都退避后再重连，避免立刻重连形成忙循环。
             if (currentCoroutineContext().isActive) delay(RECONNECT_DELAY_MS)
         }
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * 有状态的 SSE 行读取器：行尾语义与 [BufferedReader.readLine] 对齐（\n / \r\n，
+     * 去掉行尾 \r），但字符自己累积、跨调用保留读多出来的残留 —— 无换行的大流会在
+     * 累计超过 [MAX_SSE_LINE_CHARS] 时立刻抛错断开，不会先在 BufferedReader.readLine
+     * 的内部缓冲里把内存撑爆。
+     */
+    private class SseLineReader(private val source: BufferedReader) {
+        private val buf = CharArray(1024)
+        private var pos = 0
+        private var limit = 0
+
+        fun readLine(): String? {
+            val line = StringBuilder()
+            while (true) {
+                if (pos >= limit) {
+                    limit = source.read(buf)
+                    pos = 0
+                    if (limit < 0) return if (line.isEmpty()) null else line.toString()
+                }
+                val c = buf[pos++]
+                if (c == '\n') return line.toString().removeSuffix("\r")
+                line.append(c)
+                if (line.length > MAX_SSE_LINE_CHARS) {
+                    throw IllegalStateException("SSE 行超过 $MAX_SSE_LINE_CHARS 字符上限，断开重连")
+                }
+            }
+        }
+    }
 
     /**
      * Remote RPC（对齐 dsh-Go `packages/dsh_client/src/carrier.dart` 的 DshHttpCarrier）：
@@ -362,5 +406,17 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403
         const val RECONNECT_DELAY_MS = 2_000L
+
+        /** SSE 读超时：引擎有心跳 / 注释行维持连接，60s 无字节即判死链断开重连。 */
+        const val FEED_READ_TIMEOUT_MS = 60_000
+
+        /**
+         * SSE 单行最大字符数（16MB）：正常事件是模型输出的 JSON，远小于此；
+         * 超过只可能是无换行的异常流，立刻断开重连，防 readLine 式无限累积把内存撑爆。
+         */
+        const val MAX_SSE_LINE_CHARS = 16 * 1024 * 1024
+
+        /** 单条 SSE 事件（多行 data 拼接后）的最大字符数，同 [MAX_SSE_LINE_CHARS]。 */
+        const val MAX_SSE_EVENT_CHARS = 16 * 1024 * 1024
     }
 }
