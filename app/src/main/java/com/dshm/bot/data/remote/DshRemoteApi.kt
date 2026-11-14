@@ -15,6 +15,14 @@ interface DshRemoteApi {
     suspend fun botValue(endpoint: String, payload: JSONObject = JSONObject()): Any?
     suspend fun rpc(method: String, args: JSONObject = JSONObject(), timeoutMs: Int = 30_000): JSONObject
     fun feed(): Flow<BotFeedEvent>
+
+    /**
+     * `timeline` 快照（Phase 1a 的 shadow 双跑用，`docs/phase1-design.md` §3 快照帧）。
+     *
+     * 默认「不支持」返回 null：既有假实现/调用方零改动；[RemoteDshApi] 覆盖为真实端点。
+     * 失败语义交给调用方（shadow 模式必须自吞，不许影响主管线）。
+     */
+    suspend fun timeline(request: TimelineRequest = TimelineRequest()): TimelineSnapshot? = null
 }
 
 /** 把具体 [DshClient] 收进接口，调用方只看到对话所需的最小面。 */
@@ -29,4 +37,7 @@ class RemoteDshApi(private val client: DshClient) : DshRemoteApi {
         client.rpc(method, args, timeoutMs)
 
     override fun feed(): Flow<BotFeedEvent> = client.feed()
+
+    override suspend fun timeline(request: TimelineRequest): TimelineSnapshot? =
+        client.timeline(request)
 }

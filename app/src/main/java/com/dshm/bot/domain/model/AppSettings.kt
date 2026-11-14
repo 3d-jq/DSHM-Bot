@@ -39,6 +39,12 @@ data class DshGoPreferences(
     val foldProcess: Boolean = true,
     /** 打开 App 时自动启动本机引擎（对齐 dsh-Go 的 `autoStartLocal`）。 */
     val autoStartLocal: Boolean = true,
+    /**
+     * Phase 1a 的 timeline shadow 双跑开关（`docs/phase1-design.md` §6，debug 用）：
+     * 开启后对话页同时跑旧管线与 timeline 行管线并输出对比日志，**不改变主管线行为**。
+     * 生效还需引擎 hello 声明 `timeline` 能力（`DsBotCapabilities.timelineSupported()`）。
+     */
+    val timelineShadow: Boolean = false,
 ) {
     fun flag(key: String): Boolean = when (key) {
         KEY_NOTIFY_TURN_DONE -> notifyTurnDone
@@ -47,6 +53,7 @@ data class DshGoPreferences(
         KEY_NOTIFY_QUESTION -> notifyQuestion
         KEY_FOLD_PROCESS -> foldProcess
         KEY_AUTO_START_LOCAL -> autoStartLocal
+        KEY_TIMELINE_SHADOW -> timelineShadow
         else -> error("未知的设置偏好 key: $key")
     }
 
@@ -60,6 +67,7 @@ data class DshGoPreferences(
             KEY_NOTIFY_QUESTION -> copy(notifyQuestion = value)
             KEY_FOLD_PROCESS -> copy(foldProcess = value)
             KEY_AUTO_START_LOCAL -> copy(autoStartLocal = value)
+            KEY_TIMELINE_SHADOW -> copy(timelineShadow = value)
             else -> error("未知的设置偏好 key: $key")
         }
     }
@@ -71,6 +79,7 @@ data class DshGoPreferences(
         const val KEY_NOTIFY_QUESTION = "notify_question"
         const val KEY_FOLD_PROCESS = "fold_process"
         const val KEY_AUTO_START_LOCAL = "auto_start_local"
+        const val KEY_TIMELINE_SHADOW = "timeline_shadow"
 
         val BOOLEAN_KEYS = listOf(
             KEY_NOTIFY_TURN_DONE,
@@ -79,6 +88,7 @@ data class DshGoPreferences(
             KEY_NOTIFY_QUESTION,
             KEY_FOLD_PROCESS,
             KEY_AUTO_START_LOCAL,
+            KEY_TIMELINE_SHADOW,
         )
     }
 }

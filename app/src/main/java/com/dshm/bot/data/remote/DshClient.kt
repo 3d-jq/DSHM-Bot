@@ -152,6 +152,21 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
         }
 
     /**
+     * `timeline` 快照（Phase 1a，`docs/phase1-design.md` §3）：`/api/bot` 的新端点，
+     * envelope 与 [bot] 完全一致（body `{endpoint, payload}`，响应 `{ok, value}`）。
+     *
+     * 请求 `{botId|roomId, since?, cursor?, max?}`，响应
+     * `{sessionId|roomId, seq, rows[], cursor, running?, speaking?}`（解析见
+     * [parseTimelineSnapshot]）。服务端把它进 READS 集合（只读主机可用，无需特殊处理）。
+     *
+     * 错误（含 `DshRpcException`）向上抛——shadow 调用方自己 runCatching，
+     * 契约测试才能区分「失败」与「空快照」。
+     */
+    suspend fun timeline(request: TimelineRequest = TimelineRequest()): TimelineSnapshot =
+        parseTimelineSnapshot(bot("timeline", request.toPayload()))
+            ?: error("timeline 响应形状不对")
+
+    /**
      * 上传一个附件到某个 Session，返回 prompt 可消费的 receipt。
      *
      * 对齐 DSH `dsh-client-file-upload` 的原始路由：

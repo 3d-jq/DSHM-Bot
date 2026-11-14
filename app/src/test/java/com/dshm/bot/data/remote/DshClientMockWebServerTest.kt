@@ -95,6 +95,56 @@ class DshClientMockWebServerTest {
         assertEquals("{\"a\":1}", events[0].data)
     }
 
+    /**
+     * feed 的 `timeline` 事件（Phase 1a，宿主投影增量）：SSE 解析器对事件名无白名单，
+     * 新事件名天然通过；CRLF 行尾、分包与 `[DONE]` 哨兵行都不破。
+     */
+    @Test
+    fun timelineEventFlowsThroughTheSseParser() = runBlocking {
+        val rows = """[{"key":"user:40","kind":"user","seq":40,"payload":{"text":"hi"}}]"""
+        val crlf = "\r\n"
+        val body = ("event: hello$crlf" +
+            "data: {}$crlf" +
+            crlf +
+            "event: timeline$crlf" +
+            "data: {\"botId\":\"bot-1\",\"seq\":40,\"rows\":$rows}$crlf" +
+            crlf +
+            "event: timeline$crlf" +
+            "data: {\"reset\":true}$crlf" +
+            crlf +
+            "event: message$crlf" +
+            "data: [DONE]$crlf" +
+            crlf +
+            // 结尾不补空行直接关流：缓冲区里最后一条完整事件也要派发。
+            "event: timeline$crlf" +
+            "data: {\"botId\":\"bot-1\",\"seq\":41,\"rows\":[]}$crlf")
+        server.enqueue(loginResponse())
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(body),
+        )
+
+        val events = withTimeout(5_000) {
+            client().feed().take(5).toList()
+        }
+
+        assertEquals(listOf("hello", "timeline", "timeline", "message", "timeline"), events.map { it.event })
+        val frame = parseTimelineFeedFrame(JSONObject(events[1].data))
+        assertTrue(frame != null)
+        assertEquals(false, frame!!.reset)
+        assertEquals("bot-1", frame.botId)
+        assertEquals(40L, frame.seq)
+        assertEquals(listOf("user:40"), frame.rows.map { it.key })
+        assertTrue("reset 帧要能解析：${events[2].data}", parseTimelineFeedFrame(JSONObject(events[2].data))!!.reset)
+        // [DONE] 是数据行不是事件终止符：照常作为 message 派发，由消费方丢弃。
+        assertEquals("[DONE]", events[3].data)
+        // 结尾没空行的完整事件也派发（rows 空数组容错）。
+        val tail = parseTimelineFeedFrame(JSONObject(events[4].data))
+        assertTrue(tail != null && tail!!.rows.isEmpty())
+    }
+
     @Test
     fun disconnectDuringSseReconnects() = runBlocking {
         // 第一条 feed 写完一条事件后断开连接；客户端应该退避重连。

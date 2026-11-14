@@ -19,6 +19,9 @@ export const API_MIN = 1
 export const CAPABILITIES = [
   'state', 'state-avatar-refs', 'avatar', 'chat', 'room-chat', 'send', 'feed', 'feed-room', 'notices',
   'questions', 'views', 'approvals', 'stop-member-work', 'stop', 'memory', 'memory-edit', 'usage-summary', 'rpc',
+  // The unified timeline projection (projection.js): `timeline` endpoint + the
+  // `timeline` feed event. Purely additive — a client that does not know it skips it.
+  'timeline',
 ]
 export const NOTICE_KINDS = ['message', 'group', 'done', 'question', 'view', 'approval']
 
@@ -301,6 +304,8 @@ export function install(rt) {
       case 'avatar': return avatar(body)
       case 'room-chat': return roomChat(body)
       case 'usage-summary': return usageSummary(body)
+      // The same answer the Fetch route serves (projection.js), for RPC carriers.
+      case 'timeline': return rt.timelineEndpoint(body)
       case 'memory-edit': return rt.memoryEdit({ ...memoryTarget(body), scope: body.scope, topic: body.topic, text: body.text, next: body.next })
       case 'memory-add': return rt.memoryAdd({ ...memoryTarget(body), scope: body.scope, topic: body.topic, text: body.text })
       default: throw Object.assign(new Error(`Unknown endpoint ${endpoint}`), { code: 'bot/not-found' })

@@ -1,6 +1,7 @@
 package com.dshm.bot.domain.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -18,6 +19,9 @@ class DshGoPreferencesTest {
         assertTrue(value.foldProcess)
         // 打开 App 时自动启动引擎（dsh-Go 的 autoStartLocal）默认开着。
         assertTrue(value.autoStartLocal)
+        // timeline shadow（Phase 1a debug 双跑）默认关：主管线零影响。
+        assertFalse(value.timelineShadow)
+        assertFalse(DshGoPreferences().flag(DshGoPreferences.KEY_TIMELINE_SHADOW))
     }
 
     @Test

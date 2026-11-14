@@ -23,6 +23,12 @@ data class BotChatDependencies(
     val speech: SpeechRepository?,
     /** 非 null 时直接用这个 mux（测试）；null 时走 [com.dshm.bot.data.remote.DshMuxHub]。 */
     val mux: DshMux? = null,
+    /**
+     * timeline shadow 双跑的测试注入位（Phase 1a）：生产恒为 false（开关走
+     * `DshGoPreferences.timelineShadow` + `DsBotCapabilities.timelineSupported()`），
+     * JVM 测试用它绕过 prefs/能力协商直接点亮 shadow。
+     */
+    val timelineShadow: Boolean = false,
 ) {
     companion object {
         fun production(endpoint: RuntimeEndpoint?): BotChatDependencies {

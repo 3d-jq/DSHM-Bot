@@ -76,6 +76,8 @@ class DsBotCapabilitiesTest {
                 assertTrue(DsBotCapabilities.supports("room-chat"))
                 assertTrue(DsBotCapabilities.supports("usage-summary"))
                 assertFalse("未知能力不该通过", DsBotCapabilities.supports("does-not-exist"))
+                // 旧 hello 的 capabilities 没有 timeline：Phase 1 主开关默认关。
+                assertFalse(DsBotCapabilities.timelineSupported())
                 assertEquals("boot-1" to 42L, DsBotCapabilities.noticeCursor())
 
                 val helloRequest = server.requests().first { it.path == "/api/bot" }
@@ -111,6 +113,41 @@ class DsBotCapabilitiesTest {
                 DsBotCapabilities.refresh(server.endpoint, DshClient(server.endpoint))
                 assertFalse(DsBotCapabilities.supports("room-chat"))
                 assertNull(DsBotCapabilities.noticeCursor())
+            }
+        }
+        DsBotCapabilities.clear()
+    }
+
+    /**
+     * Phase 1a：宿主 hello 声明 `timeline` 能力 → 灰度主开关打开（设计 §1/§6）。
+     */
+    @Test
+    fun timelineCapabilityGatesTheProjectionSwitch() {
+        DsBotCapabilities.clear()
+        val hello = JSONObject(helloValue()).put(
+            "capabilities",
+            org.json.JSONArray(listOf("state", "chat", "timeline")),
+        )
+        FakeDshServer().use { server ->
+            server.responder = { request ->
+                when {
+                    request.path.startsWith(FakeDshServer.LOGIN_PATH_PREFIX) ->
+                        FakeDshServer.cookie("abc")
+
+                    request.path == "/api/bot" -> {
+                        val requested = JSONObject(request.body).optString("endpoint")
+                        val value = if (requested == "hello") hello.toString() else "{}"
+                        FakeDshServer.Response(200, body = """{"ok":true,"value":$value}""")
+                    }
+
+                    else -> FakeDshServer.Response(404)
+                }
+            }
+            server.start()
+            runBlocking {
+                DsBotCapabilities.refresh(server.endpoint, DshClient(server.endpoint))
+                assertTrue(DsBotCapabilities.supports(DsBotCapabilities.CAPABILITY_TIMELINE))
+                assertTrue(DsBotCapabilities.timelineSupported())
             }
         }
         DsBotCapabilities.clear()

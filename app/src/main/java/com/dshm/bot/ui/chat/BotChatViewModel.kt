@@ -28,6 +28,10 @@ import com.dshm.bot.data.remote.answersToJson
 import com.dshm.bot.data.remote.BotApproval
 import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.SpeechRepository
+import com.dshm.bot.data.remote.TimelineRequest
+import com.dshm.bot.data.remote.TimelineRow
+import com.dshm.bot.data.remote.TimelineSnapshot
+import com.dshm.bot.data.remote.parseTimelineFeedFrame
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.settings.SharedPrefsSettingsRepository
@@ -327,6 +331,9 @@ class BotChatViewModel internal constructor(
                     .collect { (enabled, prefs) ->
                         notifyEnabled = enabled
                         notifyPrefs = prefs
+                        // timeline shadow 的开关随偏好走（Phase 1a debug 双跑；
+                        // 没配 prefs 的测试/进程里保持关闭，主管线零影响）。
+                        applyTimelineShadowPref(prefs.timelineShadow)
                     }
             }
         }
@@ -380,6 +387,21 @@ class BotChatViewModel internal constructor(
     private var mux: DshMux? = null
     private var followStreamId: String? = null
     private var followSessionId: String? = null
+
+    // region ---- timeline shadow（Phase 1a，debug 双跑；设计 docs/phase1-design.md §6）----
+    // 同时跑旧管线（本类现状）与新管线（timeline 快照 + feed timeline 增量），对比器输出
+    // 差异日志。**只读**：shadow 状态全在下面这组字段里，绝不写 _uiState / 主管线集合。
+    private var shadowEnabled = false
+    private var shadowJob: Job? = null
+    /** 已见到的最大服务端 seq（断线重放游标）。 */
+    private var shadowSeq = 0L
+    private var shadowSnapshot: TimelineSnapshot? = null
+    private var shadowSessionId: String? = null
+    /** 行缓冲（key → row）；上限对齐设计 §3 的 ~600 行环形，超出丢最旧。 */
+    private val shadowRows = LinkedHashMap<String, TimelineRow>()
+    private val shadowComparator = TimelineShadowComparator()
+    // endregion
+
     private val toolEvents = LinkedHashMap<Long, ChatEntry>()
     /**
      * 会话事件记录（seq → event）。
@@ -521,6 +543,9 @@ class BotChatViewModel internal constructor(
             }
             // 先读历史，别让补模型/探测目录的 state 调用挡住对话首屏。
             load(initial = true)
+            // shadow 的另一个开关来源：依赖注入位（JVM 测试用；生产恒 false，
+            // 真开关是 DshGoPreferences.timelineShadow，由上面 prefs 的 collect 驱动）。
+            applyTimelineShadowPref(dependencies.timelineShadow)
             viewModelScope.launch { repairModelIfNeeded() }
             refreshBotStatus()
             feedJob = viewModelScope.launch {
@@ -1272,6 +1297,8 @@ class BotChatViewModel internal constructor(
                     sessionId = currentSession
                     ensureFollow(currentSession)
                     loadBrowserShots(currentSession)
+                    // shadow 双跑：会话 id 到手后补拉 timeline 快照（Phase 1a）。
+                    refreshShadowSnapshotIfNeeded()
                 }
                 // 群聊的 `room-chat` 直接给这一轮的状态：在跑吗、谁在发言
                 // （`mobile.js roomChat`：`running` 有活跃 round，`speaking` 是当前发言人）。
@@ -1493,10 +1520,98 @@ class BotChatViewModel internal constructor(
                 if (isGroup && data.optString("roomId") == botId) scheduleReload()
             }
 
+            // 宿主投影的增量帧（Phase 1a）：只有 shadow 开着才解析进对比器。
+            "timeline" -> handleTimelineFeed(data)
+
             "hello", "revision" -> scheduleReload()
             "live" -> refreshBotStatus()
         }
     }
+
+    // region ---- timeline shadow 接线（Phase 1a；主管线不读这些状态）----
+
+    /**
+     * 偏好/能力变化时开关 shadow 双跑。
+     *
+     * 生效条件（设计 §6）：偏好或测试注入位请求 + 私聊先行（1a 不做群聊）+ 宿主 hello
+     * 声明了 `timeline` 能力。任一不满足 → 关（默认态），主管线照旧。
+     */
+    private fun applyTimelineShadowPref(prefOn: Boolean) {
+        val want = (prefOn || dependencies.timelineShadow) &&
+            !isGroup &&
+            client != null &&
+            DsBotCapabilities.timelineSupported()
+        if (want == shadowEnabled) return
+        shadowEnabled = want
+        if (!want) {
+            shadowJob?.cancel()
+            shadowJob = null
+            shadowRows.clear()
+            shadowSnapshot = null
+            shadowSeq = 0L
+            shadowSessionId = null
+            return
+        }
+        refreshShadowSnapshot(reset = true)
+    }
+
+    /**
+     * 拉一次 timeline 快照：`reset` 全量重建行缓冲；否则带 `since` 做断线重放
+     * （设计 §3 的 seq 游标重连重放）。失败静默——shadow 不许打扰主管线。
+     */
+    private fun refreshShadowSnapshot(reset: Boolean) {
+        val connection = client ?: return
+        shadowJob?.cancel()
+        shadowJob = viewModelScope.launch {
+            val since = if (reset) null else shadowSeq.takeIf { it > 0L }
+            val snapshot = runCatching {
+                connection.timeline(TimelineRequest(botId = botId, since = since))
+            }.getOrNull() ?: return@launch
+            shadowSnapshot = snapshot
+            snapshot.sessionId?.let { shadowSessionId = it }
+            snapshot.seq?.let { if (it > shadowSeq) shadowSeq = it }
+            if (reset) shadowRows.clear()
+            snapshot.rows.forEach { row -> shadowRows[row.key] = row }
+            compareShadow()
+        }
+    }
+
+    /** load 学到会话 id 后补一次快照（shadow 开着且这个会话还没对齐过）。 */
+    private fun refreshShadowSnapshotIfNeeded() {
+        if (!shadowEnabled) return
+        val current = sessionId ?: return
+        if (current == shadowSessionId) return
+        refreshShadowSnapshot(reset = true)
+    }
+
+    /** feed `timeline` 增量：追行缓冲（按 key 去重）+ 对比；行流断档时重拉快照。 */
+    private fun handleTimelineFeed(data: JSONObject) {
+        if (!shadowEnabled) return
+        val frame = parseTimelineFeedFrame(data) ?: return
+        frame.botId?.takeIf { it != botId }?.let { return }
+        if (frame.reset) {
+            refreshShadowSnapshot(reset = true)
+            return
+        }
+        frame.seq?.let { if (it > shadowSeq) shadowSeq = it }
+        frame.rows.forEach { row -> shadowRows[row.key] = row }
+        while (shadowRows.size > SHADOW_ROW_BUFFER_MAX) {
+            shadowRows.remove(shadowRows.keys.first())
+        }
+        compareShadow()
+    }
+
+    /** 跑一次对比：旧管线当前 entries vs 行管线当前序列（均为只读快照）。 */
+    private fun compareShadow() {
+        shadowComparator.compare(
+            sessionKey = botId,
+            oldEntries = _uiState.value.entries,
+            newRows = shadowRows.values.sortedBy { it.seq ?: Long.MAX_VALUE },
+            newSnapshot = shadowSnapshot,
+        )
+    }
+
+    // endregion
 
     /** 读活动/记忆新闻，给名字胶囊下面那行状态用。 */
     /** 记下群聊这一轮的状态（`room-chat` 每次刷新都会带上）。 */
@@ -2490,6 +2605,8 @@ class BotChatViewModel internal constructor(
         private const val RUN_WATCH_MAX_FAILURES = 5
         /** 会话事件记录的内存上限（够覆盖最近若干轮；产物推导只看完成的轮）。 */
         private const val MAX_SESSION_EVENTS = 4_000
+        /** timeline shadow 行缓冲上限（对齐设计 §3 宿主侧 ~600 行的环形）。 */
+        private const val SHADOW_ROW_BUFFER_MAX = 600
         /** follow 断流重订的退避：1s 起步、指数左移封顶 32s。 */
         private const val FOLLOW_RETRY_BASE_MS = 1_000L
         private const val FOLLOW_RETRY_MAX_SHIFT = 5

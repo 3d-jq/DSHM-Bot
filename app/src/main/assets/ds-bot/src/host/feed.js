@@ -6,6 +6,9 @@
 //   stream    the reply a Bot is writing: a start, its text as it comes, an end
 //   notice    something a client that is not looking should hear about (mobile.js)
 //   room      a group chat changed: ask for `room-chat` again
+//   timeline  new rows of the unified timeline projection (projection.js), for a
+//             client that renders rows instead of raw events; `from`/`bufferFrom`
+//             tell it whether it can bridge its own cursor or must re-read
 // `hello` carries the team's revision and, for the mobile API, its version and the
 // latest notice, so a client that reconnects knows what it missed.
 import { ROUTE } from './constants.js'
@@ -76,6 +79,16 @@ export function install(rt) {
     if (botId === undefined) return
     for (const item of rt.displayItems(session.id, [event])) publish('message', { botId, sessionId: session.id, item })
     if (event.type === 'tool/call') live()
+    // The unified timeline projection (projection.js): the rows the event produced,
+    // for a client that renders rows instead of raw events. `from` names the seq
+    // boundary the delta covers — a client whose own cursor is older than it
+    // re-reads the `timeline` snapshot; `reset` means the buffer rotated past it.
+    if (rt.timelineDelta !== undefined) {
+      const delta = rt.timelineDelta(session.id)
+      if (delta.rows.length > 0 || delta.reset === true) {
+        publish('timeline', { botId, sessionId: session.id, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows })
+      }
+    }
   })
 
   // Attempts being streamed, by id. A turn that answers another Bot is hidden from the

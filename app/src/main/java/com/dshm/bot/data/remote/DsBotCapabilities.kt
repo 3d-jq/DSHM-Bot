@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object DsBotCapabilities {
 
+    /** 宿主投影（`timeline` 端点 + feed `timeline` 事件）的能力名（Phase 1a，设计 §1/§6）。 */
+    const val CAPABILITY_TIMELINE = "timeline"
+
     private val _hello = MutableStateFlow<DsBotHello?>(null)
     val hello: StateFlow<DsBotHello?> = _hello.asStateFlow()
 
@@ -52,6 +55,12 @@ object DsBotCapabilities {
     /** 这个能力能不能用；协商没成功时一律不能用。 */
     fun supports(capability: String): Boolean =
         _hello.value?.supports(capability) == true
+
+    /**
+     * 宿主投影能力：Phase 1 灰度的主开关（设计 §6）。旧插件没声明这一项，一律 false ——
+     * 整条回退旧管线（load + feed message + session/follow）。
+     */
+    fun timelineSupported(): Boolean = supports(CAPABILITY_TIMELINE)
 
     /** 通知补读的游标（引擎重启后从上次 seq 继续）。 */
     fun noticeCursor(): Pair<String, Long>? = _hello.value?.let {
