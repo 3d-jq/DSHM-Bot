@@ -60,6 +60,13 @@ class BotChatParityPipelineTest {
         var earlierCursor: JSONObject? = null
         var snapshotSeq: Long = 40
 
+        /**
+         * 带 `since` 的增量重放（宿主行缓冲快路径）回的行与游标。
+         * 宿主那条路径**不描述分页边界**，游标回 null（`{cursor: null, replayed: true}`）。
+         */
+        var replayRows: List<TimelineRow> = emptyList()
+        var replayCursor: JSONObject? = null
+
         override suspend fun bot(endpoint: String, payload: JSONObject): JSONObject = when (endpoint) {
             // 旧管线端点：行管线不该再调用（调用就记下来，测试断言为空）。
             "chat", "room-chat" -> {
@@ -78,12 +85,21 @@ class BotChatParityPipelineTest {
         override suspend fun timeline(request: TimelineRequest): TimelineSnapshot {
             timelineRequests += request
             val paging = request.cursor != null
+            val replaying = !paging && request.since != null
             return TimelineSnapshot(
                 sessionId = "s-1",
                 roomId = null,
                 seq = snapshotSeq,
-                rows = if (paging) earlierRows else snapshotRows,
-                cursor = if (paging) earlierCursor else snapshotCursor,
+                rows = when {
+                    paging -> earlierRows
+                    replaying -> replayRows
+                    else -> snapshotRows
+                },
+                cursor = when {
+                    paging -> earlierCursor
+                    replaying -> replayCursor
+                    else -> snapshotCursor
+                },
                 running = null,
                 speaking = null,
             )
@@ -309,6 +325,44 @@ class BotChatParityPipelineTest {
             viewModel.uiState.value.entries.map { it.id },
         )
         assertFalse("最后一页之后 hasEarlier 应收掉", viewModel.uiState.value.hasEarlier)
+    }
+
+    /**
+     * 回归（2026-11-14 真机报「看不到更早的历史，冷启动才恢复」）：
+     * 增量重放（带 since，宿主行走缓冲快路径）的响应**不描述分页边界**（cursor=null），
+     * 不能被当成「没有更早的了」把游标清掉 —— 否则运行中翻过一次旧历史就再也翻不动。
+     */
+    @Test
+    fun replayDoesNotClearEarlierCursor() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        // 首屏（最新）：user@10 + bot@11，游标 beforeSeq=10 → 还有更早的。
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L), api.row("bot:11", "bot", 11L))
+        api.snapshotCursor = JSONObject().put("beforeSeq", 10)
+
+        val viewModel = viewModel(api, scheduler)
+        assertTrue("首屏就该说有更早的历史", viewModel.uiState.value.hasEarlier)
+
+        // feed `revision` → scheduleReload → 带 since 的增量重放；宿主回 cursor=null。
+        api.replayRows = listOf(api.row("bot:12", "bot", 12L))
+        api.replayCursor = null
+        api.feedEvents.tryEmit(BotFeedEvent(event = "revision", data = "{}"))
+        scheduler.runCurrent()
+        assertTrue("重放请求应带 since", api.timelineRequests.last().since != null)
+
+        assertTrue("重放响应不带分页边界，不该清掉 hasEarlier", viewModel.uiState.value.hasEarlier)
+
+        // 游标还在：翻页仍然可用，且请求带的就是首屏那个游标。
+        api.earlierRows = listOf(api.row("bot:5", "bot", 5L))
+        api.earlierCursor = null
+        viewModel.loadEarlier()
+        scheduler.runCurrent()
+        assertEquals("翻页请求应带首屏游标", 10L, api.timelineRequests.last().cursor?.optLong("beforeSeq"))
+        assertEquals(
+            "更早的一页应插在前面",
+            listOf("bot:5", "user:10", "bot:11", "bot:12"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
     }
 
     private fun lastRequestId(api: FakeApi): String =

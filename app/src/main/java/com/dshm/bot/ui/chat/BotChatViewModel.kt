@@ -1009,7 +1009,13 @@ class BotChatViewModel internal constructor(
             // 单聊快照带 sessionId：审批卡/附件发送的会话寻址跟着对齐。
             snapshot.sessionId?.takeIf { it.isNotEmpty() }?.let { sessionId = it }
             snapshot.seq?.let { if (it > paritySeq) paritySeq = it }
-            parityCursor = snapshot.cursor
+            // 分页游标只在「全量快照」或「宿主明确给了新游标」时更新。
+            // 增量重放（带 since）走宿主的行缓冲快路径，那条路径只补新行、
+            // **不描述分页边界**（回 `cursor: null` 表示「本次响应没带这个信息」，
+            // 不是「没有更早的了」）。以前无条件覆盖，导致运行中一旦触发过重放
+            // （feed 的 revision/hello 都会触发），`parityCursor` 就被清 null，
+            // `loadEarlier()` 直接返回 —— 表现为「看不到更早的历史，冷启动才恢复」。
+            if (reset || snapshot.cursor != null) parityCursor = snapshot.cursor
             if (reset) {
                 parityRows.clear()
                 parityRenderKeys.clear()
@@ -1017,7 +1023,7 @@ class BotChatViewModel internal constructor(
             snapshot.rows.forEach { row -> absorbParityRow(row) }
             rebuildParityEntries(
                 loading = false,
-                hasEarlier = snapshot.cursor != null,
+                hasEarlier = if (reset || snapshot.cursor != null) snapshot.cursor != null else null,
             )
             if (reset) recomputeApprovals()
             logRowApplication(if (reset) "snapshot" else "replay", snapshot.rows)
