@@ -115,6 +115,13 @@ internal class TimelineEventLog {
     /**
      * earlier 分页：整页前插，保持宿主给的显示序。
      * 不按 seq 跨 part 排序（part 之间 seq 空间独立）。
+     *
+     * 「更早页」的行**渲染 id**要带命名空间前缀（见 `BotChatViewModel` 里的
+     * `EARLIER_RENDER_PREFIX`）：行的 key 只带 seq、不带 part，而「更早页」可能来自
+     * **上一个 part**（seq 空间独立）—— 老段的 `bot:5` 与当前段的 `bot:5` key 完全
+     * 相同，同时进列表时 LazyColumn 的 key 冲突会让 Compose 抛「Key was already
+     * used」→ 整个列表挂掉（真机症状：加载历史后分割线下面的气泡消失）。
+     * **数据 key 不变**（它是对话内的身份），只把**渲染 id**隔开。
      */
     fun prependPage(rows: List<TimelineRow>) {
         if (rows.isEmpty()) return
@@ -126,6 +133,24 @@ internal class TimelineEventLog {
         val out = ArrayList<TimelineRow>()
         for (page in earlierPages) out.addAll(page)
         for (list in parts.values) out.addAll(list)
+        return if (withdrawn.isEmpty()) out else out.filterNot { it.key in withdrawn }
+    }
+
+    /**
+     * **当前 part** 的行（不含更早分页）。
+     *
+     * 四期 4c：显示 = 「更早页（宿主给的行）」+「当前段（客户端自折叠）」。
+     * 两段要分开取 —— 客户端的事件日志只覆盖最近的一段，更早的历史还是宿主的行。
+     */
+    fun currentRows(): List<TimelineRow> {
+        val list = parts[currentPart] ?: return emptyList()
+        return if (withdrawn.isEmpty()) list.toList() else list.filterNot { it.key in withdrawn }
+    }
+
+    /** 更早分页的行（宿主给的，按到达顺序；最老的一页在最前）。 */
+    fun earlierRows(): List<TimelineRow> {
+        val out = ArrayList<TimelineRow>()
+        for (page in earlierPages) out.addAll(page)
         return if (withdrawn.isEmpty()) out else out.filterNot { it.key in withdrawn }
     }
 
@@ -145,5 +170,6 @@ internal class TimelineEventLog {
 
     private companion object {
         const val DEFAULT_PART = "current"
+
     }
 }

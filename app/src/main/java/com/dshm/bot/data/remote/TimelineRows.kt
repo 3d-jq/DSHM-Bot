@@ -195,6 +195,9 @@ data class TimelineSnapshot(
     val eventTo: Long? = null,
     /** 本会话被隐藏的轮（Bot 之间互答，宿主 `state.exchangeTurns`）。 */
     val exchangeTurns: List<Int> = emptyList(),
+    /** 段分隔线（换段时那一页首条消息之前的「更早的消息」分隔行）。它不是事件派生的，
+     * 客户端自折叠折不出来，由宿主给出、客户端照插。 */
+    val partDivider: JSONObject? = null,
 )
 
 /** feed `timeline` 增量帧：`{botId|roomId, seq, rows}` 或 `{"reset":true}`。 */
@@ -270,6 +273,7 @@ fun parseTimelineSnapshot(json: JSONObject?): TimelineSnapshot? {
             // 影子双轨：这批行覆盖的事件区间 + 本会话被隐藏的轮。
             eventFrom = optionalLong(json, "eventFrom"),
             eventTo = optionalLong(json, "eventTo"),
+            partDivider = json.optJSONObject("partDivider"),
             exchangeTurns = buildList {
                 val array = json.optJSONArray("exchangeTurns")
                 if (array != null) {

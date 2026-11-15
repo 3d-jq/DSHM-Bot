@@ -65,6 +65,8 @@ internal object TimelineFold {
         var turn: Int? = null
         val toolCalls = LinkedHashMap<String, ToolCall>()
         val closingOf = HashMap<Int, Long>()
+        /** 每轮最新一条 `workspace/changes`（一轮只出一张改动卡）。 */
+        val latestChanges = LinkedHashMap<Int, SessionEvent>()
         val presented = presentedByTurn(events)
         val traces = turnTracesOf(events)
         // produced 口径的扫描：每轮一份（宿主 `scans`）。
@@ -202,18 +204,29 @@ internal object TimelineFold {
                 "workspace/changes" -> {
                     val eventTurn = data?.optInt("turn", 0) ?: 0
                     if (eventTurn > 0 && eventTurn in hidden) continue
-                    rows += TimelineRow(
-                        key = "changes:${event.seq}",
-                        kind = TimelineRow.KIND_CHANGES,
-                        seq = event.seq,
-                        turn = eventTurn,
-                        timeMs = event.timeMs,
-                        // 载荷是**空**的（摘要不在事件里，客户端按 (sessionId, seq)
-                        // 另外拉 `/api/changes.summary`）——与宿主同口径。
-                        payload = TimelineRowPayload.Changes(turn = eventTurn, raw = JSONObject()),
-                    )
+                    // **一轮只留最新一条通告**（宿主 `changesRowsOf` 口径）：长回合里
+                    // `workspace/changes` 会通告多次，逐条出行会让同一轮冒出好几张改动卡。
+                    val previous = latestChanges[eventTurn]
+                    if (previous == null || event.seq > previous.seq) {
+                        latestChanges[eventTurn] = event
+                    }
                 }
             }
+        }
+
+        // 改动卡：一轮一行（上面只记了每轮最新一条通告）。
+        for (event in latestChanges.values) {
+            val eventTurn = event.data?.optInt("turn", 0) ?: 0
+            rows += TimelineRow(
+                key = "changes:${event.seq}",
+                kind = TimelineRow.KIND_CHANGES,
+                seq = event.seq,
+                turn = eventTurn,
+                timeMs = event.timeMs,
+                // 载荷是**空**的（摘要不在事件里，客户端按 (sessionId, seq) 另外拉
+                // `/api/changes.summary`）——与宿主同口径。
+                payload = TimelineRowPayload.Changes(turn = eventTurn, raw = JSONObject()),
+            )
         }
 
         // 交付卡：贴在**该轮 turn/end** 的 seq 上（轮没闭合不出卡）。
@@ -549,9 +562,12 @@ internal object TimelineFold {
     ): String? {
         val nameOf = { value: String -> resolveBot(value) ?: value }
         return when (name) {
-            "message_bot", "stop_bot", "read_group_chat" -> raw.takeIf { it.isNotEmpty() }
-            "update_bot" -> (if (raw.isNotEmpty()) nameOf(raw) else (botName ?: "")).takeIf { it.isNotEmpty() }
+            // 失败的行不带 target（宿主同口径）：否则「没能给 X 发消息」会被当成
+            // 可点目标，点出一个空的 Bot 间对话面板。
+            "message_bot", "stop_bot", "read_group_chat" -> if (isError) null else raw.takeIf { it.isNotEmpty() }
+            "update_bot" -> if (isError) null else (if (raw.isNotEmpty()) nameOf(raw) else (botName ?: "")).takeIf { it.isNotEmpty() }
             "create_group", "update_group", "delete_group", "post_to_group" -> {
+                if (isError) return null
                 val named = GROUP_RESULT_NAME.find(result.trim())?.groupValues?.getOrNull(1)
                     ?: raw.takeIf { it.isNotEmpty() }
                 named ?: ""

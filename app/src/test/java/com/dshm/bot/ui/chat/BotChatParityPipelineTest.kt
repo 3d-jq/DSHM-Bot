@@ -125,6 +125,9 @@ class BotChatParityPipelineTest {
                 },
                 running = null,
                 speaking = null,
+                cwd = snapshotCwd,
+                eventFrom = snapshotEventFrom,
+                eventTo = snapshotEventTo,
             )
         }
 
@@ -155,6 +158,11 @@ class BotChatParityPipelineTest {
             eventsCalls += from to through
             return eventsResponse
         }
+
+        /** 快照带的事件区间（影子双轨/客户端折叠靠它取同一段事件）。 */
+        var snapshotEventFrom: Long? = null
+        var snapshotEventTo: Long? = null
+        var snapshotCwd: String? = null
 
         /** 发一帧原始 durable 事件（`session` feed）。 */
         fun emitSession(seq: Long, type: String, sessionId: String = "s-1") {
@@ -270,6 +278,60 @@ class BotChatParityPipelineTest {
         return viewModel
     }
 
+    /**
+     * 四期 4c：**私聊的行来自客户端自折叠**（事件日志 » fold），宿主行只作兜底。
+     *
+     * 契约：同一批事件，客户端折出来的行与宿主给的一致；而事件一到，界面就更新
+     * （不必等宿主的行帧）——这就是「显示永远由事件日志派生」。
+     */
+    @Test
+    fun privateChatRowsComeFromTheClientFold() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        // 宿主这一页只有「用户行」；事件日志里还有 bot 行 —— 若显示用宿主行就少了它。
+        api.snapshotRows = listOf(api.row("user:2", "user", 2L))
+        api.snapshotEventFrom = 1L
+        api.snapshotEventTo = 3L
+        api.snapshotCwd = "/root/w"
+        api.eventsResponse = listOf(
+            SessionEvent(1L, "turn/start", 1000L, JSONObject().put("turn", 1)),
+            SessionEvent(2L, "user/message", 1100L, JSONObject().put("source", JSONObject().put("kind", "user")).put("content", org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "你好")))),
+            SessionEvent(3L, "assistant/message", 1200L, JSONObject().put("turn", 1).put("message", JSONObject().put("content", org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "在的"))))),
+        )
+
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        // 宿主只给了 user:2；客户端折叠多折出 bot:3（事件日志里有）。
+        assertEquals(
+            listOf("user:2", "bot:3"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+    }
+
+    /**
+     * 四期 4c 的兜底：事件日志**还没播种 / 有缺口**时，不能让界面空着——
+     * 继续用宿主的行顶上（缺口补上后自动切回客户端折叠）。
+     */
+    @Test
+    fun theHostRowsAreTheFallbackWhenTheEventLogIsNotReady() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:1", "user", 1L), api.row("bot:2", "bot", 2L))
+        // 事件区间给了，但补洞拿不到事件（eventsResponse 为空）→ 日志始终不可用。
+        api.snapshotEventFrom = 1L
+        api.snapshotEventTo = 2L
+
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        assertEquals(
+            "事件日志不可用时要用宿主行顶上（不能白屏）",
+            listOf("user:1", "bot:2"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+    }
+
     @Test
     fun snapshotAndIncrementDriveEntriesWithoutTheLegacyPipeline() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
@@ -311,11 +373,18 @@ class BotChatParityPipelineTest {
         assertEquals(listOf("p:${lastRequestId(api)}"), afterSend.map { it.id })
         assertEquals(ChatEntryKind.USER, afterSend.single().kind)
 
-        // 排队：服务端 inbox 行（requestId 命中）替换 p: 行。
+        // 排队：服务端 inbox 行（requestId 命中）确认了发送。
         api.emitTimeline(api.row("inbox:i-1", "inbox", null, requestId = lastRequestId(api), slot = "next-turn"))
         scheduler.runCurrent()
-        // 队列行不进时间线（官方 web 的时间线也不出现排队行），只进输入框上方的队列条。
-        assertTrue("排队行不该出现在时间线里：${viewModel.uiState.value.entries.map { it.id }}", viewModel.uiState.value.entries.isEmpty())
+        // 排队行不进时间线（官方 web 的时间线也不出现排队行）；界面也没有队列条
+        // （2026-11-15 用户定：去掉那个「N 条待发送」胶囊）。**本地 echo 气泡留着**
+        // ——排队期间用户仍看得见自己那条消息，直到服务端回显原地接管它。
+        assertTrue("排队行不该出现在时间线里：${viewModel.uiState.value.entries.map { it.id }}", viewModel.uiState.value.entries.none { it.id.startsWith("inbox:") })
+        assertEquals(
+            "排队期间本地 echo 气泡要留着（撑到回显）",
+            listOf("p:${lastRequestId(api)}"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
         val queued = viewModel.uiState.value.pendingQueue
         assertEquals(listOf("inbox:i-1"), queued.map { it.id })
         assertEquals(ChatEntryKind.PENDING, queued.single().kind)
@@ -519,47 +588,215 @@ class BotChatParityPipelineTest {
         val pagingRequest = api.timelineRequests.last()
         assertEquals("翻页请求带游标", 10L, pagingRequest.cursor?.optLong("beforeSeq"))
         assertEquals(
-            "更早的一页应插在前面",
-            listOf("bot:5", "user:10", "bot:11"),
+            "更早的一页应插在前面（渲染 id 带命名空间前缀，见 earlierPagesStillShow…）",
+            listOf("earlier:bot:5", "user:10", "bot:11"),
             viewModel.uiState.value.entries.map { it.id },
         )
         assertFalse("最后一页之后 hasEarlier 应收掉", viewModel.uiState.value.hasEarlier)
     }
 
     /**
-     * 回归（2026-11-14 真机报「看不到更早的历史，冷启动才恢复」）：
-     * 增量重放（带 since，宿主行走缓冲快路径）的响应**不描述分页边界**（cursor=null），
-     * 不能被当成「没有更早的了」把游标清掉 —— 否则运行中翻过一次旧历史就再也翻不动。
+     * 回归（2026-11-15 真机报「加载更早历史转圈、加载不出来」）：
+     * 4c 切换后私聊的显示来自**客户端自折叠**，而更早分页还是**宿主的行** ——
+     * 两者要拼起来（更早页 + 当前段），不能只取折叠那一段。
+     *
+     * 事件日志可用（折叠接管）时，更早页必须照样显示。
+     */
+    /** 构造一条 user/message 事件（真机形状：source.kind=user + content 文本块）。 */
+    private fun userEvent(seq: Long, timeMs: Long, text: String): SessionEvent = SessionEvent(
+        seq,
+        "user/message",
+        timeMs,
+        JSONObject()
+            .put("source", JSONObject().put("kind", "user"))
+            .put(
+                "content",
+                org.json.JSONArray().put(JSONObject().put("type", "text").put("text", text)),
+            ),
+    )
+
+    /** 构造一条 assistant/message 事件（真机形状：turn + message.content 文本块）。 */
+    private fun assistantEvent(seq: Long, timeMs: Long, text: String): SessionEvent = SessionEvent(
+        seq,
+        "assistant/message",
+        timeMs,
+        JSONObject()
+            .put("turn", 1)
+            .put(
+                "message",
+                JSONObject().put(
+                    "content",
+                    org.json.JSONArray().put(JSONObject().put("type", "text").put("text", text)),
+                ),
+            ),
+    )
+
+    /**
+     * 回归（2026-11-15 全面 review 发现）：4c 把私聊显示切到客户端折叠后，
+     * 折叠**没实现**的三类行（只读视图卡 / 回答过的提问 / Bot 互答提示）会整类消失。
+     * 这些行必须从宿主当前段补进来 —— 否则「你回答过的问题」「show_view 卡」
+     * 「Bot 间往来」在私聊里永久看不到，而且影子比对把它们排除在外、测试全绿。
      */
     @Test
-    fun replayDoesNotClearEarlierCursor() {
+    fun rowsTheFoldCannotProduceAreSupplementedFromTheHost() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
-        // 首屏（最新）：user@10 + bot@11，游标 beforeSeq=10 → 还有更早的。
-        api.snapshotRows = listOf(api.row("user:10", "user", 10L), api.row("bot:11", "bot", 11L))
-        api.snapshotCursor = JSONObject().put("beforeSeq", 10)
+        val viewRow = TimelineRow(
+            key = "view:c1",
+            kind = TimelineRow.KIND_VIEW,
+            seq = 12L,
+            turn = 1,
+            timeMs = 1200L,
+            payload = TimelineRowPayload.View(
+                JSONObject().put("title", "只读视图").put("callId", "c1").put("view", JSONObject()),
+            ),
+        )
+        val b2bRow = TimelineRow(
+            key = "event:14",
+            kind = TimelineRow.KIND_EVENT,
+            seq = 14L,
+            turn = 1,
+            timeMs = 1400L,
+            payload = TimelineRowPayload.Event(
+                eventKind = "request",
+                code = null,
+                botId = "bot-2",
+                name = "小助手",
+                raw = JSONObject().put("eventKind", "request"),
+            ),
+        )
+        // 宿主当前段：一条 user + 这两类折叠产不出的行。
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L), viewRow, b2bRow)
+        api.snapshotEventFrom = 10L
+        api.snapshotEventTo = 14L
+        // 事件日志可用 → 折叠接管显示（折叠只折得出 user:10）。
+        api.eventsResponse = listOf(userEvent(10L, 1000L, "你好"))
 
         val viewModel = viewModel(api, scheduler)
-        assertTrue("首屏就该说有更早的历史", viewModel.uiState.value.hasEarlier)
-
-        // feed `revision` → scheduleReload → 带 since 的增量重放；宿主回 cursor=null。
-        api.replayRows = listOf(api.row("bot:12", "bot", 12L))
-        api.replayCursor = null
-        api.feedEvents.tryEmit(BotFeedEvent(event = "revision", data = "{}"))
         scheduler.runCurrent()
-        assertTrue("重放请求应带 since", api.timelineRequests.last().since != null)
 
-        assertTrue("重放响应不带分页边界，不该清掉 hasEarlier", viewModel.uiState.value.hasEarlier)
+        val ids = viewModel.uiState.value.entries.map { it.id }
+        assertTrue("当前段由折叠接管：$ids", "user:10" in ids)
+        assertTrue("折叠产不出的只读视图卡必须从宿主补进来：$ids", "view:c1" in ids)
+        assertTrue("折叠产不出的 Bot 互答行必须从宿主补进来：$ids", "event:14" in ids)
+    }
 
-        // 游标还在：翻页仍然可用，且请求带的就是首屏那个游标。
+    /**
+     * 回归（同一次 review）：resync 快照只是「最新一页」，**不能把折叠范围往前收窄**
+     * —— 否则已在屏上的历史整段消失（真机「最近的对话没了」在 resync 路径上的残留）。
+     */
+    @Test
+    fun aResyncDoesNotShrinkTheFoldedRange() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(
+            api.row("user:101", "user", 101L),
+            api.row("user:110", "user", 110L),
+        )
+        api.snapshotEventFrom = 100L
+        api.snapshotEventTo = 110L
+        api.eventsResponse = listOf(
+            userEvent(101L, 1010L, "第一条"),
+            userEvent(110L, 1100L, "第二条"),
+        )
+
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+        assertEquals(listOf("user:101", "user:110"), viewModel.uiState.value.entries.map { it.id })
+
+        // resync：宿主这一页的起点更靠后（110），但同一会话内范围不能收窄。
+        api.snapshotEventFrom = 110L
+        api.snapshotEventTo = 111L
+        api.eventsResponse = listOf(userEvent(110L, 1100L, "第二条"), userEvent(111L, 1110L, "第三条"))
+        api.emitTimeline(api.row("user:111", "user", 111L), isGroup = false, running = null, from = 111L)
+        scheduler.runCurrent()
+
+        val ids = viewModel.uiState.value.entries.map { it.id }
+        assertTrue("resync 不能把历史收窄掉：$ids", "user:101" in ids)
+    }
+
+    @Test
+    fun earlierPagesStillShowWhenTheClientFoldTakesOver() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        // 首屏：当前段（user@10 / bot@11），快照回事件区间 [10, 11]。
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L), api.row("bot:11", "bot", 11L))
+        api.snapshotEventFrom = 10L
+        api.snapshotEventTo = 11L
+        api.snapshotCursor = JSONObject().put("beforeSeq", 10)
+        // 事件日志可用：宿主按区间回这两条事件，客户端就能自己折叠。
+        api.eventsResponse = listOf(
+            SessionEvent(10L, "user/message", 1000L, JSONObject().put("source", JSONObject().put("kind", "user")).put("content", org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "你好")))),
+            SessionEvent(11L, "assistant/message", 1100L, JSONObject().put("turn", 1).put("message", JSONObject().put("content", org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "在的"))))),
+        )
+
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+        assertEquals(
+            "当前段由客户端折叠给出",
+            listOf("user:10", "bot:11"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+
+        // 翻一页更早的（宿主行）：必须显示出来，不能被折叠那一段盖掉。
         api.earlierRows = listOf(api.row("bot:5", "bot", 5L))
         api.earlierCursor = null
         viewModel.loadEarlier()
         scheduler.runCurrent()
-        assertEquals("翻页请求应带首屏游标", 10L, api.timelineRequests.last().cursor?.optLong("beforeSeq"))
+
+        // 更早页的**渲染 id**带命名空间前缀：行的 key 只带 seq 不带 part，跨 part
+        // 同 seq 会撞 LazyColumn 的 key（Compose 直接抛「Key was already used」→
+        // 列表挂掉 → 真机症状「加载历史后分割线下面的气泡消失」）。
         assertEquals(
-            "更早的一页应插在前面",
-            listOf("bot:5", "user:10", "bot:11", "bot:12"),
+            "更早的一页必须显示（折叠只管当前段），且渲染 id 与当前段隔开",
+            listOf("earlier:bot:5", "user:10", "bot:11"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+    }
+
+    /**
+ * 回归（2026-11-15 真机报「最近的对话没了、新消息跑到很早的消息下面，重启就好」）：
+ * **增量/重放不得收窄折叠范围**。
+ *
+ * 宿主在 since 快路径（增量）里回的 `eventFrom` 是**增量区间**的起点，不是快照页的
+ * 起点。拿它当折叠起点 → 范围一次次收窄 → 当前会话的历史从显示里消失。
+ */
+    @Test
+    fun anIncrementalReplayDoesNotShrinkTheFoldedRange() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        // 首屏快照：当前段覆盖事件 [100, 110]，页里有三条消息。
+        api.snapshotRows = listOf(
+            api.row("user:101", "user", 101L),
+            api.row("bot:105", "bot", 105L),
+            api.row("user:110", "user", 110L),
+        )
+        api.snapshotEventFrom = 100L
+        api.snapshotEventTo = 110L
+        api.eventsResponse = listOf(
+            userEvent(101L, 1010L, "第一条"),
+            assistantEvent(105L, 1050L, "回复"),
+            userEvent(110L, 1100L, "第三条"),
+        )
+
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+        assertEquals(
+            "首屏：当前段三条消息都在",
+            listOf("user:101", "bot:105", "user:110"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+
+        // 增量重放：宿主回的是**增量区间**的 eventFrom（110），不是快照页的起点（100）。
+        api.snapshotEventFrom = 110L
+        api.snapshotEventTo = 111L
+        api.replayRows = listOf(api.row("user:111", "user", 111L))
+        api.emitTimeline(api.row("user:111", "user", 111L), from = 111L)
+        scheduler.runCurrent()
+
+        assertEquals(
+            "增量不得把折叠范围收窄（否则当前会话的历史消失）",
+            listOf("user:101", "bot:105", "user:110", "user:111"),
             viewModel.uiState.value.entries.map { it.id },
         )
     }
@@ -592,7 +829,9 @@ class BotChatParityPipelineTest {
 
         // 显示序：老 part 整页在前（divider → 老行），不被 seq 排序打乱。
         assertEquals(
-            listOf("divider:part:0", "user:1", "bot:2", "user:10", "bot:11"),
+            // 跨 part：更早页来自上一个 part，seq 空间独立 → 渲染 id 必须与当前段隔开，
+            // 否则 LazyColumn 的 key 冲突会让列表整个挂掉（真机：气泡消失）。
+            listOf("earlier:divider:part:0", "earlier:user:1", "earlier:bot:2", "user:10", "bot:11"),
             viewModel.uiState.value.entries.map { it.id },
         )
         assertFalse("游标收口后 hasEarlier 应关掉", viewModel.uiState.value.hasEarlier)
@@ -618,14 +857,15 @@ class BotChatParityPipelineTest {
         viewModel.loadEarlier()
         scheduler.runCurrent()
         assertEquals(
-            listOf("user:5", "bot:6", "user:10", "bot:11"),
+            listOf("earlier:user:5", "earlier:bot:6", "user:10", "bot:11"),
             viewModel.uiState.value.entries.map { it.id },
         )
 
         viewModel.loadEarlier()
         scheduler.runCurrent()
         assertEquals(
-            listOf("user:1", "bot:2", "user:5", "bot:6", "user:10", "bot:11"),
+            "两页更早的行都带命名空间前缀，且按更早→更晚排",
+            listOf("earlier:user:1", "earlier:bot:2", "earlier:user:5", "earlier:bot:6", "user:10", "bot:11"),
             viewModel.uiState.value.entries.map { it.id },
         )
         assertFalse(viewModel.uiState.value.hasEarlier)
@@ -680,8 +920,9 @@ class BotChatParityPipelineTest {
     }
 
     /**
-     * #2 私聊「发送中」的 echo 气泡仍在时间线里（官方也是乐观气泡），
-     * 只有已经进队列的 inbox 行搬到队列条。
+     * #2 私聊「发送中」的 echo 气泡留在时间线里（官方也是乐观气泡），**一直撑到
+     * 服务端回显原地接管它**；界面不再画队列条（2026-11-15 用户定），排队期间
+     * 用户看得见自己那条消息，靠的就是这条气泡。
      */
     @Test
     fun echoStaysInTimelineWhileQueueRowsMoveToTheDock() {
@@ -701,10 +942,14 @@ class BotChatParityPipelineTest {
         )
         assertTrue(viewModel.uiState.value.pendingQueue.isEmpty())
 
-        // 进队列后：时间线只剩 bot:1，队列条拿到 inbox 行。
+        // 进队列后：echo **仍在**时间线（撑到回显），队列数据里拿到 inbox 行。
         api.emitTimeline(api.row("inbox:q-1", "inbox", null, requestId = requestId, slot = "next-turn"))
         scheduler.runCurrent()
-        assertEquals(listOf("bot:1"), viewModel.uiState.value.entries.map { it.id })
+        assertEquals(
+            "排队期间 echo 气泡不能消失（没有队列条可看）",
+            listOf("bot:1", "p:$requestId"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
         assertEquals(listOf("inbox:q-1"), viewModel.uiState.value.pendingQueue.map { it.id })
     }
 

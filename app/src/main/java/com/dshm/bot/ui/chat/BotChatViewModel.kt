@@ -30,6 +30,7 @@ import com.dshm.bot.data.remote.ChangesSummary
 import com.dshm.bot.data.remote.parseChangesSummary
 import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.SpeechRepository
+import com.dshm.bot.data.remote.SessionEvent
 import com.dshm.bot.data.remote.SessionEventLog
 import com.dshm.bot.data.remote.parseSessionEventFrame
 import com.dshm.bot.data.remote.TimelineRequest
@@ -413,6 +414,20 @@ class BotChatViewModel internal constructor(
     private val streamFlush = StreamFlush()
 
     private var sessionId: String? = null
+    /**
+     * 四期 4c：客户端自折叠需要的两个上下文（宿主快照带回来的）。
+     * - [foldCwd]：会话工作目录 —— 产物卡的相对路径要按它解析；
+     * - [foldExchangeTurns]：本会话被隐藏的轮（Bot 之间互答）—— 那些轮整轮不画。
+     */
+    private var foldCwd: String? = null
+    private var foldExchangeTurns: Set<Int> = emptySet()
+    /** 当前段的事件起点（宿主快照回的 `eventFrom`）：折叠只覆盖这一段，
+     * 更早的历史由宿主的分页行负责（两段不重叠）。 */
+    private var foldEventFrom: Long? = null
+    /** 段分隔线（换段时那条「更早的消息」分隔行；宿主给，客户端照插）。 */
+    private var foldPartDivider: JSONObject? = null
+    /** 上面这些折叠上下文属于哪个会话（换会话时整体替换）。 */
+    private var foldSessionId: String? = null
     /** 最近一次 `state.work.approvals` 里属于本对话的条目 —— 卡片的显示身份。 */
     private var botApprovals: List<BotApproval> = emptyList()
     /** 引擎在等用户回应的提问（eventId → 请求）。 */
@@ -436,14 +451,24 @@ class BotChatViewModel internal constructor(
      */
     private val parityLog = TimelineEventLog()
     /**
-     * 四期 4a：当前会话的 **durable 事件日志**（原始事件 + 连续 seq 游标）。
+     * 四期 4a：每个会话一条 **durable 事件日志**（原始事件 + 连续 seq 游标）。
+     *
+     * 按会话分开是必须的：**每个 part 是独立的 DSH 会话**（seq 空间各自独立），
+     * 混在一份日志里，折叠会把两段的行拼在一起。
      *
      * 这是完整性判据的地基：宿主把每个 `session/event` 连同连续 seq 转发过来，
      * 这里按 dsh-Go 的规则判定重复/连续/缺口；缺口就向宿主 `events` 端点补洞。
      * 4a 不改渲染（仍走 [parityLog] 行管线），只保证「事件层」永远能自愈；
-     * 4b 再把折叠搬到客户端，让它成为显示的唯一事实源。
+     * 4b/4c 把折叠搬到客户端，让它成为显示的唯一事实源。
      */
-    private val sessionEvents = SessionEventLog()
+    private val sessionLogs = LinkedHashMap<String, SessionEventLog>()
+
+    /** 当前会话（当前 part）的事件日志。 */
+    private fun sessionLogOf(sessionId: String?): SessionEventLog? {
+        val id = sessionId?.takeIf { it.isNotEmpty() } ?: return null
+        return sessionLogs.getOrPut(id) { SessionEventLog() }
+    }
+
     /** 正在补洞（防同一缺口并发重复请求）。 */
     private var sessionEventsFilling = false
     /** 影子比对「一致」的限频时刻（不一致每次都记）。 */
@@ -1071,6 +1096,36 @@ class BotChatViewModel internal constructor(
             // 单聊快照带 sessionId：审批卡/附件发送的会话寻址跟着对齐。
             snapshot.sessionId?.takeIf { it.isNotEmpty() }?.let { sessionId = it }
             snapshot.seq?.let { if (it > paritySeq) paritySeq = it }
+            // 四期 4c：折叠上下文（cwd / 隐藏轮 / 段分隔线）**跟会话绑定**。
+            //
+            // 两条规则都有真机教训：
+            // ① 换会话（part 切换 / 换 Bot）必须**整体替换**，包括**空值**——
+            //    早先写成「非空才更新」，旧会话的隐藏轮号（在新会话里从 1 重数）会把
+            //    新一轮整轮藏起来，cwd 残留会让产物卡路径解析错。
+            // ② **同一会话内**，折叠起点只能往前（`minOf`）：resync 快照只是「最新一页」，
+            //    无条件覆盖会把已在屏上的历史整段丢掉（真机报「最近的对话没了」）。
+            // ③ 增量/重放（since 快路径）的 `eventFrom` 是**增量区间**起点，不是这一页
+            //    起点，绝不能拿来当折叠起点。
+            val snapshotSession = snapshot.sessionId?.takeIf { it.isNotEmpty() }
+            if (snapshotSession != null && snapshotSession != foldSessionId) {
+                // 换会话：三件套整体替换（空也要替换）。
+                foldSessionId = snapshotSession
+                foldEventFrom = snapshot.eventFrom
+                foldCwd = snapshot.cwd
+                foldExchangeTurns = snapshot.exchangeTurns.toSet()
+                foldPartDivider = snapshot.partDivider
+            } else if (reset || resync) {
+                val next = snapshot.eventFrom
+                foldEventFrom = when {
+                    next == null -> foldEventFrom
+                    foldEventFrom == null -> next
+                    else -> minOf(foldEventFrom!!, next)
+                }
+                foldCwd = snapshot.cwd ?: foldCwd
+                foldExchangeTurns = snapshot.exchangeTurns.toSet()
+                foldPartDivider = snapshot.partDivider
+            }
+            if (snapshot.exchangeTurns.isNotEmpty()) foldExchangeTurns = snapshot.exchangeTurns.toSet()
             // 四期 4a：首屏/重连后给 durable 事件日志播个种子（只播一次）。
             seedSessionEvents()
             // 分页游标只在「全量快照」或「宿主明确给了新游标」时更新。
@@ -1097,8 +1152,8 @@ class BotChatViewModel internal constructor(
             )
             if (reset || resync) recomputeApprovals()
             logRowApplication(if (reset) "snapshot" else if (resync) "resync" else "replay", snapshot.rows)
-            // 四期 4c 影子双轨：同一批事件上比对两套折叠（只记差异，不动 UI）。
-            shadowCompare(snapshot)
+            // 四期 4c：取齐这批事件 → 客户端折叠接管显示 → 影子比对。
+            ensureEventsFor(snapshot)
         }
     }
 
@@ -1113,28 +1168,26 @@ class BotChatViewModel internal constructor(
         // 幂等写日志：同 seq 覆盖、乱序由 TreeMap 归位、迟到行落回正确位置。
         parityLog.put(row)
         // `changes` 行：摘要不在行里，按 seq 按需拉一次（缓存，不阻塞重建）。
-        if (row.payload is TimelineRowPayload.Changes) requestChangesSummary(row.seq)
+        if (row.payload is TimelineRowPayload.Changes) {
+            requestChangesSummary(row.seq)
+            lastChangesSeq = row.seq
+        }
         val requestId = when (val payload = row.payload) {
             is TimelineRowPayload.User -> payload.requestId
             is TimelineRowPayload.Inbox -> payload.requestId
             else -> null
         } ?: return
-        val echoKey = "p:$requestId"
         if (row.kind == TimelineRow.KIND_USER) {
-            // 认领（设计 §4）：user 行接替发送中（p:）/排队/插话（inbox）行。
+            // 认领（设计 §4）：user 行接替发送中（p:）/排队（插话）行。
             // echo 可能已被 inbox 行顶掉，所以本地归属用 pendingEchoAttachments 判定
             // （send 记、失败清），两条来路都收口。
-            val hadEcho = pendingEchoRows.remove(echoKey) != null
-            if (hadEcho || pendingEchoAttachments.containsKey(requestId)) {
-                dropPendingInboxRowsOf(requestId)
-                parityRenderKeys[row.key] = echoKey
-                unclaimedRequests.remove(requestId)
-            }
+            claimEchoOf(row)
         } else if (row.kind == TimelineRow.KIND_INBOX) {
-            // 排队/插话行到达：替换掉同 requestId 的发送中 echo 行。
-            if (pendingEchoRows.remove(echoKey) != null) {
-                unclaimedRequests.remove(requestId)
-            }
+            // 排队/插话行到达：**已确认发送**（清未确认标记），但**本地 echo 气泡留着**——
+            // 排队期间用户仍能看到自己那条消息。界面不再画队列条（对齐官方网页端，
+            // 它把 `placement === 'queued'` 的项滤掉），撑到服务端回显的正是这条气泡：
+            // user 行带同一 requestId 到达时认领它（渲染键 `p:<requestId>`，原地过渡）。
+            unclaimedRequests.remove(requestId)
         }
     }
 
@@ -1220,32 +1273,87 @@ class BotChatViewModel internal constructor(
      */
     private fun rebuildParityEntries(loading: Boolean? = null, hasEarlier: Boolean? = null) {
         // 全量重算：顺序由日志（part 序 + 段内 seq）决定，不看帧到达顺序。
-        val timelineRows = parityLog.rows()
+        //
+        // 四期 4c：**私聊的行来源 = 客户端自折叠**（事件日志 » fold）——事件日志是唯一
+        // 事实源，显示永远由它重算（对齐 dsh-Go）。宿主行投影降级为**兜底**：
+        // 事件日志还没播种 / 有缺口时先用它顶上，绝不白屏。
+        // 四期 4c：显示 = **更早页（宿主的行）+ 当前段（客户端自折叠）**。
+        // - 当前段由事件日志派生（唯一事实源，对齐 dsh-Go）；事件日志没播种/有缺口时
+        //   回退宿主的当前段行，绝不白屏。
+        // - 更早页还是宿主的行：客户端的事件日志只覆盖最近一段，更早的历史还没拉进
+        //   事件日志（拉进来要改分页协议，见 docs/phase4-event-subscription.md）。
+        //   ⚠️ 早先把两段都换成折叠，结果「加载更早历史」转圈却加载不出来。
+        val hostCurrent = parityLog.currentRows()
+        val earlierRows = parityLog.earlierRows()
+        // 折叠**不产**的三类行（只读视图卡 / 回答过的提问 / Bot 互答提示）：从宿主当前段
+        // 补进来。否则 4c 切换后它们在私聊里**整类消失**（看不到「你回答过的问题」、
+        // 非交互 show_view 卡、Bot 间往来行）—— 而影子比对把 view/answered 排除在外、
+        // fixture 也没这三类，所以「oracle 全绿」并不代表与宿主一致（审查发现的盲区）。
+        // 折叠补齐这三类是后续工作；此前先不让消息丢。
+        val foldedRows = if (isGroup) {
+            null
+        } else {
+            clientFoldedRows()?.let { foldedWithSupplement(it, hostCurrent) }
+        }
+        // 队列行（排队/插话）**始终来自宿主**：它读的是 agent inbox，不是事件，
+        // 客户端自折叠折不出来（对齐 dsh-Go：inbox 是独立的一层，不写回日志）。
+        val inboxRows = hostCurrent.filter { it.kind == TimelineRow.KIND_INBOX }
+        val currentRows = foldedRows ?: hostCurrent.filterNot { it.kind == TimelineRow.KIND_INBOX }
+        // **更早页的渲染 id 带前缀**：行的 key 只带 seq、不带 part，而「更早页」可能
+        // 来自上一个 part（seq 空间独立）—— 老段的 `bot:5` 与当前段的 `bot:5` key
+        // 相同，LazyColumn 会因 key 冲突抛「Key was already used」→ 列表挂掉
+        // （真机：加载历史后分割线下面的气泡消失）。**数据 key 不动**，只隔开渲染 id。
+        val timelineRows: List<TimelineRow> = earlierRows + currentRows + inboxRows
+        val earlierKeys = earlierRows.mapTo(HashSet()) { it.key }
         // 同一条消息已经在时间线上是 `user` 气泡了 → 它的 `inbox`（排队/插话）行是
         // 同一句话的第二份显示。队列条里留着它，就会每次刷新都把「撤回」又摆出来
         // （服务端再给一次即撤销本地 withdraw）。消息还没成气泡时队列行保留（可撤回）。
         val claimedRequests = timelineRows.mapNotNullTo(HashSet()) { row ->
             (row.payload as? TimelineRowPayload.User)?.requestId
         }
-        val mapped = ArrayList<ChatEntry>(timelineRows.size + pendingEchoRows.size + browserShots.size)
+        val mapped = ArrayList<ChatEntry>(timelineRows.size + inboxRows.size + pendingEchoRows.size + browserShots.size)
+        // **entry id 必须唯一**：LazyColumn 用 entry.id 当 key，重复会让 Compose 直接抛
+        // 「Key was already used」→ 整个列表挂掉（真机症状：加载历史后分割线下面的
+        // 气泡消失）。行的 key 只带 seq 不带 part，跨 part 同 seq 就会撞车
+        // （老段的 bot:5 与当前段的 bot:5）—— 这里按「先出现者为准」去重。
+        val seenIds = HashSet<String>()
+        // ⚠️ `timelineRows` 里**已经包含** `inboxRows`（上面拼进去了），这里不能再加一遍
+        // —— 早先写成 `timelineRows + inboxRows`，inbox 行被算两次，去重守卫把第二条
+        // 改名成 `inbox:x#2`，队列里就出现两条一模一样的。
         for (row in timelineRows) {
             if (row.kind == TimelineRow.KIND_INBOX) {
                 val requestId = (row.payload as? TimelineRowPayload.Inbox)?.requestId
                 if (requestId != null && requestId in claimedRequests) continue
             }
-            val renderKey = parityRenderKeys[row.key]
+            val renderKey = if (row.key in earlierKeys) {
+                EARLIER_RENDER_PREFIX + row.key
+            } else {
+                parityRenderKeys[row.key]
+            }
             val echoRequestId = (row.payload as? TimelineRowPayload.User)?.requestId
             val attachmentItems = echoRequestId?.let { pendingEchoAttachments[it] } ?: emptyList()
             // `changes` 行：把按 seq 缓存好的摘要贴给映射器（没拉到就为 null，映射后不出行）。
             val changesSummary = (row.payload as? TimelineRowPayload.Changes)
                 ?.let { row.seq?.let { seq -> changesSummaries[seq] } }
-            chatEntryOf(
+            val entry = chatEntryOf(
                 row = row,
                 botName = botName,
                 renderKey = renderKey,
                 attachmentItems = attachmentItems,
                 changesSummary = changesSummary,
-            )?.let(mapped::add)
+            ) ?: continue
+            // 同 id 的第二行（跨 part 同 seq）：**改 id 让两行都留着**，而不是丢内容。
+            // LazyColumn 用 entry.id 当 key，重复会让 Compose 直接抛「Key was already
+            // used」→ 整个列表挂掉（真机症状：加载历史后分割线下面的气泡消失）。
+            val uniqueId = if (seenIds.add(entry.id)) {
+                entry.id
+            } else {
+                var index = 2
+                while (!seenIds.add("$entry.id#$index")) index += 1
+                DshMuxLog.log("行 id 重复（跨 part 同 seq？）：${entry.id} —— 改 id 为 $entry.id#$index 保留两行")
+                "$entry.id#$index"
+            }
+            mapped += if (uniqueId == entry.id) entry else entry.copy(id = uniqueId)
         }
         // 本地 echo 行：乐观位置，排在尾部。
         for (echoRow in pendingEchoRows.values) {
@@ -1326,8 +1434,12 @@ class BotChatViewModel internal constructor(
     private fun handleSessionEventFrame(data: JSONObject) {
         val frame = parseSessionEventFrame(data) ?: return
         if (!sessionEventBelongs(frame.sessionId)) return
-        val gap = sessionEvents.put(frame.event)
-        if (gap != null) fillSessionEvents(gap)
+        val log = sessionLogOf(frame.sessionId) ?: return
+        val gap = log.put(frame.event)
+        if (gap != null) fillSessionEvents(frame.sessionId, gap)
+        // 四期 4c：私聊的行来自**客户端自折叠**，所以事件一到就要重算显示；
+        // 群聊仍是宿主行投影（服务端条目模型），不动。
+        if (!isGroup) rebuildParityEntries()
     }
 
     /** 事件日志的会话归属：群聊 = roomId（即 botId），单聊 = 当前 part 的 sessionId。 */
@@ -1339,17 +1451,17 @@ class BotChatViewModel internal constructor(
     }
 
     /** 缺口补洞：`events{from, through}`（对齐 dsh-Go `_fill`）。补完由日志推进游标。 */
-    private fun fillSessionEvents(gap: LongRange) {
+    private fun fillSessionEvents(sessionId: String, gap: LongRange) {
         if (sessionEventsFilling) return
         val connection = client ?: return
-        val session = sessionId?.takeIf { it.isNotEmpty() } ?: if (isGroup) botId else return
+        val log = sessionLogOf(sessionId) ?: return
         sessionEventsFilling = true
         viewModelScope.launch {
-            runCatching { connection.events(session, gap.first, gap.last) }
+            runCatching { connection.events(sessionId, gap.first, gap.last) }
                 .onSuccess { list ->
-                    sessionEvents.merge(list)
+                    log.merge(list)
                     DshMuxLog.log(
-                        "session-events 补洞 ${gap.first}..${gap.last}：收到 ${list.size} 条，cursor=${sessionEvents.cursor}",
+                        "session-events 补洞 ${gap.first}..${gap.last}：收到 ${list.size} 条，cursor=${log.cursor}",
                     )
                 }
                 .onFailure {
@@ -1361,27 +1473,214 @@ class BotChatViewModel internal constructor(
         }
     }
 
-    /** 首屏/重连种子：拉最近一段 durable 事件，让日志从一开始就连续（只播一次）。 */    private fun seedSessionEvents() {
-        if (!sessionEvents.isEmpty()) return
+    /** 首屏/重连种子：拉最近一段 durable 事件，让日志从一开始就连续（只播一次）。 */
+    private fun seedSessionEvents() {
         val connection = client ?: return
-        val session = if (isGroup) botId else sessionId?.takeIf { it.isNotEmpty() } ?: return
+        val session = sessionId?.takeIf { it.isNotEmpty() } ?: if (isGroup) botId else return
+        val log = sessionLogOf(session) ?: return
+        if (!log.isEmpty()) return
         viewModelScope.launch {
             runCatching { connection.events(session, from = 1, max = 300) }
                 .onSuccess { list ->
                     if (list.isEmpty()) return@onSuccess
-                    sessionEvents.reset(list)
+                    log.reset(list)
                     DshMuxLog.log(
-                        "session-events 种子 ${list.first().seq}..${list.last().seq}（${list.size} 条），cursor=${sessionEvents.cursor}",
+                        "session-events 种子 ${list.first().seq}..${list.last().seq}（${list.size} 条），cursor=${log.cursor}",
                     )
+                    // 种子上齐后**必须重建一次**：显示来源在首屏时还是宿主行兜底
+                    // （事件日志当时还空），不重建的话折叠要等下一条事件才接管 ——
+                    // 首屏与后续行为的来源不一致，正是「重启就好 / 用着就变」的一类。
+                    if (!isGroup) rebuildParityEntries()
                 }
         }
     }
 
-    /** 四期 4a：事件日志连续游标（诊断/测试用；-1 = 还没有种子）。 */
-    internal fun sessionEventCursor(): Long = sessionEvents.cursor
+    /** 四期 4a：当前会话事件日志的连续游标（诊断/测试用；-1 = 还没有种子）。 */
+    internal fun sessionEventCursor(): Long = sessionLogOf(sessionId ?: botId)?.cursor ?: -1L
 
-    /** 四期 4a：事件日志里已缓存的事件条数（诊断/测试用）。 */
-    internal fun sessionEventCount(): Int = sessionEvents.size
+
+    /** 折叠覆盖不到、必须从宿主当前段补的行类型。 */
+    private val FOLD_UNSUPPORTED_KINDS = setOf(
+        TimelineRow.KIND_VIEW,
+        TimelineRow.KIND_ANSWERED,
+    )
+
+    /** 折叠覆盖不到的 Bot 互答事件行（`request`/`reply`/`report`/`stopped`）。
+     * 折叠自己产的是 `retry`/`turnfail` 两种 event，不要重复补。 */
+    private val FOLD_UNSUPPORTED_EVENT_KINDS = setOf("request", "reply", "report", "stopped")
+
+    /**
+     * 折叠行 + 宿主里「折叠不产」的那几类行，按 seq 归位。
+     *
+     * 为什么必须补：4c 把私聊显示切到客户端折叠后，折叠没实现的 kind 会**整类消失**
+     * （只读视图卡、回答过的提问、Bot 互答提示）。这些行是纯事件派生的、且折叠不产，
+     * 直接用宿主的行补上，既不丢消息也不必先把 `parts.js` 的文本解析整套搬过来。
+     */
+    private fun foldedWithSupplement(
+        folded: List<TimelineRow>,
+        host: List<TimelineRow>,
+    ): List<TimelineRow> {
+        val present = folded.mapTo(HashSet()) { it.key }
+        val extra = host.filter { row ->
+            val kind = row.kind
+            val unsupportedKind = kind in FOLD_UNSUPPORTED_KINDS
+            val unsupportedEvent = kind == TimelineRow.KIND_EVENT &&
+                (row.payload as? TimelineRowPayload.Event)?.eventKind?.let { it in FOLD_UNSUPPORTED_EVENT_KINDS } == true
+            (unsupportedKind || unsupportedEvent) && row.key !in present
+        }
+        if (extra.isEmpty()) return folded
+        // 按 seq 归位（无 seq 的排最后）；同 seq 保持折叠在前、补充在后的稳定序。
+        return (folded + extra).sortedWith(compareBy { it.seq ?: Long.MAX_VALUE })
+    }
+
+    /** 最近一次代码产物卡对应的 seq（diff 的锚：算「那一轮」的改动）。 */
+    private var lastChangesSeq: Long? = null
+
+    /**
+     * 四期 4b-2：这一轮改了哪些文件（从**事件日志**自己算，与 dsh-go 同数据源：
+     * 工具结果 meta 里的 `diffs`，其次工具参数，最后整篇写入算新增）。
+     *
+     * 数据全部来自事件日志（4a 的地基），不再向宿主要 diff。
+     */
+    fun changesForDiff(anchorSeq: Long? = lastChangesSeq): List<FileChange> {
+        val session = sessionId?.takeIf { it.isNotEmpty() } ?: return emptyList()
+        val log = sessionLogOf(session) ?: return emptyList()
+        if (log.isEmpty()) return emptyList()
+        // 只算**那一轮**的改动：用 `turn/start`/`turn/end` 框住 anchor 所在的那一轮
+        // （dsh-go 也按轮汇总）。`to` 必须收在该轮 turn/end，不能用整段日志的最新 seq
+        // —— 否则点一张旧卡会显示「最近一轮」甚至整段历史的改动。
+        val to = turnEndAfter(log, anchorSeq) ?: log.newestSeq() ?: return emptyList()
+        val from = turnStartBefore(log, anchorSeq) ?: log.oldestSeq() ?: return emptyList()
+        val events = ShadowDiff.eventsForRange(log, from, to) ?: return emptyList()
+        return runCatching { changesFromEvents(events) }.getOrDefault(emptyList())
+    }
+
+    /** [anchorSeq] 所在那一轮的终点（turn/end）；没有就返回 null。 */
+    private fun turnEndAfter(log: SessionEventLog, anchorSeq: Long?): Long? {
+        if (anchorSeq == null) return null
+        for (event in log.eventsIn(anchorSeq, null)) {
+            if (event.type == "turn/end") return event.seq
+        }
+        return null
+    }
+
+    /** 离 [anchorSeq] 最近的那一轮的起点（没有轮事件时返回 null）。 */
+    private fun turnStartBefore(log: SessionEventLog, anchorSeq: Long?): Long? {
+        if (anchorSeq == null) return null
+        var start: Long? = null
+        for (event in log.eventsIn(0, anchorSeq)) {
+            if (event.type == "turn/start") start = event.seq
+        }
+        return start
+    }
+
+    /** 四期 4a：当前会话事件日志里已缓存的事件条数（诊断/测试用）。 */
+    internal fun sessionEventCount(): Int = sessionLogOf(sessionId ?: botId)?.size ?: 0
+
+/**
+     * 四期 4c：客户端自折叠出的私聊行；**不可用时返回 null**（调用方回退宿主行）。
+     *
+     * 「不可用」的两种情况：
+     * - 事件日志还没播种（冷启动、种子还没到）→ 没有可折的事件；
+     * - 事件日志**有缺口**（丢帧且补洞未成）→ 折出来的行会少一截，这时宁可继续用
+     *   宿主行，也不能让界面缺内容（缺口会被补洞补上，之后自动切回）。
+     */
+    private fun clientFoldedRows(): List<TimelineRow>? {
+        val session = sessionId?.takeIf { it.isNotEmpty() } ?: return null
+        val log = sessionLogOf(session) ?: return null
+        if (log.isEmpty()) return null
+        // 只折**当前段**（宿主快照这一页覆盖的事件区间往后）：更早的历史是宿主的
+        // 分页行，事件日志的种子可能比它更早 —— 折整个日志会和那些行重复。
+        val from = foldEventFrom ?: log.oldestSeq() ?: return null
+        val to = log.newestSeq() ?: return null
+        if (to < from) return null
+        val events = ShadowDiff.eventsForRange(log, from, to) ?: return null
+        return try {
+            val rows = TimelineFold.fold(
+                events = events,
+                exchangeTurns = foldExchangeTurns,
+                cwd = foldCwd,
+                botName = botName,
+                resolveBot = { it },
+            )
+            // 折叠路径不走宿主行那条道，所以 echo 认领与 changes 摘要要自己接上。
+            for (row in rows) {
+                if (row.payload is TimelineRowPayload.Changes) requestChangesSummary(row.seq)
+                claimEchoOf(row)
+            }
+            logShadowVsHost(rows, from, to, events.size)
+            // 段分隔线：换段时这一页首条消息之前的那条「更早的消息」分隔行。它不是事件
+            // 派生的（折叠折不出来），由宿主给出 —— 照插，折叠路径才与宿主一致。
+            val divider = foldPartDivider
+            if (divider != null && rows.isNotEmpty()) {
+                listOf(
+                    TimelineRow(
+                        key = divider.optString("key"),
+                        kind = TimelineRow.KIND_DIVIDER,
+                        seq = null,
+                        turn = null,
+                        timeMs = if (divider.isNull("startedAt")) null else divider.optLong("startedAt"),
+                        payload = TimelineRowPayload.Divider(if (divider.isNull("startedAt")) null else divider.optLong("startedAt")),
+                    ),
+                ) + rows
+            } else {
+                rows
+            }
+        } catch (error: Exception) {
+            DshMuxLog.log("客户端折叠抛错，回退宿主行：${error.message ?: error.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /**
+     * 诊断：折叠出的行与宿主当前段的行是否对得上。
+     * 对不上时记下两边的 key 摘要 —— 「消息顺序乱 / 自己的气泡不见了」这类问题靠肉眼
+     * 看不出来，必须有两侧的对照证据。
+     */
+    private fun logShadowVsHost(
+        folded: List<TimelineRow>,
+        from: Long,
+        to: Long,
+        eventCount: Int,
+    ) {
+        val host = parityLog.currentRows().filter { row ->
+            val seq = row.seq
+            seq == null || (seq >= from && seq <= to)
+        }
+        val foldedKeys = folded.map { it.key }
+        val hostKeys = host.map { it.key }
+        if (foldedKeys == hostKeys) return
+        val onlyHost = hostKeys.filter { it !in foldedKeys }
+        val onlyFolded = foldedKeys.filter { it !in hostKeys }
+        DshMuxLog.log(
+            "折叠与宿主不一致：事件 $eventCount（$from..$to）折叠 ${foldedKeys.size} 行 / 宿主 ${hostKeys.size} 行" +
+                "；只在宿主=[${onlyHost.take(4).joinToString(",")}]；只在折叠=[${onlyFolded.take(4).joinToString(",")}]",
+        )
+    }
+
+    /**
+     * 认领本地乐观 echo：`user` 行接替发送中（`p:`）/排队（`inbox`）行。
+     * 宿主行路径（[absorbParityRow]）与客户端折叠路径共用。
+     */
+    private fun claimEchoOf(row: TimelineRow) {
+        if (row.kind != TimelineRow.KIND_USER) return
+        val requestId = (row.payload as? TimelineRowPayload.User)?.requestId ?: return
+        val echoKey = "p:$requestId"
+        val hadEcho = pendingEchoRows.remove(echoKey) != null
+        if (hadEcho || pendingEchoAttachments.containsKey(requestId)) {
+            dropPendingInboxRowsOf(requestId)
+            unclaimedRequests.remove(requestId)
+            // 诊断：自己的气泡会不会消失，就看这一行（认领成功 → 渲染键换成 p:<id>，
+            // 气泡原地过渡；认领没发生 → echo 被摘掉而正式行没接管，气泡就没了）。
+            // 先取旧值再赋值 —— 早先写成「先赋值后比较」，条件恒假，这条证据日志
+            // 永远打不出来（排查气泡消失时会被误读成「没发生认领」）。
+            val firstClaim = parityRenderKeys[row.key] != echoKey
+            parityRenderKeys[row.key] = echoKey
+            if (firstClaim) {
+                DshMuxLog.log("echo 认领：行=${row.key} requestId=$requestId 有本地echo=$hadEcho → 渲染键=$echoKey")
+            }
+        }
+    }
 
     /** 影子比对「跳过」的限频记录（跳过也要留痕：否则分不清「跳过」与「失败」）。 */
     private fun shadowSkip(reason: String) {
@@ -1392,64 +1691,81 @@ class BotChatViewModel internal constructor(
     }
 
     /**
-     * 四期 4c **影子双轨**：拿「同一批事件」上，客户端自折叠与宿主行投影逐行比对，
-     * **只记差异日志，不动 UI**。     *
-     * 这是 4c 切换前的安全网：真机跑一天，差异日志全空才敢切显示。差异非空时
-     * 说明两套实现已经开始分叉——那时还没切 UI，代价为零。
+     * 四期 4c：快照到达后**先把这批事件取齐**（本地没有就问宿主要），再重建显示
+     * （客户端折叠接管），最后影子比对。
      *
-     * 比对前先向宿主 `events` 端点**取齐同一段事件**（确定性，不依赖 feed 时机）：
-     * 快照到达时事件日志未必已收到那批事件，直接比会得到一堆假差异。
+     * 顺序很重要：折叠要有事件才折得出来；先重建会退到宿主行（虽然等价，但
+     * 就不是「事件驱动」了）。取齐后重建，折叠才真正接管。
      */
-    private fun shadowCompare(snapshot: TimelineSnapshot) {
+    private fun ensureEventsFor(snapshot: TimelineSnapshot) {
         if (isGroup) {
             // 群聊是**服务端条目模型**（产物卡来自成员会话，不在群会话事件里），
             // 客户端不折叠它 —— 记一条，免得「没跑」和「失败」分不清。
             shadowSkip("群聊：服务端条目模型，不做客户端折叠比对")
             return
         }
+        val session = snapshot.sessionId?.takeIf { it.isNotEmpty() } ?: sessionId ?: return
         val from = snapshot.eventFrom
         val to = snapshot.eventTo
         if (from == null || to == null || to < from) {
             shadowSkip("快照没有事件区间（eventFrom/eventTo），无从比对")
             return
         }
+        val log = sessionLogOf(session) ?: return
         val connection = client ?: return
         viewModelScope.launch {
             // 1) 取齐这段事件（本地没有就问宿主要；补齐后写进日志，事件层也自愈）。
-            if (ShadowDiff.eventsForRange(sessionEvents, from, to) == null) {
-                runCatching { connection.events(sessionId ?: botId, from, to, max = 500) }
-                    .onSuccess { sessionEvents.merge(it) }
+            if (ShadowDiff.eventsForRange(log, from, to) == null) {
+                runCatching { connection.events(session, from, to, max = 500) }
+                    .onSuccess { log.merge(it) }
             }
-            val events = ShadowDiff.eventsForRange(sessionEvents, from, to) ?: return@launch
-            // 2) 客户端自折叠（同一段事件）。
-            val clientRows = try {
-                TimelineFold.fold(
-                    events = events,
-                    exchangeTurns = snapshot.exchangeTurns.toSet(),
-                    cwd = snapshot.cwd,
-                    botName = botName,
-                )
-            } catch (error: Exception) {
-                DshMuxLog.log("影子比对：客户端折叠抛错 ${error.message ?: error.javaClass.simpleName}")
-                return@launch
+            val events = ShadowDiff.eventsForRange(log, from, to) ?: return@launch
+            // 2) 折叠接管显示（事件已齐）。
+            rebuildParityEntries()
+            // 3) 影子比对：同一批事件上，客户端折叠 vs 宿主行投影。
+            shadowCompare(snapshot, events)
+        }
+    }
+
+    /**
+     * 四期 4c **影子双轨**：拿「同一批事件」上，客户端自折叠与宿主行投影逐行比对，
+     * **只记差异日志，不动 UI**。
+     *
+     * 这是 4c 切换前的安全网：真机跑一天，差异日志全空才敢切显示。差异非空时
+     * 说明两套实现已经开始分叉——那时还没切 UI，代价为零。
+     */
+    private fun shadowCompare(snapshot: TimelineSnapshot, events: List<SessionEvent>) {
+        // 客户端自折叠（同一段事件）。
+        val clientRows = try {
+            TimelineFold.fold(
+                events = events,
+                exchangeTurns = snapshot.exchangeTurns.toSet(),
+                cwd = snapshot.cwd,
+                botName = botName,
+                resolveBot = { it },
+            )
+        } catch (error: Exception) {
+            DshMuxLog.log("影子比对：客户端折叠抛错 ${error.message ?: error.javaClass.simpleName}")
+            return
+        }
+        // 与宿主行投影逐行比（只比本次快照覆盖的行）。
+        val from = snapshot.eventFrom ?: return
+        val to = snapshot.eventTo ?: return
+        val hostRows = snapshot.rows.filter { row ->
+            val seq = row.seq
+            seq == null || (seq >= from && seq <= to)
+        }
+        val result = ShadowDiff.compare(hostRows, clientRows)
+        if (result.identical) {
+            // 一致是常态：限频记（否则每次快照都刷屏）。
+            val now = System.currentTimeMillis()
+            if (now - lastShadowOkAt > SHADOW_OK_LOG_MS) {
+                lastShadowOkAt = now
+                DshMuxLog.log("影子比对：一致（${events.size} 事件 → ${clientRows.size} 行）")
             }
-            // 3) 与宿主行投影逐行比（只比本次快照覆盖的行）。
-            val hostRows = snapshot.rows.filter { row ->
-                val seq = row.seq
-                seq == null || (seq >= from && seq <= to)
-            }
-            val result = ShadowDiff.compare(hostRows, clientRows)
-            if (result.identical) {
-                // 一致是常态：限频记（否则每次快照都刷屏）。
-                val now = System.currentTimeMillis()
-                if (now - lastShadowOkAt > SHADOW_OK_LOG_MS) {
-                    lastShadowOkAt = now
-                    DshMuxLog.log("影子比对：一致（${events.size} 事件 → ${clientRows.size} 行）")
-                }
-            } else {
-                // 不一致是异常：**每次都记**（要抓得住）。
-                DshMuxLog.log("影子比对：${result.summary()}")
-            }
+        } else {
+            // 不一致是异常：**每次都记**（要抓得住）。
+            DshMuxLog.log("影子比对：${result.summary()}")
         }
     }
 
@@ -2320,6 +2636,8 @@ class BotChatViewModel internal constructor(
         private const val HOST_PENDING_CAP = 32
         /** `changes` 摘要每个 seq 最多拉几次（失败重试；成功即停）。 */
         private const val CHANGES_SUMMARY_ATTEMPTS = 3
+        /** 「更早页」渲染 id 的命名空间前缀（跨 part 同 seq 不撞 LazyColumn 的 key）。 */
+        private const val EARLIER_RENDER_PREFIX = "earlier:"
         /** 影子比对「一致」的记日志间隔（不一致每次都记）。 */
         private const val SHADOW_OK_LOG_MS = 30_000L
         /** 影子比对「跳过」的记日志间隔。 */

@@ -3,6 +3,7 @@ package com.dshm.bot.ui.chat
 import com.dshm.bot.data.remote.TimelineRow
 import com.dshm.bot.data.remote.TimelineRowPayload
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** TimelineEventLog：沿袭 dsh-Go `_log` 的一致性语义（幂等/乱序归位/合并/前插/part 隔离）。 */
