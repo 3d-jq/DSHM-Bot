@@ -61,6 +61,11 @@ class TimelineEventLog {
 | `loadEarlier()` | `log.prependPage(snapshot.rows)` |
 | 群聊 reset 帧 | `log.reset(...)` |
 
+#### 帧的发布者 = 日志拥有者（2026-11-15 修「产物卡延迟」根因）
+增量帧**必须由 projection 自己的 `session/event` 监听器发**（先 `record` → 再算增量 → 再 `publishFeed('timeline')`），不能放在 `feed.js`：`index.js` 的 MODULES 里 feed 在 channel 之前，feed 的监听器**先注册先执行**，它在「当前事件写进缓冲之前」就算增量 → 增量永远慢一拍。产物卡行骑在 `turn/end` 的 seq 上，于是那张卡要等下一条消息触发的那一帧才被顺带带出（用户报的「做 PPT，代码产物卡立即显示、产物卡不显示/很久才出」，也解释「产物卡中途出现」）。测试之所以没抓到，是因为 `timeline-endpoint.test.js` 的 fakeRt 恰好按 projection→feed 安装（与线上相反）。
+- 兜底：projection 记到 `turn/end` 后，若本轮**有卡但这一帧没带上它**，直接 `timelineResync`（`reset` 帧让客户端重读快照）——不再依赖下一条消息。回归测试见 `timeline-endpoint.test.js`（`regression: in the production install order…` / `fallback: a card that the delta drops…`）。
+- `feed.js` 只留 `message`/`live`，并暴露 `rt.feedWatched()` 让 projection 在无人观看时跳过增量计算。
+
 ### 显示
 `rebuildParityEntries()` 永远 `log.rows()` → `chatEntryOf()` 映射 → `_uiState`，**不再依赖插入序**。
 - `paritySeq` 只作 since 游标，不决定显示
