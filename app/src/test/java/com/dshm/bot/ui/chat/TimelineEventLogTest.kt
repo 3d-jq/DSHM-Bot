@@ -139,6 +139,42 @@ class TimelineEventLogTest {
         assertEquals(listOf("p1-a", "p2-a"), keys(log))
     }
 
+    /** 回归（2026-11-15 真机「用着用着气泡乱、冷启动又正常」）：整页重放不能挪已有行。 */
+    @Test
+    fun replayingAPageKeepsExistingRowPositions() {
+        val log = TimelineEventLog()
+        log.merge(listOf(row("user:1", 1), row("bot:relay-1:0", null, "旧"), row("user:2", 2), row("bot:relay-1:1", null, "旧")))
+        assertEquals(listOf("user:1", "bot:relay-1:0", "user:2", "bot:relay-1:1"), keys(log))
+
+        // 运行期会把整页再给一遍（room 刷新 / 轮末收口）。旧实现「先删再插」会把
+        // user:1 插到第一个更大 seq 之前（一步跨过中间的 relay 行），并把无 seq 的
+        // 回复行挪到队尾 —— 每重放一次就错位一次。
+        log.merge(listOf(row("user:1", 1), row("bot:relay-1:0", null, "新"), row("user:2", 2), row("bot:relay-1:1", null, "新")))
+        assertEquals(listOf("user:1", "bot:relay-1:0", "user:2", "bot:relay-1:1"), keys(log))
+        assertEquals("新", (log.rows()[1].payload as TimelineRowPayload.Bot).text)
+        assertEquals("新", (log.rows()[3].payload as TimelineRowPayload.Bot).text)
+    }
+
+    @Test
+    fun repeatedReplaysAreStable() {
+        val log = TimelineEventLog()
+        val page = listOf(row("user:1", 1), row("bot:relay-1:0", null), row("user:2", 2), row("bot:relay-1:1", null))
+        repeat(5) { log.merge(page) }
+        assertEquals(page.map { it.key }, keys(log))
+        assertEquals(page.size, log.size())
+    }
+
+    /** live 回复（无 seq）settled 后拿到真 seq：身份不变，位置按 seq 归位。 */
+    @Test
+    fun aRowsSeqAppearingOnReplayMovesItToItsSeqPosition() {
+        val log = TimelineEventLog()
+        log.put(row("user:1", 1))
+        log.put(row("bot:relay-1:0", null))
+        log.put(row("bot:relay-1:0", 3))
+        assertEquals(listOf("user:1", "bot:relay-1:0"), keys(log))
+        assertEquals(3L, log.rows()[1].seq)
+    }
+
     @Test
     fun maxSeqTracksTheCurrentPart() {
         val log = TimelineEventLog()

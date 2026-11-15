@@ -14,8 +14,9 @@ import com.dshm.bot.data.remote.TimelineRow
  *
  * 所以不能「有 seq 的按 seq 排、无 seq 的统一扔尾部」——那样群聊 relay 行会全被挪到
  * 后面（气泡错位、用户气泡掉出视口），私聊 divider 会跑到所有气泡下面。
- * 正确做法：**有 seq 的插到「第一个 seq 更大的行」之前；无 seq 的按到达顺序追加**，
- * 既保住宿主给的显示序，又让迟到/重放的行按 seq 归位。
+ * 正确做法：**已经存在的行（同 key / 同 seq）原地覆盖、绝不挪位**；新出现的行才
+ * 「有 seq 的插到第一个 seq 更大的行之前、无 seq 的按到达顺序追加」。这样既保住宿主
+ * 给的显示序，又让迟到/重放的新行按 seq 归位，且**整页重放不会打乱已有顺序**。
  *
  * 与 dsh-Go 的差异：我们有 part（Bot 换段后 seq 空间独立），故按下标分段隔离。
  */
@@ -59,18 +60,50 @@ internal class TimelineEventLog {
     fun put(part: String, row: TimelineRow) {
         // 服务端又重新给出这一行：撤回失效，恢复显示。
         withdrawn.remove(row.key)
-        val list = parts.getOrPut(part) { ArrayList() }
-        // 幂等：同 key（或同 seq）的行先移除，再插到新位置。
+        insertRow(parts.getOrPut(part) { ArrayList() }, row)
+    }
+
+    /** 单行有序插入的本体（幂等、同身份原地覆盖、新行按 seq 归位）。 */
+    private fun insertRow(list: MutableList<TimelineRow>, row: TimelineRow) {
+        // 同 key（或同 seq）已存在 → **原地覆盖，绝不挪位**。
+        //
+        // 这是「用着用着气泡乱、冷启动又正常」的根：运行期会整页重放（room 刷新、
+        // 轮末收口、宿主 reset 帧）。若沿用「先删再插」，每个有 seq 的行都会被重新
+        // 插到「第一个 seq 更大的行」之前——一步跨过夹在中间的无 seq 群聊回复行，
+        // 于是每重放一次就错位一次；冷启动只有一次快照，所以看不出来。
+        // 真正迟到/乱序的行是**新身份**，仍按下面的规则归位。
         val existing = list.indexOfFirst { it.key == row.key || (row.seq != null && it.seq == row.seq) }
-        if (existing >= 0) list.removeAt(existing)
+        if (existing >= 0) {
+            // 身份相同但 seq 从无到有（live → settled）：位置要按 seq 重新归位。
+            if (list[existing].seq == row.seq) {
+                list[existing] = row
+                return
+            }
+            list.removeAt(existing)
+        }
         val seq = row.seq
         if (seq == null) {
-            // 无 seq：尊重宿主给的显示序（群聊位置序 / 私聊 divider）。
+            // 无 seq：尊重宿主给的显示序（群聊位置序 / 私聊 divider），追加到尾部。
             list.add(row)
             return
         }
         val at = list.indexOfFirst { it.seq != null && it.seq > seq }
         if (at >= 0) list.add(at, row) else list.add(row)
+    }
+
+    /**
+     * 权威重读：用**最新快照**重建当前 part，清掉快照不再包含的行。
+     * 保留更早的分页（earlierPages）与其它 part（不清历史）。
+     *
+     * 用于宿主 reset 帧 / 群聊轮末收口——它们返回的是「最新窗口」：
+     * 盲目合并会让已落定/已移除的行永久残留（越用越乱、冷启动才好）；
+     * 全量清空又会丢掉更早的历史。这是两者之间的收敛语义。
+     */
+    fun resyncCurrent(rows: List<TimelineRow>) {
+        withdrawn.clear()
+        val list = parts.getOrPut(currentPart) { ArrayList() }
+        list.clear()
+        for (row in rows) insertRow(list, row)
     }
 
     /** 本地撤回一行（排队项撤回 / 乐观摘行）：rebuild 时不再显示。 */

@@ -1,0 +1,273 @@
+{
+  "basicTurn": [
+    {
+      "key": "user:2",
+      "kind": "user",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "text": "你好",
+        "images": 0
+      }
+    },
+    {
+      "key": "bot:3",
+      "kind": "bot",
+      "seq": 3,
+      "turn": 1,
+      "timeMs": 1200,
+      "payload": {
+        "text": "在的"
+      }
+    }
+  ],
+  "multiBlock": [
+    {
+      "key": "bot:2",
+      "kind": "bot",
+      "seq": 2,
+      "turn": 3,
+      "timeMs": 1100,
+      "payload": {
+        "text": "第一段"
+      }
+    },
+    {
+      "key": "bot:2",
+      "kind": "bot",
+      "seq": 2,
+      "turn": 3,
+      "timeMs": 1100,
+      "payload": {
+        "text": "第二段"
+      }
+    }
+  ],
+  "hiddenTurn": [
+    {
+      "key": "user:2",
+      "kind": "user",
+      "seq": 2,
+      "turn": 2,
+      "timeMs": 1100,
+      "payload": {
+        "text": "用户消息",
+        "images": 0
+      }
+    }
+  ],
+  "withAttachments": [
+    {
+      "key": "user:2",
+      "kind": "user",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "text": "看这两张",
+        "images": 2,
+        "blocks": [
+          {
+            "type": "image",
+            "name": "a.png"
+          }
+        ],
+        "requestId": "r-9"
+      }
+    }
+  ],
+  "multiTextUser": [
+    {
+      "key": "user:2",
+      "kind": "user",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "text": "第一行\n第二行",
+        "images": 0
+      }
+    }
+  ],
+  "trimmedUser": [
+    {
+      "key": "user:2",
+      "kind": "user",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "text": "实义",
+        "images": 0
+      }
+    }
+  ],
+  "retryRow": [
+    {
+      "key": "retry:2",
+      "kind": "event",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "eventKind": "retry",
+        "code": "rate_limit",
+        "name": "小助手",
+        "text": "模型请求失败，正在重试（2/5）：限流"
+      }
+    }
+  ],
+  "turnFailed": [
+    {
+      "key": "turnfail:2",
+      "kind": "event",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "eventKind": "failed",
+        "code": "boom",
+        "name": "小助手",
+        "text": "后续步骤失败"
+      }
+    }
+  ],
+  "changesRow": [
+    {
+      "key": "changes:2",
+      "kind": "changes",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {}
+    }
+  ],
+  "deliverableCard": [
+    {
+      "key": "user:2",
+      "kind": "user",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "text": "做一份 PPT",
+        "images": 0
+      }
+    },
+    {
+      "key": "bot:4",
+      "kind": "bot",
+      "seq": 4,
+      "turn": 1,
+      "timeMs": 1300,
+      "payload": {
+        "text": "做好了"
+      }
+    },
+    {
+      "key": "present:1",
+      "kind": "artifact",
+      "seq": 5,
+      "turn": 1,
+      "timeMs": null,
+      "payload": {
+        "files": [
+          {
+            "path": "/root/w/报告.pptx",
+            "description": "定稿"
+          }
+        ],
+        "delivered": true,
+        "collapsedCount": 4
+      }
+    }
+  ],
+  "toolRow": [
+    {
+      "key": "tool:3",
+      "kind": "tool",
+      "seq": 3,
+      "turn": 1,
+      "timeMs": 1200,
+      "payload": {
+        "tool": "message_bot",
+        "state": "ok",
+        "callId": "c1",
+        "target": "小助手",
+        "label": "消息发给了 小助手"
+      }
+    }
+  ],
+  "producedCard": [
+    {
+      "key": "user:2",
+      "kind": "user",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "text": "写个文件",
+        "images": 0
+      }
+    },
+    {
+      "key": "bot:5",
+      "kind": "bot",
+      "seq": 5,
+      "turn": 1,
+      "timeMs": 1400,
+      "payload": {
+        "text": "写好了"
+      }
+    },
+    {
+      "key": "present:1",
+      "kind": "artifact",
+      "seq": 6,
+      "turn": 1,
+      "timeMs": null,
+      "payload": {
+        "files": [
+          {
+            "path": "/root/w/纪要.md",
+            "description": null
+          }
+        ],
+        "delivered": false,
+        "collapsedCount": 4
+      }
+    }
+  ],
+  "producedRelativePath": [
+    {
+      "key": "present:1",
+      "kind": "artifact",
+      "seq": 4,
+      "turn": 1,
+      "timeMs": null,
+      "payload": {
+        "files": [
+          {
+            "path": "/root/w/笔记.md",
+            "description": null
+          }
+        ],
+        "delivered": false,
+        "collapsedCount": 4
+      }
+    }
+  ],
+  "presentedAfterClosing": [
+    {
+      "key": "bot:2",
+      "kind": "bot",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "text": "好了"
+      }
+    }
+  ]
+}

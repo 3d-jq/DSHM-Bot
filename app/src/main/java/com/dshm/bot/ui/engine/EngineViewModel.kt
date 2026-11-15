@@ -335,11 +335,30 @@ class EngineViewModel(
      * 运行日志：拼最近几段（engine.1.log … engine.log），**包含重启前的历史** ——
      * 单次启动就清空日志会把诊断证据抹掉（产物卡排查吃过亏）。每段只读尾部，
      * 不整读进内存；落盘前已打过码，这里再过一遍是冗余防线。
+     *
+     * 客户端自己的日志（`client.log`）也拼上：不少 ROM 过滤第三方应用的 logcat，
+     * 客户端诊断只能靠落盘。宿主证据（engine.log）与客户端证据（client.log）
+     * 一起看，才是一份完整现场。
      */
     fun logText(): String = runCatching {
         val engineLog = File(appContext.filesDir, "engine.log")
             .takeIf { it.isFile } ?: return@runCatching ""
-        TextMasking.maskSecrets(EngineLog.readAll(engineLog, LOG_TAIL_BYTES).trim().takeLast(300_000))
+        val clientLog = File(appContext.filesDir, "client.log")
+            .takeIf { it.isFile }
+        val host = EngineLog.readAll(engineLog, LOG_TAIL_BYTES).trim().takeLast(300_000)
+        val client = clientLog
+            ?.let { EngineLog.readAll(it, LOG_TAIL_BYTES).trim().takeLast(100_000) }
+            .orEmpty()
+        TextMasking.maskSecrets(
+            buildString {
+                if (client.isNotEmpty()) {
+                    append("===== 客户端日志（client.log） =====\n")
+                    append(client)
+                    append("\n")
+                }
+                append(host)
+            },
+        )
     }.getOrDefault("")
 
 

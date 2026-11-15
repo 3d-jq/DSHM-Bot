@@ -4,6 +4,7 @@ import com.dshm.bot.MainDispatcherRule
 import com.dshm.bot.data.remote.BotFeedEvent
 import com.dshm.bot.data.remote.DshMuxLog
 import com.dshm.bot.data.remote.DshRemoteApi
+import com.dshm.bot.data.remote.SessionEvent
 import com.dshm.bot.data.remote.TimelineRequest
 import com.dshm.bot.data.remote.TimelineRow
 import com.dshm.bot.data.remote.TimelineRowPayload
@@ -18,6 +19,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -143,6 +145,29 @@ class BotChatParityPipelineTest {
         override suspend fun changesSummary(sessionId: String, seq: Long): JSONObject? {
             changesSummaryCalls += sessionId to seq
             return changesSummaryResponse
+        }
+
+        /** 四期 4a：补洞查询的记录（from to through）。 */
+        val eventsCalls = mutableListOf<Pair<Long, Long?>>()
+        var eventsResponse: List<SessionEvent> = emptyList()
+
+        override suspend fun events(sessionId: String, from: Long, through: Long?, max: Int): List<SessionEvent> {
+            eventsCalls += from to through
+            return eventsResponse
+        }
+
+        /** 发一帧原始 durable 事件（`session` feed）。 */
+        fun emitSession(seq: Long, type: String, sessionId: String = "s-1") {
+            feedEvents.tryEmit(
+                BotFeedEvent(
+                    event = "session",
+                    data = JSONObject()
+                        .put("sessionId", sessionId)
+                        .put("seq", seq)
+                        .put("type", type)
+                        .toString(),
+                ),
+            )
         }
 
         fun row(
@@ -330,6 +355,71 @@ class BotChatParityPipelineTest {
         assertTrue("撤回后行先乐观摘除", viewModel.uiState.value.pendingQueue.isEmpty())
     }
 
+    /**
+     * 同一条消息已经成了 `user` 气泡 → 它的 `inbox`（排队/插话）行不能再出现在队列条：
+     * 旧行为是「本地 withdraw，服务端再给一次就恢复」，于是每次刷新队列条都把「撤回」
+     * 又摆出来（真机报「怎么每次都有个撤回」）。气泡还没到之前队列行保留，撤回能力不变。
+     */
+    @Test
+    fun anInboxRowIsHiddenOnceItsMessageIsAUserBubble() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("inbox:roomq:room-1:1", "inbox", null, requestId = "r-1"))
+        val viewModel = viewModel(api, scheduler, isGroup = true)
+        scheduler.runCurrent()
+        assertEquals("还没成气泡：队列行保留（可撤回）", 1, viewModel.uiState.value.pendingQueue.size)
+
+        api.emitTimeline(api.row("user:10", "user", 10L, requestId = "r-1"), isGroup = true)
+        scheduler.runCurrent()
+        assertTrue(
+            "气泡与队列行是同一句话，队列行必须去掉",
+            viewModel.uiState.value.pendingQueue.isEmpty(),
+        )
+        assertTrue(
+            "气泡必须还在",
+            viewModel.uiState.value.entries.any { it.id == "user:10" },
+        )
+    }
+
+    /**
+     * 四期 4a：原始 durable 事件按连续 seq 判定完整性。
+     * 连续事件不补洞；跳号（`seq > cursor + 1`）才向宿主 `events` 端点补洞（对齐 dsh-Go `_fill`）。
+     */
+    @Test
+    fun theEventLogDetectsGapsAndAsksTheHostForTheHoles() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L))
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+        api.eventsCalls.clear() // 首屏种子（默认空应答）
+
+        assertEquals("还没有事件时游标是 -1", -1L, viewModel.sessionEventCursor())
+
+        api.emitSession(20, "user/message")
+        api.emitSession(21, "assistant/message")
+        scheduler.runCurrent()
+        assertTrue("连续事件不该补洞：${api.eventsCalls}", api.eventsCalls.isEmpty())
+        assertEquals(21L, viewModel.sessionEventCursor())
+        assertEquals(2, viewModel.sessionEventCount())
+
+        // 丢了三帧（22..24）：必须补洞，且补洞期间游标不越过缺口。
+        api.emitSession(25, "user/message")
+        scheduler.runCurrent()
+        assertEquals("跳号 22..24 应触发一次补洞", listOf(22L to 24L), api.eventsCalls)
+        assertEquals("补洞结果为空时游标停在缺口前", 21L, viewModel.sessionEventCursor())
+
+        // 宿主把洞补上：游标一路推进到已缓存的最新事件。
+        api.eventsResponse = listOf(
+            SessionEvent(22L, "user/message", null, null),
+            SessionEvent(23L, "assistant/message", null, null),
+            SessionEvent(24L, "user/message", null, null),
+        )
+        api.emitSession(26, "assistant/message")
+        scheduler.runCurrent()
+        assertEquals("补洞后游标应推进到 26", 26L, viewModel.sessionEventCursor())
+    }
+
     @Test
     fun groupChatUsesRoomIdAndRefetchesSnapshotWhenRoundCloses() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
@@ -353,11 +443,55 @@ class BotChatParityPipelineTest {
         scheduler.runCurrent()
         assertEquals(1, api.timelineRequests.size)
 
-        // round 收口（true→false 边沿）：全量重拉一次快照，把落定行对齐。
+        // round 收口（true→false 边沿）：**合并**重放一次快照，把落定行对齐。
+        // 旧实现是 reset=true（清空日志 + 只装回最新一页）：更早的轮会整片丢失，
+        // 真机表现为「发完消息前面的气泡全没了，冷启动又正常」。
         api.emitTimeline(api.row("event:12", "event", 12L), isGroup = true, running = false)
         scheduler.runCurrent()
         assertEquals(2, api.timelineRequests.size)
-        assertNull("收口重拉是全量（不带 since）", api.timelineRequests.last().since)
+        // 轮收口是**权威重读**：拉完整最新窗口（不带 since），用它对当前 part 收敛。
+        assertNull("收口重拉是权威重读（不带 since）", api.timelineRequests.last().since)
+        assertTrue(
+            "收口刷新后更早的行必须还在（不能被清空）",
+            viewModel.uiState.value.entries.map { it.id }
+                .containsAll(listOf("user:relay-9:0", "bot:relay-9:1")),
+        )
+    }
+
+    /** 权威重读会清掉当前 part 里宿主已不再给的行（已落定的 live 回复 / 被移除项）。 */
+    @Test
+    fun resyncPrunesRowsTheHostNoLongerEmits() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(
+            api.row("user:1", "user", 1L),
+            api.row("bot:relay-1:0", "bot", null),
+        )
+        val viewModel = viewModel(api, scheduler, isGroup = true)
+        scheduler.runCurrent()
+        assertEquals(2, viewModel.uiState.value.entries.size)
+
+        // 开跑：一行 live 回复进来（seq=null）。
+        api.emitTimeline(api.row("bot:relay-2:9", "bot", null), isGroup = true, running = true)
+        scheduler.runCurrent()
+        assertTrue(
+            "live 回复应在列",
+            viewModel.uiState.value.entries.any { it.id == "bot:relay-2:9" },
+        )
+
+        // 收口：权威重读返回「餐厅快照」——旧的 live 回复已落定/不再在列，需被清掉。
+        api.snapshotRows = listOf(
+            api.row("user:1", "user", 1L),
+            api.row("bot:relay-2:9", "bot", null), // 已落定的同 key 行（宿主给出的等价物）
+        )
+        api.emitTimeline(running = false, isGroup = true)
+        scheduler.runCurrent()
+        val ids = viewModel.uiState.value.entries.map { it.id }
+        assertEquals(
+            "重读后只留宿主给出的行，live 残留/过期行被清掉",
+            listOf("user:1", "bot:relay-2:9"),
+            ids,
+        )
     }
 
     /**
@@ -722,23 +856,39 @@ class BotChatParityPipelineTest {
         assertEquals(1, api.changesSummaryCalls.size)
     }
 
-    /** `changes` 行拉不到摘要（宿主已释放/失败）时不出行，也不重拉。 */
+    /** `changes` 行拉不到摘要时不出行，但**失败会重试**（以前永久记 null → 卡再也不出现）。 */
     @Test
-    fun changesRowWithoutSummaryRendersNothing() {
+    fun changesRowWithoutSummaryRetriesAndRendersOnceTheHostAnswers() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
         api.changesSummaryResponse = null
-        api.snapshotRows = listOf(
-            TimelineRow(
-                key = "changes:9", kind = "changes", seq = 9L, turn = 3, timeMs = null,
-                payload = TimelineRowPayload.Changes(turn = 3, raw = JSONObject().put("turn", 3)),
-            ),
+        val row = TimelineRow(
+            key = "changes:9", kind = "changes", seq = 9L, turn = 3, timeMs = null,
+            payload = TimelineRowPayload.Changes(turn = 3, raw = JSONObject().put("turn", 3)),
         )
+        api.snapshotRows = listOf(row)
         val viewModel = viewModel(api, scheduler)
         scheduler.runCurrent()
 
         assertEquals(listOf("s-1" to 9L), api.changesSummaryCalls)
-        assertTrue(viewModel.uiState.value.entries.isEmpty())
+        assertTrue("没有摘要就不出行", viewModel.uiState.value.entries.isEmpty())
+
+        // 宿主恢复提供（或第一次只是暂时失败）：重放该行会重试，摘要到位后卡出现。
+        // 旧实现把 null 缓存在 `changesSummaries` 里且「同一 seq 只拉一次」——这一轮
+        // 的卡就永久消失，只有重开界面才好（用户实测「代码产物卡不持久化」）。
+        api.changesSummaryResponse = JSONObject()
+            .put("total", 1).put("added", 1).put("deleted", 0)
+            .put(
+                "files",
+                JSONArray().put(JSONObject().put("path", "/ws/b.md").put("display", "b.md")),
+            )
+        api.emitTimeline(row)
+        scheduler.runCurrent()
+
+        assertEquals(2, api.changesSummaryCalls.size)
+        val entry = viewModel.uiState.value.entries.single()
+        assertEquals(ChatEntryKind.CHANGES, entry.kind)
+        assertEquals(listOf("b.md"), entry.changes?.files?.map { it.display })
     }
 
     private fun lastRequestId(api: FakeApi): String =

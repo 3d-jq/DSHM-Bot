@@ -31,6 +31,14 @@ interface DshRemoteApi {
      * 拉不到（宿主 404 / 网络失败）一律 null，调用方静默。
      */
     suspend fun changesSummary(sessionId: String, seq: Long): JSONObject? = null
+
+    /**
+     * 四期 4a：durable 事件补洞查询（`/api/bot` 的 `events`，按 `[from, through]` 回放）。
+     *
+     * 默认「不支持」返回空：既有假实现/调用方零改动；[RemoteDshApi] 覆盖为真实端点。
+     */
+    suspend fun events(sessionId: String, from: Long, through: Long? = null, max: Int = 500): List<SessionEvent> =
+        emptyList()
 }
 
 /** 把具体 [DshClient] 收进接口，调用方只看到对话所需的最小面。 */
@@ -51,4 +59,7 @@ class RemoteDshApi(private val client: DshClient) : DshRemoteApi {
 
     override suspend fun changesSummary(sessionId: String, seq: Long): JSONObject? =
         client.changesSummary(sessionId, seq)
+
+    override suspend fun events(sessionId: String, from: Long, through: Long?, max: Int): List<SessionEvent> =
+        client.events(sessionId, from, through, max)
 }

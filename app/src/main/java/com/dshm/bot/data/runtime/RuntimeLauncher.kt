@@ -29,6 +29,9 @@ class RuntimeLauncher(
 
     init {
         EngineLog.init(appContext)
+        // 客户端日志也落盘：不少 ROM 过滤第三方应用的 logcat，真机上会「进程在跑、
+        // 却一条应用日志都没有」——诊断就没有证据了（产物卡不及时、行错位都栽在这）。
+        ClientLog.install(appContext)
     }
 
     /**

@@ -181,6 +181,20 @@ data class TimelineSnapshot(
     /** 群聊才带：round 在跑吗、谁在发言。 */
     val running: Boolean?,
     val speaking: String?,
+    /**
+     * 会话工作目录（四期 4b/4c）：客户端自折叠时，产物卡的相对路径要按它解析。
+     * 宿主在 `timeline` 快照里一并回。
+     */
+    val cwd: String? = null,
+    /**
+     * 四期 4c 影子双轨：这批行覆盖的**事件区间**（含端点）。
+     * 客户端拿它从自己的事件日志里取**同一段**事件来折叠，两边逐行比对——
+     * 没有区间，比的就不是同一批事件，差异全是假的。
+     */
+    val eventFrom: Long? = null,
+    val eventTo: Long? = null,
+    /** 本会话被隐藏的轮（Bot 之间互答，宿主 `state.exchangeTurns`）。 */
+    val exchangeTurns: List<Int> = emptyList(),
 )
 
 /** feed `timeline` 增量帧：`{botId|roomId, seq, rows}` 或 `{"reset":true}`。 */
@@ -251,6 +265,20 @@ fun parseTimelineSnapshot(json: JSONObject?): TimelineSnapshot? {
             cursor = json.optJSONObject("cursor"),
             running = if (json.has("running") && !json.isNull("running")) json.optBoolean("running") else null,
             speaking = json.optString("speaking").takeIf { it.isNotEmpty() },
+            // 会话工作目录：客户端自折叠时产物卡的相对路径要按它解析（四期 4b/4c）。
+            cwd = json.optString("cwd").takeIf { it.isNotEmpty() },
+            // 影子双轨：这批行覆盖的事件区间 + 本会话被隐藏的轮。
+            eventFrom = optionalLong(json, "eventFrom"),
+            eventTo = optionalLong(json, "eventTo"),
+            exchangeTurns = buildList {
+                val array = json.optJSONArray("exchangeTurns")
+                if (array != null) {
+                    for (index in 0 until array.length()) {
+                        val turn = array.optInt(index, 0)
+                        if (turn > 0) add(turn)
+                    }
+                }
+            },
         )
     }.getOrNull()
 }
@@ -261,10 +289,19 @@ fun parseTimelineFeedFrame(data: JSONObject?): TimelineFeedFrame? {
     return runCatching {
         val reset = data.optBoolean("reset", false)
         if (reset) {
-            // reset 帧：行流追不上了，客户端丢缓冲重拉快照；行字段可以缺席。
+            // reset 帧：行流追不上了，客户端丢缓冲重拉快照；行字段可以缺席，
+            // 但**归属身份（botId / roomId）必须照常解析**——否则这一帧成了「无身份帧」，
+            // 会被任何打开着的聊天接受（群聊成员的行漏进私聊就是这么发生的）。
             TimelineFeedFrame(
-                reset = true, botId = null, roomId = null, seq = null,
-                rows = emptyList(), running = null, speaking = null,
+                reset = true,
+                botId = data.optString("botId").takeIf { it.isNotEmpty() },
+                roomId = data.optString("roomId").takeIf { it.isNotEmpty() },
+                seq = optionalLong(data, "seq"),
+                from = optionalLong(data, "from"),
+                bufferFrom = optionalLong(data, "bufferFrom"),
+                rows = emptyList(),
+                running = if (data.has("running") && !data.isNull("running")) data.optBoolean("running") else null,
+                speaking = data.optString("speaking").takeIf { it.isNotEmpty() },
             )
         } else {
             // 非 reset 帧的 rows 存在但不是数组：骨架残缺，整体作废。

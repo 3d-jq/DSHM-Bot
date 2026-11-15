@@ -167,6 +167,27 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
             ?: error("timeline 响应形状不对")
 
     /**
+     * 四期 4a：durable 事件补洞查询（`/api/bot` 的 `events`，宿主按 seq 区间回放）。
+     *
+     * 客户端事件日志发现缺口时用它补齐（对齐 dsh-Go `_fill`）；返回升序事件列表。
+     */
+    suspend fun events(
+        sessionId: String,
+        from: Long,
+        through: Long? = null,
+        max: Int = 500,
+    ): List<SessionEvent> = parseSessionEventsResponse(
+        bot(
+            "events",
+            JSONObject()
+                .put("sessionId", sessionId)
+                .put("from", from)
+                .apply { if (through != null) put("through", through) }
+                .put("max", max),
+        ),
+    )
+
+    /**
      * 一轮改动的文件摘要：`GET /api/changes.summary?sessionId=..&seq=..`。
      *
      * 这是 DSH `dsh-client-ui-deliverables` 注册的 **Fetch 路由**（与 `/api/bot` 同端口、
