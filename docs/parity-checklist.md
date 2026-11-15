@@ -32,20 +32,10 @@
 - **我们现状**：宿主 `projection.js` **完全不认 `workspace/changes`**；客户端无此卡。
 - **做法**：宿主认事件产轻量行 `kind:'changes'`（key/seq/turn）→ 客户端调 `/api/changes.summary`（同端口，同 cookie）→ 渲染 `ChangedFilesCard`（文件图标 + 标题 + 增删行数 + 折叠 >5），点文件走现有「打开文件」链路。**不接** diff 内联预览 / `.open` 宿主桌面打开（平台取舍）。
 
-### ★★★ P1：交付文件的「原生打开」对齐
-- **官方出处**：DSH `/api/present.open`（宿主打开文件）、`/api/present.host`（宿主能力查询：能否打开）。
-- **我们现状**：产物卡点开是 `cacheDir` 下载 + FileProvider + `ACTION_VIEW`（可用但绕；且**只对我们自己的缓存副本**）。
-- **做法**：优先走 DSH 的 present 打开通道（若 Android 上 `fileManager` 能力可用），失败回退现有 FileProvider；至少把 `/api/present.host` 的能力探测接上，让卡显示「可用/不可用」。
-
 ### ★★☆ P2：DSH Agent 管理（多会话段）
 - **官方出处**：`state.agents` + `add-agent` / `agent-session` / `agent-adopt` / `agent-archive` / `agent-rename` / `remove-agent`。
 - **我们现状**：6 个端点全未接；`state.agents` 只在别处读。
 - **做法**：Bot 详情页加「会话」入口（列 Agent 会话、新建段、接管、归档、改标题）。需先出小设计（UI 放哪、与现有 session/\* 的关系）。
-
-### ★★☆ P2：侧聊（side chats）—— **待你确认是否做**
-- **官方出处**：`state.sideChats` + `side-new` / `side-ask` / `side-cancel` / `side-close`；官方侧栏有整套「旁路问答」面板（不写 Session、不派工具）。
-- **我们现状**：**零覆盖**。此前 roadmap 把「BTW 旁路卡」记为**有意不做**（理由：网页版对话里没有创建入口）。研究显示官方**有**这个功能面（在侧栏）。
-- **待定**：做（Android 放侧栏/底部面板）还是维持有意不做？——**需你拍板**。
 
 ### ★☆☆ P3：会话列表实时（`session/control`）
 - 官方用它让侧栏会话列表实时更新；我们靠轮询 `state`。收益中等。
@@ -61,7 +51,8 @@
 
 | 项 | 理由 |
 |---|---|
-| BTW 旁路卡（若侧聊也定为不做，合并进这条） | 网页端对话无创建入口；移动端场景弱 |
+| **侧聊 / BTW 旁路问答**（`state.sideChats` + `side-new/ask/cancel/close`） | **用户 2026-11-15 定为不做**（官方有整套侧栏面板，我们不做） |
+| **present 原生打开**（DSH `/api/present.open` / `/api/present.host`） | **用户 2026-11-15 定为不做**：我们已有「下载到 cacheDir → FileProvider → ACTION_VIEW」，够用且更简单；DSH 那套是宿主桌面打开 |
 | reactions（表情回应） | 网页端存浏览器本地、不发引擎 |
 | 群聊消息的时间/耗时 | 手机上无价值 |
 | 新消息分隔线 | 用户明确要求去掉 |
@@ -81,7 +72,7 @@ hover 工具栏、右键菜单、多窗口/并排、桌面快捷键、`changes.d
 |---|---|---|
 | **一期 ✅** | 时间线有序日志 + 全量重算 + 轮末无条件重放 | 已装机，高强度测试无「不及时/错位」 |
 | **二期** | ChangedFiles 代码产物卡 + 交付文件原生打开（present.host 探测） | 改文件的回合出「编辑了 N 个文件」卡、点开能打开 |
-| **三期** | DSH Agent 管理 + 侧聊（若确认做）+ session/control + 其余 P3 | 「安卓版」能力清单核对 |
+| **三期** | DSH Agent 管理 + session/control + 其余 P3 | 「安卓版」能力清单核对 |
 | **四期** | 插件化接管（DSH 公开扩展点：槽位/RPC）——按 roadmap「大目标」推进 | 上游能力长成我们的形状 |
 
 ## 6. 关键结论（来自研究，重要）
