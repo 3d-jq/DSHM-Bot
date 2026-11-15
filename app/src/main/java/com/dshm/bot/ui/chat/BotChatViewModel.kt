@@ -26,6 +26,8 @@ import com.dshm.bot.data.remote.DshQuestionRequest
 import com.dshm.bot.data.remote.DshQuestionAnswer
 import com.dshm.bot.data.remote.answersToJson
 import com.dshm.bot.data.remote.BotApproval
+import com.dshm.bot.data.remote.ChangesSummary
+import com.dshm.bot.data.remote.parseChangesSummary
 import com.dshm.bot.data.remote.parseBotApprovals
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.data.remote.TimelineRequest
@@ -79,6 +81,13 @@ enum class ChatEntryKind {
      * 中的消息，可撤回 / 改插话（`session/updateQueue`）。认领后由 `user` 行接替。
      */
     PENDING,
+
+    /**
+     * `changes` 行（timeline 投影，Phase 2）：这一轮改动的文件卡。摘要不在行里，
+     * 由 ViewModel 按 `(sessionId, seq)` 走 DSH `/api/changes.summary` 按需拉取，
+     * 拉到才出行（[ChatEntry.changes]）。
+     */
+    CHANGES,
 }
 
 /** 历史里「用户回答过的提问」。 */
@@ -210,6 +219,11 @@ data class ChatEntry(
     val pendingName: String? = null,
     /** 群聊 live 行（round 进行中的回复占位）：`live===true` 画「发言中」态。 */
     val live: Boolean = false,
+    /**
+     * [ChatEntryKind.CHANGES]：这一轮改动的摘要素材（宿主 `GET /api/changes.summary`）。
+     * null 表示还没拉到（此行也不会出现在界面上，等拉到重建后再出）。
+     */
+    val changes: ChangesSummary? = null,
 )
 
 /** 待发送的本地附件。 */
@@ -435,6 +449,15 @@ class BotChatViewModel internal constructor(
     private var parityRoundRunning = false
     /** 诊断日志限频：同一会话两次「行应用」日志的最小间隔。 */
     private var lastParityLogAt = 0L
+
+    /**
+     * 每轮改动摘要缓存（`seq` → 摘要）。键是 `changes` 行的 seq（即通告事件的
+     * seq），与 `GET /api/changes.summary?seq=` 的坐标一致。值为 null 表示「拉过了
+     * 但宿主已不提供 / 请求失败」——同一 seq 同样只拉一次，不再重试。
+     */
+    private val changesSummaries = HashMap<Long, ChangesSummary?>()
+    /** 正在拉取的 seq（防同一 seq 并发重复请求）。 */
+    private val changesFetching = HashSet<Long>()
     // endregion
 
     private val sessionRunningById = HashMap<String, Boolean>()
@@ -1050,6 +1073,8 @@ class BotChatViewModel internal constructor(
     private fun absorbParityRow(row: TimelineRow) {
         // 幂等写日志：同 seq 覆盖、乱序由 TreeMap 归位、迟到行落回正确位置。
         parityLog.put(row)
+        // `changes` 行：摘要不在行里，按 seq 按需拉一次（缓存，不阻塞重建）。
+        if (row.payload is TimelineRowPayload.Changes) requestChangesSummary(row.seq)
         val requestId = when (val payload = row.payload) {
             is TimelineRowPayload.User -> payload.requestId
             is TimelineRowPayload.Inbox -> payload.requestId
@@ -1096,6 +1121,36 @@ class BotChatViewModel internal constructor(
         DshMuxLog.log("timeline $source t=$now：${rows.size} 行 [$keys$more] seq=$paritySeq 缓冲=${parityLog.size()}${if (cardLog) " CARDS=[$cardKeys]" else ""}")
     }
 
+    /**
+     * `changes` 行的摘要按需拉取（`docs/parity-checklist.md` §2 P1）。
+     *
+     * 行的轻载荷只有 `{turn}`；摘要按 `(sessionId, seq)` 走 DSH
+     * `GET /api/changes.summary`（裸 JSON，解析见 [parseChangesSummary]）。同一 seq
+     * 只拉一次，无论成败（失败静默、只记一条 DshMuxLog）；拉到/拉完都触发一次全量
+     * 重建。这里只发协程、不等结果 —— 绝不阻塞行应用。
+     */
+    private fun requestChangesSummary(seq: Long?) {
+        if (seq == null) return
+        if (changesSummaries.containsKey(seq) || seq in changesFetching) return
+        val connection = client ?: return
+        changesFetching.add(seq)
+        val target = sessionId?.takeIf { it.isNotEmpty() } ?: botId
+        viewModelScope.launch {
+            val result = runCatching { connection.changesSummary(target, seq) }
+            val summary = result.getOrNull()?.let(::parseChangesSummary)
+            changesFetching.remove(seq)
+            changesSummaries[seq] = summary
+            if (summary == null) {
+                val failure = result.exceptionOrNull()
+                DshMuxLog.log(
+                    "changes.summary seq=$seq 没有摘要" +
+                        (failure?.let { "（${it.message ?: it.javaClass.simpleName}）" } ?: "（宿主已释放或该 seq 无记录）"),
+                )
+            }
+            rebuildParityEntries()
+        }
+    }
+
     /** 摘掉同 requestId 的排队/插话行（认领或撤回后它们就没有意义了）。 */
     private fun dropPendingInboxRowsOf(requestId: String) {
         parityLog.rows()
@@ -1127,11 +1182,15 @@ class BotChatViewModel internal constructor(
             val renderKey = parityRenderKeys[row.key]
             val echoRequestId = (row.payload as? TimelineRowPayload.User)?.requestId
             val attachmentItems = echoRequestId?.let { pendingEchoAttachments[it] } ?: emptyList()
+            // `changes` 行：把按 seq 缓存好的摘要贴给映射器（没拉到就为 null，映射后不出行）。
+            val changesSummary = (row.payload as? TimelineRowPayload.Changes)
+                ?.let { row.seq?.let { seq -> changesSummaries[seq] } }
             chatEntryOf(
                 row = row,
                 botName = botName,
                 renderKey = renderKey,
                 attachmentItems = attachmentItems,
+                changesSummary = changesSummary,
             )?.let(mapped::add)
         }
         // 本地 echo 行：乐观位置，排在尾部。

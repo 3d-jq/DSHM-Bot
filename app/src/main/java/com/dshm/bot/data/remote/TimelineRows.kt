@@ -40,10 +40,13 @@ data class TimelineRow(
         const val KIND_ANSWERED = "answered"
         const val KIND_INBOX = "inbox"
 
+        /** DSH `workspace/changes` 通告（该轮改动的文件）；摘要按 (sessionId, seq) 另取。 */
+        const val KIND_CHANGES = "changes"
+
         /** 已知的全部 kind；`turntail` / `streaming` 这类 1c 才发的行也先认下（raw 载荷）。 */
         val KINDS = setOf(
             KIND_USER, KIND_BOT, KIND_TOOL, KIND_ARTIFACT, KIND_EVENT, KIND_DIVIDER,
-            KIND_VIEW, KIND_ANSWERED, KIND_INBOX, "turntail", "streaming",
+            KIND_VIEW, KIND_ANSWERED, KIND_INBOX, KIND_CHANGES, "turntail", "streaming",
         )
     }
 }
@@ -103,6 +106,18 @@ sealed interface TimelineRowPayload {
     ) : TimelineRowPayload
 
     data class Divider(val timeMs: Long?) : TimelineRowPayload
+
+    /**
+     * `changes`：DSH `workspace/changes` 通告的轻量行（`payload` 只有 `turn`）。
+     *
+     * 摘要本体不在事件里：客户端按 `(sessionId, seq)` 走
+     * `GET /api/changes.summary` 取（seq 用行的 [TimelineRow.seq]，即通告事件的 seq）。
+     * [raw] 原样保留，向后兼容将来多出的字段。
+     */
+    data class Changes(
+        val turn: Int?,
+        val raw: JSONObject,
+    ) : TimelineRowPayload
 
     /** `view` / `answered` 的载荷原样保留（对齐现有 `ChatViewCard` / `ChatAnsweredQuestion` 形状）。 */
     data class View(val view: JSONObject) : TimelineRowPayload
@@ -314,6 +329,11 @@ private fun parseRowPayload(kind: String, payload: JSONObject): TimelineRowPaylo
 
     TimelineRow.KIND_DIVIDER -> TimelineRowPayload.Divider(
         timeMs = optionalLong(payload, "timeMs") ?: optionalLong(payload, "time"),
+    )
+
+    TimelineRow.KIND_CHANGES -> TimelineRowPayload.Changes(
+        turn = optionalInt(payload, "turn"),
+        raw = payload,
     )
 
     TimelineRow.KIND_VIEW -> TimelineRowPayload.View(payload)

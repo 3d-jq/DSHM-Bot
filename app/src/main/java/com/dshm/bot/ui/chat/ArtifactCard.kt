@@ -270,7 +270,7 @@ private fun ArtifactTile(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                painter = painterResource(artifactIcon(artifact)),
+                painter = painterResource(artifactIcon(artifact.path)),
                 contentDescription = null,
                 tint = artifactTint(artifact),
                 modifier = Modifier.size(Dshm.spacing.icon),
@@ -345,8 +345,9 @@ private fun artifactTint(artifact: ChatArtifact): Color = when (artifact.extensi
     else -> Dshm.colors.textSecondary
 }
 
-/** 类型图标（对齐 dsh-Go `artifactIcon`）：按 `ArtifactKind` 分，不再是粗粒度两三种。 */
-private fun artifactIcon(artifact: ChatArtifact): Int = when (artifactKindOf(artifact.path)) {
+/** 类型图标（对齐 dsh-Go `artifactIcon`）：按 `ArtifactKind` 分，不再是粗粒度两三种。
+ * `internal`：改动卡（`ChangedFilesCard`）按同一套图标体系画文件行。 */
+internal fun artifactIcon(path: String): Int = when (artifactKindOf(path)) {
     ArtifactKind.IMAGE -> R.drawable.ic_lucide_image
     ArtifactKind.VIDEO -> R.drawable.ic_lucide_file_video
     ArtifactKind.AUDIO -> R.drawable.ic_lucide_audio_lines
@@ -446,8 +447,8 @@ private fun ArtifactMenu(
     }
 }
 
-/** 已知错误码给白话；其余显示引擎给的原话。 */
-private fun artifactErrorText(context: android.content.Context, error: Throwable): String =
+/** 已知错误码给白话；其余显示引擎给的原话。`internal`：改动卡复用同一套错误文案。 */
+internal fun artifactErrorText(context: android.content.Context, error: Throwable): String =
     when (artifactErrorCode(error)) {
         "workspace-file/not-found" -> context.getString(R.string.chat_artifact_not_found)
         "workspace-file/too-large" -> context.getString(R.string.chat_artifact_too_large)

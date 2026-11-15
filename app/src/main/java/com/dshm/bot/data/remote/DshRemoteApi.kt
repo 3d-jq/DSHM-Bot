@@ -23,6 +23,14 @@ interface DshRemoteApi {
      * 失败语义交给调用方（shadow 模式必须自吞，不许影响主管线）。
      */
     suspend fun timeline(request: TimelineRequest = TimelineRequest()): TimelineSnapshot? = null
+
+    /**
+     * 一轮改动的文件摘要（`GET /api/changes.summary?sessionId=..&seq=..`，裸 JSON）。
+     *
+     * 默认「不支持」返回 null：既有假实现/调用方零改动；[RemoteDshApi] 覆盖为真实端点。
+     * 拉不到（宿主 404 / 网络失败）一律 null，调用方静默。
+     */
+    suspend fun changesSummary(sessionId: String, seq: Long): JSONObject? = null
 }
 
 /** 把具体 [DshClient] 收进接口，调用方只看到对话所需的最小面。 */
@@ -40,4 +48,7 @@ class RemoteDshApi(private val client: DshClient) : DshRemoteApi {
 
     override suspend fun timeline(request: TimelineRequest): TimelineSnapshot? =
         client.timeline(request)
+
+    override suspend fun changesSummary(sessionId: String, seq: Long): JSONObject? =
+        client.changesSummary(sessionId, seq)
 }

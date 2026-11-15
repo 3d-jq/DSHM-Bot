@@ -137,6 +137,14 @@ class BotChatParityPipelineTest {
         }
         override fun feed(): Flow<BotFeedEvent> = feedEvents
 
+        val changesSummaryCalls = mutableListOf<Pair<String, Long>>()
+        var changesSummaryResponse: JSONObject? = null
+
+        override suspend fun changesSummary(sessionId: String, seq: Long): JSONObject? {
+            changesSummaryCalls += sessionId to seq
+            return changesSummaryResponse
+        }
+
         fun row(
             key: String,
             kind: String,
@@ -671,6 +679,66 @@ class BotChatParityPipelineTest {
         assertTrue("断档应触发一次带 since 的重放：$replay", replay?.since != null)
         assertEquals("since 应为断档前的本地 seq", 40L, replay?.since)
         assertTrue("当前帧仍要正常应用", viewModel.uiState.value.entries.any { it.id == "bot:50" })
+    }
+
+    /** `changes` 行：摘要按 (sessionId, seq) 只拉一次，拉到后行才带上改动卡。 */
+    @Test
+    fun changesRowFetchesItsSummaryOnceAndRendersTheCard() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.changesSummaryResponse = JSONObject()
+            .put("total", 1).put("added", 3).put("deleted", 1)
+            .put(
+                "files",
+                JSONArray().put(
+                    JSONObject().put("path", "/ws/a.md").put("display", "a.md").put("added", 3).put("deleted", 1),
+                ),
+            )
+        api.snapshotRows = listOf(
+            TimelineRow(
+                key = "changes:6", kind = "changes", seq = 6L, turn = 2, timeMs = null,
+                payload = TimelineRowPayload.Changes(turn = 2, raw = JSONObject().put("turn", 2)),
+            ),
+        )
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        // 快照 admitted 后按 (sessionId, seq) 拉了正好一次（sessionId 来自快照）。
+        assertEquals(listOf("s-1" to 6L), api.changesSummaryCalls)
+        val entry = viewModel.uiState.value.entries.single()
+        assertEquals(ChatEntryKind.CHANGES, entry.kind)
+        assertEquals("changes:6", entry.id)
+        assertEquals(1, entry.changes?.total)
+        assertEquals(listOf("a.md"), entry.changes?.files?.map { it.display })
+
+        // 同一 seq 再来一次（重放/重连）不会重复拉。
+        api.emitTimeline(
+            TimelineRow(
+                key = "changes:6", kind = "changes", seq = 6L, turn = 2, timeMs = null,
+                payload = TimelineRowPayload.Changes(turn = 2, raw = JSONObject().put("turn", 2)),
+            ),
+        )
+        scheduler.runCurrent()
+        assertEquals(1, api.changesSummaryCalls.size)
+    }
+
+    /** `changes` 行拉不到摘要（宿主已释放/失败）时不出行，也不重拉。 */
+    @Test
+    fun changesRowWithoutSummaryRendersNothing() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.changesSummaryResponse = null
+        api.snapshotRows = listOf(
+            TimelineRow(
+                key = "changes:9", kind = "changes", seq = 9L, turn = 3, timeMs = null,
+                payload = TimelineRowPayload.Changes(turn = 3, raw = JSONObject().put("turn", 3)),
+            ),
+        )
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        assertEquals(listOf("s-1" to 9L), api.changesSummaryCalls)
+        assertTrue(viewModel.uiState.value.entries.isEmpty())
     }
 
     private fun lastRequestId(api: FakeApi): String =

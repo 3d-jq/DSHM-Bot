@@ -1,5 +1,7 @@
 package com.dshm.bot.ui.chat
 
+import com.dshm.bot.data.remote.ChangedFile
+import com.dshm.bot.data.remote.ChangesSummary
 import com.dshm.bot.data.remote.TimelineFile
 import com.dshm.bot.data.remote.TimelineRow
 import com.dshm.bot.data.remote.TimelineRowPayload
@@ -188,6 +190,29 @@ class TimelineRowMappingTest {
         assertEquals("user", mapped.pendingSourceKind)
         assertEquals("研究员", mapped.pendingName)
         assertEquals("bot-9", mapped.botId)
+    }
+
+    @Test
+    fun changesRowMapsToChangesEntryOnlyOnceTheSummaryArrives() {
+        val row = TimelineRow(
+            "changes:6", "changes", 6L, 2, 100L,
+            TimelineRowPayload.Changes(turn = 2, raw = JSONObject().put("turn", 2)),
+        )
+        // 摘要还没拉到：不出行（官方也是「摘到且非空才画」），避免空卡。
+        assertNull(chatEntryOf(row, botName = "小助手"))
+        // 摘要到了：映射成 CHANGES 条目，seq 带过去（按 seq 缓存对得上）。
+        val summary = ChangesSummary(
+            files = listOf(
+                ChangedFile(path = "/ws/a.md", display = "a.md", added = 3, deleted = 1),
+                ChangedFile(path = "/ws/b.png", display = "b.png", added = 0, deleted = 0, binary = true),
+            ),
+            total = 2, added = 3, deleted = 1,
+        )
+        val mapped = chatEntryOf(row, botName = "小助手", changesSummary = summary)!!
+        assertEquals(ChatEntryKind.CHANGES, mapped.kind)
+        assertEquals("changes:6", mapped.id)
+        assertEquals(6L, mapped.seq)
+        assertEquals(summary, mapped.changes)
     }
 
     @Test

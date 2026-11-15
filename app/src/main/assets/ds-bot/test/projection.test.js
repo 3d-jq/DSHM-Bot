@@ -9,6 +9,7 @@ import { test } from 'node:test'
 import { roomItems } from '../src/host/mobile.js'
 import {
   artifactRowsOf,
+  changesRowsOf,
   composeRoomRows,
   composeTimelineRows,
   failureRowsOf,
@@ -38,6 +39,8 @@ const toolResult = (turn, callId, { meta, isError, text } = {}) => event('tool/r
   ...(meta ? { meta } : {}),
 })
 const presented = (turn, callId, files) => event('deliverables/presented', { turn, callId, files })
+// DSH `workspace/changes`: the event data carries only the turn (dsh-workspace-changes).
+const changes = turn => event('workspace/changes', { turn })
 
 const keysOf = rows => rows.map(row => row.key)
 const reset = () => { seq = 0 }
@@ -197,6 +200,48 @@ test('a finished turn without present lists the produced files, extension-agnost
   assert.equal(rows.length, 1)
   assert.deepEqual(rows[0].payload.files.map(file => file.path), ['/root/w/report.pptx', '/root/w/old.md'])
   assert.equal(rows[0].payload.delivered, false)
+})
+
+test('a workspace/changes announcement becomes one light row per turn, above the artifact card', () => {
+  reset()
+  const events = [
+    turnStart(1),
+    toolCall(1, 'w1', 'write', { file_path: 'a.md', content: 'x' }),
+    toolResult(1, 'w1', { meta: { path: '/root/w/a.md' } }),
+    assistant(1, '改好了'),
+    changes(1),
+    turnEnd(1),
+  ]
+  const rows = composeTimelineRows({ events, baseItems: [base('bot', '改好了', events[3].seq)], cwd: '/root/w' })
+  const changesRow = rows.find(row => row.kind === 'changes')
+  assert.ok(changesRow, `缺 changes 行：${keysOf(rows)}`)
+  // key/seq 用**通告事件**的 seq —— 客户端按它取 /api/changes.summary。
+  assert.equal(changesRow.key, `changes:${events[4].seq}`)
+  assert.equal(changesRow.seq, events[4].seq)
+  assert.equal(changesRow.turn, 1)
+  assert.deepEqual(changesRow.payload, {}, '轻行：摘要不在行里')
+  // 位置：同轮尾部、artifact 行之前（「changes 在上」）。
+  const changesAt = rows.findIndex(row => row.kind === 'changes')
+  const artifactAt = rows.findIndex(row => row.kind === 'artifact')
+  assert.ok(artifactAt >= 0, `缺 artifact 行：${keysOf(rows)}`)
+  assert.ok(changesAt < artifactAt, `changes 必须在 artifact 之前：${keysOf(rows)}`)
+})
+
+test('several change announcements in one turn keep only the latest; hidden turns drop theirs', () => {
+  reset()
+  const events = [
+    turnStart(2),
+    toolCall(2, 'w1', 'write', { file_path: 'a.md', content: 'x' }),
+    toolResult(2, 'w1', { meta: { path: '/root/w/a.md' } }),
+    changes(2),
+    changes(2),
+    assistant(2, '好了'),
+    turnEnd(2),
+  ]
+  assert.deepEqual(changesRowsOf(events).map(row => row.key), [`changes:${events[4].seq}`])
+  assert.deepEqual(changesRowsOf(events, { exchangeTurns: [2] }), [])
+  // A turn that changed nothing never announces; it makes no row.
+  assert.deepEqual(changesRowsOf([turnStart(3), turnEnd(3)]), [])
 })
 
 test('a read (view) is not a mutation and makes no artifact', () => {

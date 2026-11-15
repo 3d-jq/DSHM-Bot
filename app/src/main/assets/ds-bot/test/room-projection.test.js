@@ -135,6 +135,22 @@ test('round events never fold into a tool row: group_relay speaks through its re
   assert.ok(rows.every(row => row.kind !== 'tool'), '群聊不该有 group_relay 工具行')
 })
 
+test('a room turn\'s change announcement rides the tail as one light changes row', () => {
+  reset()
+  const events = [
+    ...ROOM_EVENTS(),
+    event('workspace/changes', { turn: 1 }),
+  ]
+  const rows = baseRows(events)
+  const changesRow = rows.find(row => row.kind === 'changes')
+  assert.ok(changesRow, `缺 changes 行：${keysOf(rows)}`)
+  assert.equal(changesRow.key, `changes:${events.at(-1).seq}`)
+  assert.equal(changesRow.turn, 1)
+  assert.deepEqual(changesRow.payload, {}, '轻行：摘要不在行里')
+  // Tail: after the round's positional rows, before the endpoint's artifact card.
+  assert.equal(rows.at(-1).kind, 'changes')
+})
+
 test('the room card carries presents only — the workspace scan never feeds it', () => {
   reset()
   // 2026-11-14 取证的定案：成员会话里确实有带描述的 present，而扫盘捞到的是私聊产物

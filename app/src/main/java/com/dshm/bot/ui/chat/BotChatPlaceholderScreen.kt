@@ -1108,6 +1108,16 @@ private fun ChatMessages(
                         delivered = entry.artifactsDelivered,
                     )
 
+                    // `changes` 行（Phase 2）：这一轮改动的文件卡（对齐官方 `ChangedFiles`）。
+                    // 摘要在 ViewModel 里按需拉到，没拉到就不会有这条 entry（`entry.changes == null`）。
+                    ChatEntryKind.CHANGES -> entry.changes?.let { summary ->
+                        ChangedFilesCard(
+                            summary = summary,
+                            endpoint = endpoint,
+                            sessionId = bot.id,
+                        )
+                    }
+
                     ChatEntryKind.BROWSER_SHOT -> BrowserShotCard(
                         shot = entry.shot,
                         onClick = { onOpenBrowser(entry.shot?.url) },

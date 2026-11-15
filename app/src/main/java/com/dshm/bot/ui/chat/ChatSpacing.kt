@@ -50,7 +50,8 @@ fun chatItemSpacing(
     val top = when {
         // 事件行/分隔线固定 2dp；紧跟事件行的那条也只留 2dp（事件行下侧对称）。
         eventLike || olderEventLike -> spacing.xxs
-        groupStart || turnsChanged || entryKind == ChatEntryKind.ARTIFACTS -> spacing.turnGap
+        groupStart || turnsChanged ||
+            entryKind == ChatEntryKind.ARTIFACTS || entryKind == ChatEntryKind.CHANGES -> spacing.turnGap
         else -> spacing.xs
     }
     return ChatItemSpacing(top = top, groupStart = groupStart, sameBotAsOlder = sameBotAsOlder)

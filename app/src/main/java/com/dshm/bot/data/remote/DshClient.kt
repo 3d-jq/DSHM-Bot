@@ -167,6 +167,47 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
             ?: error("timeline 响应形状不对")
 
     /**
+     * 一轮改动的文件摘要：`GET /api/changes.summary?sessionId=..&seq=..`。
+     *
+     * 这是 DSH `dsh-client-ui-deliverables` 注册的 **Fetch 路由**（与 `/api/bot` 同端口、
+     * 同 `dsh-auth-*` cookie），响应是**裸 JSON** `{turn, files, total, added, deleted}`
+     * （不是 `{ok,value}` 信封；解析见 [parseChangesSummary]）。
+     *
+     * 宿主在 Session 已释放 / 该 seq 没记录时回 404；其余非 2xx 也归为「没有」。
+     * 一律返回 `null`（静默），调用方「拉到就画、拉不到就不画」。
+     */
+    suspend fun changesSummary(sessionId: String, seq: Long): JSONObject? = withContext(Dispatchers.IO) {
+        withAuthRetry { auth ->
+            val session = URLEncoder.encode(sessionId, "UTF-8").replace("+", "%20")
+            val connection =
+                (URL(endpoint.baseUrl.trimEnd('/') + "/api/changes.summary?sessionId=" + session + "&seq=" + seq).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15_000
+                    readTimeout = 30_000
+                    setRequestProperty("Cookie", auth)
+                }
+            try {
+                val code = connection.responseCode
+                checkAuthExpired(code)
+                when {
+                    // 摘要已被释放 / 宿主没记录这个 seq：是「没有」，不是错误。
+                    code == 404 -> null
+                    code in 200..299 -> {
+                        val text = connection.inputStream.bufferedReader().use(BufferedReader::readText)
+                        if (text.isBlank()) null else JSONObject(text)
+                    }
+                    else -> null
+                }
+            } catch (malformed: org.json.JSONException) {
+                DshMuxLog.log("changes.summary seq=$seq 响应不是 JSON：${malformed.message}")
+                null
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    /**
      * 上传一个附件到某个 Session，返回 prompt 可消费的 receipt。
      *
      * 对齐 DSH `dsh-client-file-upload` 的原始路由：

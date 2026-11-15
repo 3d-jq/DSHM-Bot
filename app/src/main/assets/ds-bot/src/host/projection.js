@@ -12,9 +12,9 @@
 //
 // A row is `{ key, kind, seq, turn, timeMs, payload }`:
 //   - `key` is the durable identity (`user:<seq>`, `bot:<seq>`, `tool:<seq>`,
-//     `present:<turn>`, `retry:<seq>`, `turnfail:<seq>`, `event:<seq>`,
-//     `answer:<seq>`, `view:<callId>`, `inbox:<itemId>`); a client only ever
-//     replaces a row by key, never re-sorts the table itself.
+//     `present:<turn>`, `changes:<seq>`, `retry:<seq>`, `turnfail:<seq>`,
+//     `event:<seq>`, `answer:<seq>`, `view:<callId>`, `inbox:<itemId>`); a client
+//     only ever replaces a row by key, never re-sorts the table itself.
 //   - rows with a seq are strictly ascending in seq; rows without one (inbox) are
 //     appended at the tail.
 //   - unknown payload fields must be ignored by clients (additive evolution).
@@ -240,14 +240,13 @@ function itemToRow(item, index, viewSeqOf, userAttachments) {
   }
 }
 
-/** Tool rows for one event list: a running call holds its row, the result replaces
- * it at the result's seq. A call whose result is not in this list keeps its
- * `running` row — a live snapshot's edge. `present` makes no row at all: the
- * deliverable card is the one surface for it (2026-11-14, user's call). */
+/** Tool rows for one event list: a settling result makes the row at the result's
+ * seq (ok/error); a call with no result in this window makes none (a toolless
+ * edge needs no placeholder row). `present` makes no row at all: the deliverable
+ * card is the one surface for it (2026-11-14, user's call). */
 export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } = {}) {
   const hidden = new Set(exchangeTurns)
   const calls = new Map()
-  const settled = new Set()
   const rows = []
   const nameOf = raw => (resolveBot !== undefined && raw !== '' ? resolveBot(raw) ?? raw : raw)
   for (const event of events) {
@@ -266,7 +265,6 @@ export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } =
     const pending = calls.get(callId)
     if (pending === undefined) continue
     if (typeof pending.turn === 'number' && hidden.has(pending.turn)) continue
-    settled.add(callId)
     const isError = event.data?.isError === true || message?.isError === true || event.data?.error !== undefined
     const args = pending.args
     const raw = ['to', 'bot', 'name', 'group'].map(key => (isRecord(args) ? String(args[key] ?? '').trim() : '')).find(value => value !== '') ?? ''
@@ -321,9 +319,9 @@ export function toolRowsOf(events, { exchangeTurns = [], resolveBot, botName } =
       label,
     }))
   }
-  // A call whose result is in this same list already made its result row: the
-  // running row from the call drops (the official swap, per turn).
-  return rows.filter(entry => !(entry.payload.state === 'running' && settled.has(entry.payload.callId)))
+  // Every TOOL_ROWS call settles into exactly one row (ok/error); no row is ever
+  // left in `running`, so there is nothing to swap or filter here.
+  return rows
 }
 
 /** Rows a finished turn's deliverables make (official `deliverablesDefinition`
@@ -409,6 +407,30 @@ export function artifactRowsOf(events, { exchangeTurns = [], cwd } = {}) {
   return rows
 }
 
+/** A turn's changed files, as a light row: the DSH `workspace/changes` event
+ * carries only `{turn}` (`dsh-workspace-changes`), so the row names the turn and
+ * rides the *announcing event's* seq — the coordinates the client hydrates through
+ * `GET /api/changes.summary?sessionId=..&seq=..`. One row per turn: a long turn may
+ * announce more than once and the latest announcement supersedes the earlier ones
+ * (official `changesForClosing`). Its seq sits just before `turn/end` (the recorder
+ * appends inside the turn, before turn/end commits), so it lands in the turn tail,
+ * above the artifact card. `present` is unrelated: a turn can carry both. */
+export function changesRowsOf(events, { exchangeTurns = [] } = {}) {
+  const hidden = new Set(exchangeTurns)
+  const latest = new Map()
+  for (const event of events) {
+    if (event.type !== 'workspace/changes') continue
+    const turn = event.data?.turn
+    if (typeof turn !== 'number' || !Number.isSafeInteger(turn) || turn < 1) continue
+    if (hidden.has(turn)) continue
+    const seq = event.seq
+    if (typeof seq !== 'number') continue
+    const previous = latest.get(turn)
+    if (previous === undefined || seq > previous.seq) latest.set(turn, { turn, seq, time: event.time })
+  }
+  return [...latest.values()].map(entry => row(`changes:${entry.seq}`, 'changes', entry.seq, entry.turn, entry.time, {}))
+}
+
 /** `llm/retry` and a turn that ended in error, as event rows (one per event; the
  * client folds identical consecutive lines itself — an intentional deviation). */
 export function failureRowsOf(events, { exchangeTurns = [], botId, botName } = {}) {
@@ -483,6 +505,7 @@ export function composeTimelineRows({ events, baseItems, exchangeTurns = [], res
   const rows = (baseItems ?? []).map((item, index) => itemToRow(item, index, viewSeqOf, userAttachments))
   rows.push(...toolRowsOf(events, { exchangeTurns, resolveBot, botName }))
   rows.push(...failureRowsOf(events, { exchangeTurns, botName }))
+  rows.push(...changesRowsOf(events, { exchangeTurns }))
   rows.push(...artifactRowsOf(events, { exchangeTurns, cwd }))
   const ordered = rows
     .map((entry, index) => ({ entry, index }))
@@ -532,6 +555,9 @@ export function composeRoomRows({ events, baseItems, botName }) {
         break
     }
   }
+  // The turn's changed files (a light `changes` row the client hydrates) ride in
+  // the tail ahead of the group artifact card the endpoint appends after this.
+  rows.push(...changesRowsOf(events))
   rows.push(...failureRowsOf(events, { botName }))
   return rows
 }

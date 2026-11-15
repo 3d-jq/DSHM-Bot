@@ -150,6 +150,25 @@ class TimelineRowsTest {
     }
 
     @Test
+    fun changesRowKeepsTurnAndRawPayload() {
+        val parsed = parseTimelineRow(
+            row("changes:6", "changes", JSONObject().put("turn", 2), seq = 6, turn = 2),
+        )
+        val changes = parsed!!.payload as TimelineRowPayload.Changes
+        assertEquals(2, changes.turn)
+        assertEquals(2, changes.raw.optInt("turn"))
+        assertEquals(6L, parsed.seq)
+        assertEquals(2, parsed.turn)
+
+        // 轻载荷（空对象）也认：turn 回落 null，行保留。
+        val bare = parseTimelineRow(row("changes:7", "changes", JSONObject(), seq = 7, turn = null))
+        val barePayload = bare!!.payload as TimelineRowPayload.Changes
+        assertNull(barePayload.turn)
+        assertNull(bare.turn)
+        assertEquals(7L, bare.seq)
+    }
+
+    @Test
     fun unknownKindIsIgnoredForForwardCompatibility() {
         assertNull(parseTimelineRow(row("future:1", "quantum", JSONObject().put("x", 1))))
     }

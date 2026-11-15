@@ -259,6 +259,12 @@
     <string name="chat_artifacts_delivered">Delivered %1$d files</string>
     <string name="chat_artifacts_generated">Generated %1$d files</string>
     <string name="chat_artifacts_all">All %1$d files</string>
+    <string name="chat_changes_edited">Edited %1$d files</string>
+    <string name="chat_changes_edited_single">Edited %1$s</string>
+    <string name="chat_changes_added">+%1$d</string>
+    <string name="chat_changes_deleted">−%1$d</string>
+    <string name="chat_changes_binary">Binary</string>
+    <string name="chat_changes_oversized">Too large</string>
     <string name="chat_artifact_more">More actions</string>
     <string name="chat_artifact_fetching">Getting the file from the engine…</string>
     <string name="chat_artifact_open">Open</string>

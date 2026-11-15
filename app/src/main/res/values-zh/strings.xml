@@ -259,6 +259,12 @@
     <string name="chat_artifacts_delivered">交付了 %1$d 个文件</string>
     <string name="chat_artifacts_generated">生成了 %1$d 个文件</string>
     <string name="chat_artifacts_all">全部 %1$d 个文件</string>
+    <string name="chat_changes_edited">编辑了 %1$d 个文件</string>
+    <string name="chat_changes_edited_single">编辑了 %1$s</string>
+    <string name="chat_changes_added">+%1$d</string>
+    <string name="chat_changes_deleted">−%1$d</string>
+    <string name="chat_changes_binary">二进制</string>
+    <string name="chat_changes_oversized">文件过大</string>
     <string name="chat_artifact_more">更多操作</string>
     <string name="chat_artifact_fetching">正在从引擎取文件…</string>
     <string name="chat_artifact_open">打开</string>

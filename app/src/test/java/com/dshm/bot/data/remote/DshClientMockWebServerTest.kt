@@ -15,6 +15,7 @@ import okhttp3.mockwebserver.SocketPolicy
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -72,6 +73,36 @@ class DshClientMockWebServerTest {
         val body = JSONObject(bot.body.readUtf8())
         assertEquals("chat", body.getString("endpoint"))
         assertEquals("bot-1", body.getJSONObject("payload").getString("botId"))
+    }
+
+    @Test
+    fun changeSummaryReadsBareJsonWithCookieAndReturns404AsNull() = runBlocking {
+        // DSH 路由返回**裸 JSON**（dsh-client-ui-deliverables 直接 Response.json），
+        // 不带 {ok,value} 信封 —— 落库形状就按这个断言。
+        val summary = JSONObject()
+            .put("turn", 2).put("total", 1).put("added", 3).put("deleted", 1)
+            .put(
+                "files",
+                org.json.JSONArray().put(
+                    JSONObject().put("path", "a.md").put("display", "a.md").put("added", 3).put("deleted", 1),
+                ),
+            )
+        server.enqueue(loginResponse())
+        server.enqueue(MockResponse().setResponseCode(200).setBody(summary.toString()))
+        server.enqueue(MockResponse().setResponseCode(404).setBody("Change summary unavailable."))
+
+        val client = client()
+        val parsed = client.changesSummary("s-1", 6L)
+        assertEquals(summary.toString(), parsed?.toString())
+
+        assertEquals("/?token=test-token", server.takeRequest().path)
+        val summaryRequest = server.takeRequest()
+        assertEquals("/api/changes.summary?sessionId=s-1&seq=6", summaryRequest.path)
+        assertEquals("GET", summaryRequest.method)
+        assertTrue(summaryRequest.getHeader("Cookie").orEmpty().isNotEmpty())
+
+        // Host no longer serves the summary (Session disposed / unknown seq): 404 → null.
+        assertNull(client.changesSummary("s-1", 7L))
     }
 
     @Test

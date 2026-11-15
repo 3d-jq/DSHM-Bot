@@ -1,5 +1,6 @@
 package com.dshm.bot.ui.chat
 
+import com.dshm.bot.data.remote.ChangesSummary
 import com.dshm.bot.data.remote.TimelineFile
 import com.dshm.bot.data.remote.TimelineRow
 import com.dshm.bot.data.remote.TimelineRowPayload
@@ -20,6 +21,8 @@ internal fun chatEntryOf(
     botName: String,
     renderKey: String? = null,
     attachmentItems: List<ChatAttachmentItem> = emptyList(),
+    /** `changes` 行的摘要（宿主 `/api/changes.summary` 的解析结果）；未拉到时为 null。 */
+    changesSummary: ChangesSummary? = null,
 ): ChatEntry? {
     val id = renderKey ?: row.key
     val seq = row.seq
@@ -143,6 +146,19 @@ internal fun chatEntryOf(
             pendingSourceKind = payload.sourceKind,
             pendingName = payload.name,
         )
+
+        // `changes` 行：摘要还没拉到（或宿主已不提供）就不出行 —— 官方也是
+        // 「摘到且 files 非空才画卡」；拉到后 ViewModel 会重算一次 entries。
+        is TimelineRowPayload.Changes -> changesSummary?.let { summary ->
+            ChatEntry(
+                id = id,
+                kind = ChatEntryKind.CHANGES,
+                text = "",
+                timeMs = time,
+                seq = seq,
+                changes = summary,
+            )
+        }
 
         // turntail / streaming 等未展开 kind：1c 再接，不渲染。
         is TimelineRowPayload.Raw -> null

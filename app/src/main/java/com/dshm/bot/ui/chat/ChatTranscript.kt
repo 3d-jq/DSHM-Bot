@@ -70,6 +70,18 @@ fun conversationMarkdown(
                     if (entry.pendingSlot == "next-step") "插话中" else "排队中",
                 ).append("：").append(entry.text).append("\n\n")
             }
+
+            ChatEntryKind.CHANGES -> entry.changes?.let { summary ->
+                out.append("- 改动 ").append(summary.total).append(" 个文件：\n")
+                summary.files.forEach { file ->
+                    out.append("  - ").append(file.display)
+                    if (!file.binary && !file.oversized) {
+                        out.append(" (+").append(file.added).append(" −").append(file.deleted).append(')')
+                    }
+                    out.append('\n')
+                }
+                out.append('\n')
+            }
         }
     }
     return out.toString().trimEnd() + "\n"
