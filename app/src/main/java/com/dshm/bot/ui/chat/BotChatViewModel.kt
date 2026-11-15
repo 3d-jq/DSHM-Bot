@@ -414,7 +414,11 @@ class BotChatViewModel internal constructor(
     private var paritySnapshot: TimelineSnapshot? = null
     private var paritySessionId: String? = null
     /** 服务端投影的行缓冲（key → row）；群聊保持宿主位置序，单聊按 seq 归位。 */
-    private val parityRows = LinkedHashMap<String, TimelineRow>()
+    /**
+     * 时间线**唯一事实源**（对齐 dsh-Go `_log`）：按 (part, seq) 有序、幂等写入，
+     * 显示永远从它全量重算 —— 不再靠「帧到达顺序」维护显示缓冲。
+     */
+    private val parityLog = TimelineEventLog()
     /** earlier 分页游标（timeline 响应的 cursor），null = 没有更早的了。 */
     private var parityCursor: JSONObject? = null
     private var parityLoadingEarlier = false
@@ -843,15 +847,9 @@ class BotChatViewModel internal constructor(
                         return@onSuccess
                     }
                     parityCursor = snapshot.cursor
-                    // 整页前插：新页 rows 先入，旧 rows 随后（同 key 以新页为准）。
-                    val rebuilt = LinkedHashMap<String, TimelineRow>()
-                    snapshot.rows.forEach { row ->
-                        rebuilt[row.key] = row
-                        absorbEchoRelationsOf(row)
-                    }
-                    parityRows.forEach { (key, row) -> rebuilt[key] = row }
-                    parityRows.clear()
-                    parityRows.putAll(rebuilt)
+                    // 更早的一页整页前插（顺序由宿主给的显示序决定，不跨 part 排序）。
+                    parityLog.prependPage(snapshot.rows)
+                    snapshot.rows.forEach { row -> absorbEchoRelationsOf(row) }
                     parityLoadingEarlier = false
                     rebuildParityEntries(hasEarlier = snapshot.cursor != null)
                     logRowApplication("earlier", snapshot.rows)
@@ -1029,7 +1027,7 @@ class BotChatViewModel internal constructor(
             // `loadEarlier()` 直接返回 —— 表现为「看不到更早的历史，冷启动才恢复」。
             if (reset || snapshot.cursor != null) parityCursor = snapshot.cursor
             if (reset) {
-                parityRows.clear()
+                parityLog.clear()
                 parityRenderKeys.clear()
             }
             snapshot.rows.forEach { row -> absorbParityRow(row) }
@@ -1050,7 +1048,8 @@ class BotChatViewModel internal constructor(
      * `requestId` → 替换掉同 requestId 的 echo 行（发送中 → 排队/插话）。
      */
     private fun absorbParityRow(row: TimelineRow) {
-        parityRows[row.key] = row
+        // 幂等写日志：同 seq 覆盖、乱序由 TreeMap 归位、迟到行落回正确位置。
+        parityLog.put(row)
         val requestId = when (val payload = row.payload) {
             is TimelineRowPayload.User -> payload.requestId
             is TimelineRowPayload.Inbox -> payload.requestId
@@ -1094,26 +1093,24 @@ class BotChatViewModel internal constructor(
         val throttled = now - lastParityLogAt < PARITY_LOG_MIN_INTERVAL_MS
         if (!cardLog && throttled) return
         lastParityLogAt = now
-        DshMuxLog.log("timeline $source t=$now：${rows.size} 行 [$keys$more] seq=$paritySeq 缓冲=${parityRows.size}${if (cardLog) " CARDS=[$cardKeys]" else ""}")
+        DshMuxLog.log("timeline $source t=$now：${rows.size} 行 [$keys$more] seq=$paritySeq 缓冲=${parityLog.size()}${if (cardLog) " CARDS=[$cardKeys]" else ""}")
     }
 
     /** 摘掉同 requestId 的排队/插话行（认领或撤回后它们就没有意义了）。 */
     private fun dropPendingInboxRowsOf(requestId: String) {
-        val iterator = parityRows.entries.iterator()
-        while (iterator.hasNext()) {
-            val (key, existing) = iterator.next()
-            val payload = existing.payload as? TimelineRowPayload.Inbox ?: continue
-            if (payload.requestId == requestId) {
-                iterator.remove()
+        parityLog.rows()
+            .filter { (it.payload as? TimelineRowPayload.Inbox)?.requestId == requestId }
+            .map { it.key }
+            .forEach { key ->
+                parityLog.withdraw(key)
                 parityRenderKeys.remove(key)
             }
-        }
     }
 
     /**
      * 行缓冲 → entries 全量重建（唯一写 entries 的地方）。
      *
-     * **渲染顺序 = 行缓冲的插入序**（`parityRows` 是 LinkedHashMap）：宿主按显示序
+     * **渲染顺序 = 日志顺序**（`parityLog`：(part, seq) 有序）：宿主按显示序
      * 返回 rows（首屏单 part 内 seq 升序、更早的 part 整页前插、增量追加尾部），
      * 客户端不再按 seq 全局排序 —— part 之间 seq 空间独立（每个 part 是独立 session），
      * 按 seq 排序会在跨 part 时把老 part 的行插错位置。
@@ -1123,9 +1120,11 @@ class BotChatViewModel internal constructor(
      * 交给输入框上方的队列条（官方 web 的时间线也不出现排队行）。
      */
     private fun rebuildParityEntries(loading: Boolean? = null, hasEarlier: Boolean? = null) {
-        val mapped = ArrayList<ChatEntry>(parityRows.size + pendingEchoRows.size + browserShots.size)
-        for ((key, row) in parityRows) {
-            val renderKey = parityRenderKeys[key]
+        // 全量重算：顺序由日志（part 序 + 段内 seq）决定，不看帧到达顺序。
+        val timelineRows = parityLog.rows()
+        val mapped = ArrayList<ChatEntry>(timelineRows.size + pendingEchoRows.size + browserShots.size)
+        for (row in timelineRows) {
+            val renderKey = parityRenderKeys[row.key]
             val echoRequestId = (row.payload as? TimelineRowPayload.User)?.requestId
             val attachmentItems = echoRequestId?.let { pendingEchoAttachments[it] } ?: emptyList()
             chatEntryOf(
@@ -1182,9 +1181,6 @@ class BotChatViewModel internal constructor(
         }
         frame.rows.forEach { row -> absorbParityRow(row) }
         frame.seq?.let { if (it > paritySeq) paritySeq = it }
-        while (parityRows.size > SHADOW_ROW_BUFFER_MAX * 2) {
-            parityRows.remove(parityRows.keys.first())
-        }
         rebuildParityEntries()
         logRowApplication("increment", frame.rows)
         // 群聊帧带 round 状态：活动状态行实时刷新（旧 room-progress 轮询保留为兜底，
@@ -1230,15 +1226,9 @@ class BotChatViewModel internal constructor(
                     }
                     parityCursor = snapshot.cursor
                     if (isGroup) {
-                        // 位置序：更早的页插在前面。
-                        val rebuilt = LinkedHashMap<String, TimelineRow>()
-                        snapshot.rows.forEach { row ->
-                            rebuilt[row.key] = row
-                            absorbEchoRelationsOf(row)
-                        }
-                        parityRows.forEach { (key, row) -> rebuilt[key] = row }
-                        parityRows.clear()
-                        parityRows.putAll(rebuilt)
+                        // 位置序：更早的页**整页前插**（不跨 part 按 seq 排序）。
+                        parityLog.prependPage(snapshot.rows)
+                        snapshot.rows.forEach { row -> absorbEchoRelationsOf(row) }
                     } else {
                         snapshot.rows.forEach { row -> absorbParityRow(row) }
                     }
@@ -1303,8 +1293,8 @@ class BotChatViewModel internal constructor(
                     ),
                 )
             }
-            // 乐观摘行：服务端的下一份快照/增量会给出真相。
-            parityRows.remove(entry.id)
+            // 乐观摘行：写进 withdraw（重放带回来也不显示，服务端真给了才恢复）。
+            parityLog.withdraw(entry.id)
             rebuildParityEntries()
         }
     }
@@ -1326,7 +1316,7 @@ class BotChatViewModel internal constructor(
                 )
             }
             // 乐观摘行：宿主下一份快照/增量给出真相。
-            parityRows.remove(entry.id)
+            parityLog.withdraw(entry.id)
             rebuildParityEntries()
         }
     }
@@ -1885,10 +1875,11 @@ class BotChatViewModel internal constructor(
             }
             optimisticRun = false
             _uiState.update { it.copy(running = false, activity = null, stopVisible = false) }
-            // 本轮结束了还有没等到回显的本地气泡（feed 漏投、SSE 断流）：重拉一次历史，
-            // 让正主把它换下来。自愈窗口从「下次任意重载」缩到「本轮结束」。
-            // 轮末自愈：还有没等到认领的本地气泡（行流漏投）→ 重放游标快照。
-            if (unclaimedRequests.isNotEmpty()) refreshTimelineSnapshot(reset = false)
+            // 轮末**无条件**按 since 重放一次快照：宿主增量帧是一次性消费的，若本轮最后一帧
+            // （最常见就是产物卡帧）落在断流窗口里丢了，这里幂等合并把它补回来 ——
+            // 不再依赖「必须有下一帧」才触发断档检测（那正是此前的漏洞）。
+            // 顺带把没等到回显的本地气泡一并自愈（重放会把 user 回显带回来）。
+            refreshTimelineSnapshot(reset = false)
             val phoneTaskDone = PhoneControlSession.consumeFor(botId)
             // 这一轮有没有产出：失败行由宿主投影的 `event` 行承担（eventKind=failed），
             // 从本轮的行里取，和「正常做完」区分开（不再另查诊断）。
@@ -2088,8 +2079,6 @@ class BotChatViewModel internal constructor(
         private const val SINGLE_CHAT_STATE_MIN_MS = 3_000L
         /** 回合监视连续拿不到 `state` 的上限：超过就按「没在跑」收尾，不再空转。 */
         private const val RUN_WATCH_MAX_FAILURES = 5
-        /** 行缓冲上限（对齐设计 §3 宿主侧 ~600 行的环形，1 200 行留一倍余量）。 */
-        private const val SHADOW_ROW_BUFFER_MAX = 1_200
         /** 行应用诊断日志的限频：同一会话两次日志的最小间隔。 */
         private const val PARITY_LOG_MIN_INTERVAL_MS = 3_000L
 
