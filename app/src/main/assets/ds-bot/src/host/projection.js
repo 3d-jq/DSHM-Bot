@@ -911,7 +911,11 @@ export function install(rt) {
     // 快路径：投影缓冲（通常是引擎刚落盘的那段）。
     const buffer = buffers.get(sessionId)
     const buffered = buffer === undefined ? [] : eventsOf(buffer).filter(inRange)
-    if (buffered.length > 0) {
+    // 快路径只在缓冲**真的覆盖到 from** 时可用：缓冲已轮转时它只含缺口尾部，
+    // 直接返回会让客户端误以为补齐了（游标不动 → 每条新事件都重发一次请求，
+    // 洞也永远补不上）。覆盖不到就落慢路径去翻 Session 日志。
+    const bufferCoversFrom = buffered.length > 0 && buffered[0].seq <= from
+    if (bufferCoversFrom) {
       const kept = buffered.slice(-max)
       return {
         sessionId,
@@ -1114,6 +1118,13 @@ export function install(rt) {
       eventFrom: events.length > 0 ? events[0].seq : null,
       eventTo: events.length > 0 ? events.at(-1).seq : null,
       exchangeTurns: state.exchangeTurns[part.sessionId] ?? [],
+      // 段分隔线：换段时这一页的第一条消息之前有一条「更早的消息」分隔行。它**不是**
+      // 事件派生的，客户端自折叠折不出来 —— 由宿主给出，客户端照插（否则分段
+      // 分隔行在折叠路径上丢失）。
+      // 与上面往 rows 里 unshift divider 的条件**必须同源**（`!more && index > 0`）：
+      // 该 part 还有更早页时不能说「这里是段的开头」，否则客户端在段中间也插分隔线，
+      // 翻到该 part 最老一页时又叠一条。
+      partDivider: !more && index > 0 ? { key: `divider:part:${index}`, startedAt: Number.isFinite(part.startedAt) ? part.startedAt : null } : null,
       ...(since !== undefined && events.length > 0 && events[0].seq > since + 1 ? { partial: true } : {}),
     }
   }
