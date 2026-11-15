@@ -36,8 +36,29 @@ jobs:
         run: ./gradlew --console=plain :app:testDebugUnitTest
 
       # abortOnError=true（见 app/build.gradle.kts 的 lint 配置），有 error 直接红。
+      #
+      # 失败时把 lint 报告**打成注解**：工作流日志要 admin 权限才能下载（API 403），
+      # 而注解（check-runs/annotations）匿名可读 —— 否则 CI 红了只能看到
+      # 「exit code 1」，看不出是哪条 lint 规则。
       - name: Lint
-        run: ./gradlew --console=plain :app:lintDebug
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --console=plain :app:lintDebug
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::Lint failed (exit $code)"
+            report=app/build/reports/lint-results-debug.txt
+            if [ -f "$report" ]; then
+              # 只发前 40 条错误行，避免刷爆注解配额。
+              grep -n -m 200 -E "Error:|error:" "$report" | head -40 | while IFS= read -r line; do
+                echo "::error file=app/build/reports/lint-results-debug.txt::${line}"
+              done
+            else
+              echo "::error::lint report missing at $report"
+            fi
+          fi
+          exit "$code"
 
       - name: Upload reports on failure
         if: failure()
