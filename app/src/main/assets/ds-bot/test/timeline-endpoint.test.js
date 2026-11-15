@@ -303,6 +303,238 @@ test('the delta path delivers the deliverable card live: cursor walking over tur
   assert.equal(logLines.filter(line => line.includes('turn 9 closed')).length, 1, '定点日志不该重复')
 })
 
+/** A fake rt wired in the *production* install order: feed first, projection after
+ * (index.js MODULES puts feed before channel). Under the old arrangement feed's
+ * `session/event` listener ran before the record, so its delta lagged one event. */
+function fakeFeedFirstRt() {
+  const sessionListeners = []
+  const logLines = []
+  const ctx = {
+    on(name, handler) { if (name === 'session/event') sessionListeners.push(handler) },
+    effect() {},
+    get() { return undefined },
+    logger: { info: (template, ...args) => logLines.push(String(template).replace('%s', args.join(' '))), warn() {} },
+    sessionController: { page: async () => ({ records: [], hasMore: false }) },
+  }
+  const rt = {
+    ctx,
+    config: {},
+    state: { exchangeTurns: {} },
+    warn() {},
+    load: async () => {},
+    refresh: async () => {},
+    isBotSession: id => id === 'sess-1',
+    roomOf: () => undefined,
+    chatOwners: new Map([['sess-1', 'bot-1']]),
+    pastOwners: new Map(),
+    chatOf: id => (id === 'bot-1' ? 'sess-1' : id),
+    botOf: id => (id === 'bot-1' ? { id: 'bot-1', name: '小助手' } : undefined),
+    resolveAgent: async () => ({ session: { seq: 0, header: { cwd: '/root/w' } }, inbox: { nextTurn: [], nextStep: [] } }),
+    roomProgress: new Map(),
+    workDirOf: () => '/root/w',
+  }
+  installParts(rt)
+  installFeed(rt)
+  installProjection(rt)
+  return { rt, sessionListeners, logLines }
+}
+
+/** A turn that declares a deliverable and closes with it. */
+const DELIVER_TURN = [
+  { type: 'turn/start', seq: 1, time: 1000, data: { turn: 9 } },
+  { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '做一份 PPT' }] } },
+  { type: 'tool/call', seq: 3, time: 1200, data: { turn: 9, callId: 'p9', name: 'present', arguments: { files: [{ path: '报告.pptx', description: '定稿' }] } } },
+  { type: 'tool/result', seq: 4, time: 1300, data: { turn: 9, message: { toolCallId: 'p9', content: [{ type: 'text', text: 'Presented /root/w/报告.pptx' }] } } },
+  { type: 'deliverables/presented', seq: 5, time: 1400, data: { turn: 9, callId: 'p9', files: [{ path: '报告.pptx', description: '定稿' }] } },
+  { type: 'assistant/message', seq: 6, time: 1500, data: { turn: 9, message: { content: [{ type: 'text', text: '做好了。' }] } } },
+  { type: 'turn/end', seq: 7, time: 1600, data: { turn: 9, reason: { kind: 'completed' } } },
+]
+
+test('regression: in the production install order the turn/end frame itself carries the deliverable card', () => {
+  // 用户真机报「做 PPT，代码产物卡立即显示、产物卡不显示」。根因是装配顺序：
+  // index.js 的 MODULES 里 feed 在 channel 之前 → feed 的 session/event 监听器先注册、
+  // 先执行，旧实现里它在「当前事件写进缓冲之前」就算增量 → 增量永远慢一拍；而产物卡的
+  // 行骑在 turn/end 的 seq 上，于是必须等下一条消息触发的那一帧才被顺带带出。
+  const { rt, sessionListeners, logLines } = fakeFeedFirstRt()
+  const frames = []
+  rt.subscribeFeed((event, data) => { if (event === 'timeline') frames.push(data) })
+
+  for (const item of DELIVER_TURN) for (const handler of sessionListeners) handler({ id: 'sess-1' }, item)
+
+  // 卡必须在 turn/end 触发的那一帧就发出去——不依赖任何后续事件。
+  const cardFrame = frames.find(frame => frame.sessionId === 'sess-1' && frame.rows.some(row => row.key === 'present:9'))
+  assert.ok(cardFrame, `turn/end 之后没有任何一帧带产物卡（帧内容：${JSON.stringify(frames.map(frame => frame.rows.map(row => row.key)))})`)
+  const card = cardFrame.rows.find(row => row.key === 'present:9')
+  assert.equal(card.seq, 7, '卡贴在该轮 turn/end')
+  assert.deepEqual(card.payload.files.map(file => file.path), ['/root/w/报告.pptx'])
+  assert.equal(card.payload.delivered, true)
+  assert.ok(!frames.some(frame => frame.sessionId === 'sess-1' && frame.reset === true), '正常路径不该触发兜底重读')
+
+  // 出卡定点日志也随这一帧落下（真机取证线）。
+  const diagnostics = logLines.filter(line => line.includes('CARD t=') && line.includes('turn 9 closed'))
+  assert.equal(diagnostics.length, 1, `出卡定点日志应恰好一条：${logLines.join(' | ')}`)
+  assert.ok(diagnostics[0].includes('card generated'), `日志应说卡已生成：${diagnostics[0]}`)
+})
+
+test('fallback: a card that the delta drops is recovered by a resync frame at turn/end', () => {
+  // 兜底路径（防以后行序/游标再出岔）：本轮有卡、但这一帧没带上它 → turn/end 收口时
+  // 必须发一帧 reset，让客户端重读快照。这里用猴补丁让某一次 delta 少发卡来模拟。
+  const { rt, sessionListeners } = fakeFeedFirstRt()
+  const frames = []
+  rt.subscribeFeed((event, data) => { if (event === 'timeline') frames.push(data) })
+
+  const realDelta = rt.timelineDelta
+  let dropped = false
+  rt.timelineDelta = sessionId => {
+    const delta = realDelta(sessionId)
+    if (!dropped && delta.rows.some(row => row.kind === 'artifact')) {
+      dropped = true
+      return { ...delta, rows: delta.rows.filter(row => row.kind !== 'artifact') }
+    }
+    return delta
+  }
+
+  for (const item of DELIVER_TURN) for (const handler of sessionListeners) handler({ id: 'sess-1' }, item)
+
+  assert.ok(dropped, '测试前提：产物卡确实被漏发过一次')
+  const reset = frames.find(frame => frame.sessionId === 'sess-1' && frame.reset === true)
+  assert.ok(reset, `卡被漏发后 turn/end 兜底应发一帧 reset（帧：${JSON.stringify(frames.map(frame => ({ reset: !!frame.reset, keys: frame.rows?.map(row => row.key) })))}）`)
+})
+
+test('regression: a Session with no routable identity publishes no timeline frame (no cross-chat leak)', () => {
+  // 真机回归（2026-11-15）：「群聊对应的 bot 回答出现在私聊界面」。原因是帧的发布从
+  // feed.js 搬到 projection 时丢了「必须有 botId」这道闸 —— 没有身份字段的帧到了
+  // 客户端会被**任何打开着的聊天**接受。成员会话（以及已删除 Bot 的旧段）正是这种
+  // 「是 bot 会话、但不对应任何打开的私聊」的会话，必须一帧都不发。
+  const { rt, sessionListeners } = fakeFeedFirstRt()
+  const frames = []
+  rt.subscribeFeed((event, data) => { if (event === 'timeline') frames.push(data) })
+  rt.isBotSession = id => id === 'sess-1' || id === 'sess-ghost'
+  for (const handler of sessionListeners) {
+    handler({ id: 'sess-ghost' }, { type: 'user/message', seq: 1, time: 1000, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '群里的活' }] } })
+  }
+  assert.deepEqual(frames, [], `无身份会话不该发 timeline 帧：${JSON.stringify(frames)}`)
+})
+
+test('resync frames carry their routing identity (and an unknown Session sends none)', () => {
+  const { rt } = fakeFeedFirstRt()
+  const frames = []
+  rt.subscribeFeed((event, data) => { if (event === 'timeline') frames.push(data) })
+  rt.timelineResync('sess-1')
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0].botId, 'bot-1', '私聊 resync 必须带 botId')
+  assert.equal(frames[0].reset, true)
+  rt.timelineResync('sess-ghost')
+  assert.equal(frames.length, 1, '无身份会话的 resync 不该发帧')
+})
+
+test('4a: every durable event rides the feed with its seq; only fold-relevant types carry data', () => {
+  const { rt, sessionListeners } = fakeFeedFirstRt()
+  const frames = []
+  rt.subscribeFeed((event, data) => { if (event === 'session') frames.push(data) })
+  const events = [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
+    { type: 'thinking/delta', seq: 2, time: 1001, data: { huge: 'x'.repeat(1000) } },
+    { type: 'user/message', seq: 3, time: 1002, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] } },
+  ]
+  for (const item of events) for (const handler of sessionListeners) handler({ id: 'sess-1' }, item)
+  const sessionFrames = frames.filter(frame => frame.sessionId === 'sess-1')
+  assert.deepEqual(sessionFrames.map(frame => frame.seq), [1, 2, 3], '每个 durable 事件都要转发（连续性可判定）')
+  assert.equal(sessionFrames[0].type, 'turn/start')
+  assert.ok(sessionFrames[0].data !== undefined, '折叠需要的类型带 data')
+  assert.equal(sessionFrames[1].data, undefined, '不需要折叠的类型只发占位，不带大 payload')
+  assert.equal(sessionFrames[1].type, 'thinking/delta')
+  assert.deepEqual(sessionFrames[2].data.content[0].text, 'hi')
+})
+
+test('4a: the events query fills a gap from the projection buffer', async () => {
+  const { rt, sessionListeners } = fakeFeedFirstRt()
+  const events = [
+    { type: 'turn/start', seq: 10, time: 1000, data: { turn: 1 } },
+    { type: 'user/message', seq: 11, time: 1001, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'a' }] } },
+    { type: 'assistant/message', seq: 12, time: 1002, data: { turn: 1, message: { content: [{ type: 'text', text: 'b' }] } } },
+  ]
+  for (const item of events) for (const handler of sessionListeners) handler({ id: 'sess-1' }, item)
+  const answer = await rt.sessionEventsQuery({ sessionId: 'sess-1', from: 11, through: 12 })
+  assert.deepEqual(answer.events.map(event => event.seq), [11, 12])
+  assert.equal(answer.oldestSeq, 11)
+  assert.equal(answer.newestSeq, 12)
+})
+
+test('4a: the events query pages the Session log when the buffer no longer holds the range', async () => {
+  const { rt } = fakeFeedFirstRt()
+  const LOG = [
+    { type: 'user/message', seq: 5, time: 1005, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'old' }] } },
+    { type: 'assistant/message', seq: 6, time: 1006, data: { turn: 1, message: { content: [{ type: 'text', text: 'old reply' }] } } },
+  ]
+  rt.ctx.sessionController.page = async request => {
+    const before = request.beforeSeq ?? Infinity
+    const through = request.throughSeq ?? Infinity
+    const visible = LOG.filter(item => item.seq < before && item.seq <= through)
+    const window = visible.slice(-(request.maxMessages ?? 10))
+    return { records: window.map(event => ({ event })), hasMore: visible.length > window.length }
+  }
+  const answer = await rt.sessionEventsQuery({ sessionId: 'sess-1', from: 5, through: 6 })
+  assert.deepEqual(answer.events.map(event => event.seq), [5, 6])
+  assert.equal(answer.events[0].type, 'user/message')
+  assert.equal(answer.events[1].type, 'assistant/message')
+})
+
+test('4b: the forwarded payload types cover every event type the folds read', () => {
+  // 地基自校验：折叠逻辑（parts.js / projection.js）读到的每一种事件类型，都必须在
+  // TIMELINE_EVENT_TYPES 里 —— 否则客户端只拿到占位帧，折叠不出对应的行。以后有人在
+  // 折叠里加了新类型却忘了改转发清单，这条会立刻红（而不是等真机出问题）。
+  const parts = readFileSync(`${pluginRoot}src/host/parts.js`, 'utf8')
+  const projection = readFileSync(`${pluginRoot}src/host/projection.js`, 'utf8')
+  const declared = /export const TIMELINE_EVENT_TYPES = new Set\(\[([\s\S]*?)\]\)/.exec(projection)?.[1] ?? ''
+  const forwarded = new Set([...declared.matchAll(/'([^']+)'/g)].map(match => match[1]))
+  assert.ok(forwarded.size >= 10, `转发清单解析失败：${declared}`)
+  const read = new Set()
+  for (const source of [parts, projection]) {
+    for (const match of source.matchAll(/event\??\.type\s*(?:===|!==)\s*'([^']+)'/g)) read.add(match[1])
+  }
+  const missing = [...read].filter(type => !forwarded.has(type))
+  assert.deepEqual(missing, [], `折叠读了但没转发 payload 的事件类型：${missing.join(', ')}`)
+})
+
+test('4c 影子双轨：快照回 cwd 与事件区间（客户端要比同一批事件）', async () => {
+  const { rt, sessionListeners } = fakeFeedFirstRt()
+  const events = [
+    { type: 'turn/start', seq: 10, time: 1000, data: { turn: 1 } },
+    { type: 'user/message', seq: 11, time: 1001, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'a' }] } },
+    { type: 'assistant/message', seq: 12, time: 1002, data: { turn: 1, message: { content: [{ type: 'text', text: 'b' }] } } },
+  ]
+  for (const item of events) for (const handler of sessionListeners) handler({ id: 'sess-1' }, item)
+  rt.ctx.sessionController.page = async () => ({ records: events.map(event => ({ event })), hasMore: false })
+  const answer = await rt.timelineEndpoint({ botId: 'bot-1' })
+  assert.equal(answer.cwd, '/root/w', '快照要回 cwd（客户端折叠产物卡路径要用）')
+  assert.equal(answer.eventFrom, 10, '快照要回这批行覆盖的事件区间起点')
+  assert.equal(answer.eventTo, 12, '快照要回这批行覆盖的事件区间终点')
+  assert.deepEqual(answer.exchangeTurns, [], '快照要回本会话被隐藏的轮')
+})
+
+test('4c 影子双轨：同一批事件上，客户端折叠与宿主逐行一致', async () => {
+  // 影子双轨的**契约**：宿主与客户端折叠对同一批事件必须逐行相等。
+  // 这里直接验宿主侧：同一批事件，宿主自己的两行快照与增量给出的行必须一致。
+  const { rt, sessionListeners } = fakeFeedFirstRt()
+  const events = [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
+    { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '你好' }] } },
+    { type: 'assistant/message', seq: 3, time: 1200, data: { turn: 1, message: { content: [{ type: 'text', text: '在的' }] } } },
+    { type: 'turn/end', seq: 4, time: 1300, data: { turn: 1 } },
+  ]
+  for (const item of events) for (const handler of sessionListeners) handler({ id: 'sess-1' }, item)
+  rt.ctx.sessionController.page = async () => ({ records: events.map(event => ({ event })), hasMore: false })
+  const snapshot = await rt.timelineEndpoint({ botId: 'bot-1' })
+  const delta = rt.timelineDelta('sess-1')
+  const shape = row => `${row.key}|${row.kind}|${row.seq}|${row.turn}|${row.timeMs}|${JSON.stringify(row.payload)}`
+  assert.deepEqual(
+    delta.rows.map(shape).sort(),
+    snapshot.rows.map(shape).sort(),
+    '同一批事件：增量与快照给出的行必须一致（影子双轨的前提）',
+  )
+})
+
 test('channel wiring: timeline is a READ endpoint answered by case timeline', () => {
   const source = readFileSync(`${pluginRoot}src/host/channel.js`, 'utf8')
   const reads = /const READS = new Set\(\[([^\]]*)\]\)/.exec(source)?.[1] ?? ''
@@ -313,9 +545,13 @@ test('channel wiring: timeline is a READ endpoint answered by case timeline', ()
   // 兼容自证：旧群聊端点原样保留（官方网页端与旧管线都还在用它们）。
   assert.ok(/async function roomChat\(/.test(mobile), 'room-chat 端点丢了')
   assert.ok(/case 'room-chat': return roomChat\(body\)/.test(mobile), 'room-chat 分流丢了')
+  // 时间线帧的发布者是 projection（日志拥有者），不是 feed：feed 的 session/event
+  // 监听器先于记录注册，增量会慢一拍（曾把产物卡拖到下一条消息才出现）。
+  const projection = readFileSync(`${pluginRoot}src/host/projection.js`, 'utf8')
+  assert.ok(/publishFeed\?\.\('timeline'/.test(projection), 'projection 没有发布 timeline 事件')
+  assert.ok(/roomId: sessionId/.test(projection), 'projection 的房间分支没有发群聊 timeline 增量')
   const feed = readFileSync(`${pluginRoot}src/host/feed.js`, 'utf8')
-  assert.ok(/publish\('timeline'/.test(feed), 'feed 没有发布 timeline 事件')
-  assert.ok(/roomId: session\.id/.test(feed), 'feed 的房间分支没有发群聊 timeline 增量')
+  assert.ok(!/publish\('timeline'/.test(feed), 'feed 不该再发布 timeline（已归 projection 日志拥有者）')
   const channel = readFileSync(`${pluginRoot}src/host/channel.js`, 'utf8')
   assert.ok(/case 'room-progress':/.test(channel) && /case 'room-chat':/.test(channel), 'channel 的旧群聊端点丢了')
 })

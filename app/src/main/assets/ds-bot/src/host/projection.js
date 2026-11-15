@@ -33,6 +33,19 @@ const BUFFER_SESSIONS = 64
 // payload always carries every file — folding is the client's rendering choice.
 export const COLLAPSED_ARTIFACTS = 4
 
+/** Event types whose payload the client needs to fold the timeline itself (四期 4b)。
+ * Every other durable event still rides as a `{seq,type}` placeholder so the client
+ * can judge continuity (`seq == cursor + 1`) without receiving huge tool bodies.
+ *
+ * 这份清单必须覆盖 `parts.js` / `projection.js` 里折叠真正读到的**每一种**事件类型
+ * （测试 `timeline-endpoint.test.js` 会扫描源码自校验）——漏一种，客户端就折叠不出
+ * 对应的行。 */
+export const TIMELINE_EVENT_TYPES = new Set([
+  'user/message', 'assistant/message', 'assistant/attempt', 'tool/call', 'tool/ptc-dispatch-start',
+  'tool/result', 'turn/start', 'turn/end', 'deliverables/presented', 'workspace/changes',
+  'llm/retry', 'session/fork',
+])
+
 // The tools whose calls become rows (the client's FOLLOW set; `remember`/`forget`
 // stay out as it does — the activity row shows them). `group_relay` is absent too:
 // its replies are rows of their own (room items), not a tool row. `present` is
@@ -681,14 +694,87 @@ export function install(rt) {
     while (buffer.events.size > BUFFER_EVENTS) buffer.events.delete(buffer.events.keys().next().value)
   }
 
+  /** Compute and publish one `timeline` delta for a Session: the rows the feed has
+   * not carried yet, plus the buffer's reach. Published from the log's own listener,
+   * **right after the event is recorded**, so the delta always covers the event that
+   * triggered it. feed.js used to publish it, but its listener registers before the
+   * record (feed installs before channel), so the delta lagged one event — and a
+   * turn's deliverable card (whose row rides `turn/end`) was held back until the next
+   * message arrived. Returns the delta, or undefined when nobody is watching. */
+  const publishDelta = sessionId => {
+    if (rt.timelineDelta === undefined || rt.publishFeed === undefined) return undefined
+    if (rt.feedWatched !== undefined && !rt.feedWatched()) return undefined
+    // 每一帧都必须带**归属身份**（群聊 roomId / 私聊 botId）：客户端按它认领帧，
+    // 缺了它的帧会被任何打开着的聊天接受 —— 群聊成员会话的行漏进私聊就是这么发生的
+    // （feed.js 的旧实现只在 chatOwners 有 botId 时才发帧，搬过来时这道闸丢了）。
+    const room = rt.roomOf(sessionId) !== undefined
+    const botId = rt.chatOwners.get(sessionId)
+    if (!room && botId === undefined) return undefined
+    const delta = rt.timelineDelta(sessionId)
+    if (delta.rows.length === 0 && delta.reset !== true) return delta
+    if (room) {
+      rt.publishFeed?.('timeline', { roomId: sessionId, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows, running: delta.running === true, speaking: delta.speaking ?? null })
+      rt.timelineLog?.(sessionId, `room publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from} running=${delta.running === true}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}`)
+      return delta
+    }
+    rt.publishFeed?.('timeline', { botId, sessionId, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows })
+    // Delta-path diagnostics (a phone saw cards only after a restart): one rate-limited
+    // line per Session — the row keys this frame carries, cards flagged.
+    const cardRows = delta.rows.filter(row => row.kind === 'artifact')
+    rt.timelineLog?.(sessionId, `FRAME t=${Date.now()} publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}${cardRows.length > 0 ? ' · HAS ARTIFACT CARD' : ''}`)
+    // 有卡就绕过限频单独打一行，保证「卡到底发了没」一定有证据。
+    if (cardRows.length > 0) rt.timelineLog.force?.(sessionId, `CARD-FRAME t=${Date.now()} keys=[${cardRows.map(row => row.key).join(', ')}]`)
+    return delta
+  }
+
+  /** Whether a Session's rows hold a deliverable card for a turn — the fallback's
+   * oracle (a full recompute, only at a turn's close). */
+  const artifactCardExists = (sessionId, turn) => {
+    const buffer = buffers.get(sessionId)
+    if (buffer === undefined) return false
+    const rows = rowsOf(sessionId, eventsOf(buffer), undefined, { cwd: rt.workDirOf?.({ botId: rt.chatOwners.get(sessionId) }) })
+    return rows.some(entry => entry.kind === 'artifact' && entry.turn === turn)
+  }
+
+  // TIMELINE_EVENT_TYPES（模块级）是转发给客户端的载荷类型清单，见文件头常量区。
+  /** One durable Session event as the wire frame the client's event log stores. */
+  const sessionEventFrame = (sessionId, event) => {
+    if (typeof event?.seq !== 'number') return undefined
+    return {
+      sessionId,
+      seq: event.seq,
+      type: String(event.type ?? ''),
+      time: Number.isFinite(event.time) ? event.time : null,
+      ...(TIMELINE_EVENT_TYPES.has(event.type) ? { data: event.data ?? null } : {}),
+    }
+  }
+
+  /** 四期 4a：把原始 durable 事件转给客户端（**每个有 seq 的事件都发**，保证连续性
+   * 可判定）。客户端据此维护「唯一事实源」事件日志与缺口判据（对齐 dsh-Go `_log`）。 */
+  const publishSessionEvent = (sessionId, event) => {
+    const frame = sessionEventFrame(sessionId, event)
+    if (frame !== undefined) rt.publishFeed?.('session', frame)
+  }
+
   ctx.on('session/event', (session, event) => {
     const id = session?.id
     if (id === undefined) return
     if (!rt.isBotSession(id) && rt.roomOf(id) === undefined) return
     record(id, event)
+    // 四期 4a：原始事件（含连续 seq）先转发给客户端，作为客户端事件日志的唯一输入；
+    // 它在行投影之前，客户端拿到的 seq 顺序就是引擎落盘顺序。
+    publishSessionEvent(id, event)
     // 诊断：声明到达引擎的时刻，用来量「present → 卡出现」的延迟。
     if (event?.type === 'deliverables/presented' && typeof event.seq === 'number') {
       logLine(id, `PRESENT arrived t=${Date.now()} seq=${event.seq} turn=${event.data?.turn}`)
+    }
+    // 先记日志、再算增量、再发帧：顺序由这一个监听器内部保证，行永不慢一拍。
+    const delta = publishDelta(id)
+    // 兜底：turn/end 刚落，若本轮的产物卡没能进入这次增量（例如行的 seq 已被游标越过），
+    // 直接让客户端重读快照，卡一定出现——不再依赖下一条消息把它顺带带出。
+    if (delta !== undefined && event?.type === 'turn/end' && typeof event.data?.turn === 'number' && rt.roomOf(id) === undefined) {
+      const turn = event.data.turn
+      if (!delta.rows.some(entry => entry.kind === 'artifact' && entry.turn === turn) && artifactCardExists(id, turn)) rt.timelineResync(id)
     }
   })
 
@@ -810,6 +896,59 @@ export function install(rt) {
    * snapshot answer (`room-progress` read through the projection's own face). */
   rt.timelineRoomState = roomId => roomStateOf(roomId)
 
+  /** 四期 4a：补洞查询（对齐 dsh-Go `_fill`）。请求 `{sessionId, from, through?, max?}`，
+   * 返回覆盖该区间的 durable 事件（升序）。先在投影的环形缓冲里找（快路径）；缓冲已
+   * 轮转或冷启动时退到 Session 日志按 seq 翻页（慢路径）。客户端用「首尾正好接上
+   * cursor+1 .. seq-1」判定补洞是否成功。 */
+  rt.sessionEventsQuery = async (body = {}, signal) => {
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+    if (sessionId === '') throw Object.assign(new Error('Which session?'), { code: 'bot/invalid' })
+    const from = Number.isInteger(body.from) ? Math.max(0, body.from) : 0
+    const through = Number.isInteger(body.through) ? body.through : undefined
+    const max = Number.isInteger(body.max) && body.max > 0 && body.max <= 500 ? body.max : 500
+    const inRange = event => typeof event?.seq === 'number' &&
+      event.seq >= from && (through === undefined || event.seq <= through)
+    // 快路径：投影缓冲（通常是引擎刚落盘的那段）。
+    const buffer = buffers.get(sessionId)
+    const buffered = buffer === undefined ? [] : eventsOf(buffer).filter(inRange)
+    if (buffered.length > 0) {
+      const kept = buffered.slice(-max)
+      return {
+        sessionId,
+        events: kept.map(event => sessionEventFrame(sessionId, event)).filter(Boolean),
+        oldestSeq: kept[0].seq,
+        newestSeq: kept.at(-1).seq,
+        hasMore: buffered.length > kept.length,
+      }
+    }
+    // 慢路径：Session 日志翻页（缓冲已经轮转掉了这段）。
+    const out = []
+    let beforeSeq = through !== undefined ? through + 1 : undefined
+    let throughSeq = through
+    for (let page = 0; page < 40 && out.length < max; page += 1) {
+      const answer = await ctx.sessionController.page({
+        address: { kind: 'session', sessionId },
+        ...(throughSeq !== undefined ? { throughSeq } : {}),
+        ...(beforeSeq !== undefined ? { beforeSeq } : {}),
+        maxMessages: Math.min(200, max - out.length),
+      }, signal ?? AbortSignal.timeout(HISTORY_TIMEOUT_MS))
+      const events = (answer.records ?? []).map(record => record.event).filter(inRange)
+      if (events.length === 0) break
+      out.unshift(...events)
+      beforeSeq = events[0].seq
+      throughSeq = undefined
+      if (answer.hasMore !== true) break
+    }
+    const kept = out.slice(-max)
+    return {
+      sessionId,
+      events: kept.map(event => sessionEventFrame(sessionId, event)).filter(Boolean),
+      oldestSeq: kept.length > 0 ? kept[0].seq : null,
+      newestSeq: kept.length > 0 ? kept.at(-1).seq : null,
+      hasMore: out.length > kept.length,
+    }
+  }
+
   /** A Session's rows changed in a way a delta cannot carry (a withdrawn queue row:
    * rows are keyed, and a delta only ever names new seqs or new keys — a removal is
    * neither). One frame telling clients to re-read the snapshot converges them. */
@@ -817,8 +956,11 @@ export function install(rt) {
     const buffer = buffers.get(sessionId)
     const seq = buffer !== undefined && buffer.events.size > 0 ? [...buffer.events.keys()].at(-1) : 0
     const room = rt.roomOf(sessionId) !== undefined
+    const botId = rt.chatOwners.get(sessionId)
+    // 归属身份不能省：没有 botId / roomId 的帧会被任何打开着的聊天接受。
+    if (!room && botId === undefined) return
     rt.publishFeed?.('timeline', {
-      ...(room ? { roomId: sessionId } : { sessionId }),
+      ...(room ? { roomId: sessionId } : { botId, sessionId }),
       seq, from: seq, ...(room ? roomStateOf(sessionId) : {}), reset: true,
     })
     logLine(sessionId, `resync asked after a queue change (snapshot re-read)`)
@@ -906,7 +1048,20 @@ export function install(rt) {
         const events = eventsOf(buffer)
         if (since >= events[0].seq - 1) {
           const rows = rowsOf(sessionId, events, agent.session, { cwd, inbox }).filter(entry => typeof entry.seq === 'number' && entry.seq > since)
-          return { sessionId, seq: Number(agent.session.seq) - 1, rows, cursor: null, replayed: true }
+          // `cwd` 一并回：客户端要自己折叠时（4b/4c）产物卡的相对路径要按它解析。
+          // 事件区间也回：影子双轨要**同一批事件**才比得了（客户端按区间取同一段）。
+          const fresh = events.filter(event => typeof event.seq === 'number' && event.seq > since)
+          return {
+            sessionId,
+            seq: Number(agent.session.seq) - 1,
+            rows,
+            cursor: null,
+            replayed: true,
+            cwd: cwd ?? null,
+            eventFrom: fresh.length > 0 ? fresh[0].seq : null,
+            eventTo: fresh.length > 0 ? fresh.at(-1).seq : null,
+            exchangeTurns: state.exchangeTurns[sessionId] ?? [],
+          }
         }
       }
     }
@@ -951,6 +1106,14 @@ export function install(rt) {
       seq: Number(agent.session.seq) - 1,
       rows,
       cursor: more ? { part: index, beforeSeq: events[0].seq } : index > 0 ? { part: index - 1 } : null,
+      // `cwd` 一并回：客户端要自己折叠时（4b/4c）产物卡的相对路径要按它解析。
+      cwd: partSession?.header?.cwd ?? cwd ?? null,
+      // 四期 4c 影子双轨：这批行覆盖的**事件区间** + 本会话被隐藏的轮。
+      // 客户端拿它从自己的事件日志里取**同一段**事件来折叠，两边逐行比对——
+      // 没有区间，比的就不是同一批事件，差异全是假的。
+      eventFrom: events.length > 0 ? events[0].seq : null,
+      eventTo: events.length > 0 ? events.at(-1).seq : null,
+      exchangeTurns: state.exchangeTurns[part.sessionId] ?? [],
       ...(since !== undefined && events.length > 0 && events[0].seq > since + 1 ? { partial: true } : {}),
     }
   }

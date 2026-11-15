@@ -97,7 +97,7 @@ export function install(rt) {
   })
   // What a host that only reads the team may still answer.
   // Updates change the dsh profile, not the team, so a reading host may run them too.
-  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'timeline', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'phone-wait', 'phone-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'stop', 'thinking', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary'])
+  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'timeline', 'events', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'phone-wait', 'phone-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'stop', 'thinking', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary'])
 
   function setPrefs(body) {
     if (body.theme !== undefined) {
@@ -217,6 +217,11 @@ export function install(rt) {
         case 'timeline':
           await rt.load()
           return ok(await rt.timelineEndpoint(body, signal))
+        // 四期 4a：补洞查询——原始 durable 事件（带连续 seq）按区间回放，
+        // 客户端事件日志发现缺口时用它补齐（对齐 dsh-Go `_fill`）。
+        case 'events':
+          await rt.load()
+          return ok(await rt.sessionEventsQuery(body, signal))
         // DSH's own whole-log figures for the current part of a Bot's chat, the ones its
         // status bar shows; a window without that bar shows them in the Bot's details.
         case 'run-stats': {

@@ -60,6 +60,9 @@ export function install(rt) {
   rt.publishFeed = (event, data) => {
     if (watched()) publish(event, data)
   }
+  /** Whether anyone is watching the feed: the timeline projection computes and
+   * publishes a delta only then (it writes the row log either way). */
+  rt.feedWatched = () => watched()
 
   let liveTimer
   const live = () => {
@@ -73,41 +76,19 @@ export function install(rt) {
     if (rt.selfOf(agent.id) !== undefined) live()
   })
 
+  // The unified timeline projection (projection.js) owns the row log and publishes
+  // its own `timeline` frames. It has to: the row log must be written *before* the
+  // delta reads it back, and projection's `session/event` listener registers after
+  // this one (feed installs before channel in index.js), so a delta computed here
+  // always lagged one event behind — which is what held a turn's deliverable card
+  // back until the *next* message arrived (and made it look like it appeared "mid
+  // way"). Here only a Bot's own chat's `message` items and the `live` signal stay.
   ctx.on('session/event', (session, event) => {
     if (!watched()) return
     const botId = rt.chatOwners.get(session.id)
-    if (botId === undefined) {
-      // A group chat's own Session: the room feed signal (mobile.js) tells old
-      // clients to re-read `room-chat`; the timeline delta carries the rows the
-      // event produced, with the round's running/speaking state alongside.
-      if (rt.roomOf(session.id) !== undefined && rt.timelineDelta !== undefined) {
-        const delta = rt.timelineDelta(session.id)
-        if (delta.rows.length > 0 || delta.reset === true) {
-          publish('timeline', { roomId: session.id, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows, running: delta.running === true, speaking: delta.speaking ?? null })
-          rt.timelineLog?.(session.id, `room publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from} running=${delta.running === true}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}`)
-        }
-      }
-      return
-    }
+    if (botId === undefined) return
     for (const item of rt.displayItems(session.id, [event])) publish('message', { botId, sessionId: session.id, item })
     if (event.type === 'tool/call') live()
-    // The unified timeline projection (projection.js): the rows the event produced,
-    // for a client that renders rows instead of raw events. `from` names the seq
-    // boundary the delta covers — a client whose own cursor is older than it
-    // re-reads the `timeline` snapshot; `reset` means the buffer rotated past it.
-    if (rt.timelineDelta !== undefined) {
-      const delta = rt.timelineDelta(session.id)
-      if (delta.rows.length > 0 || delta.reset === true) {
-        publish('timeline', { botId, sessionId: session.id, seq: delta.seq, from: delta.from, bufferFrom: delta.bufferFrom, ...(delta.reset ? { reset: true } : {}), rows: delta.rows })
-        // Delta-path diagnostics (a phone saw cards only after a restart): one
-        // rate-limited line per Session — the row keys this frame carries, cards
-        // flagged. `timelineLog` lives in projection.js; its absence is fine.
-        const hasCard = delta.rows.some(row => row.kind === 'artifact')
-        rt.timelineLog?.(session.id, `FRAME t=${Date.now()} publish ${delta.reset === true ? 'reset' : `${delta.rows.length} row(s)`} seq=${delta.seq} from=${delta.from}${delta.rows.length > 0 ? ` keys=[${delta.rows.slice(0, 6).map(row => row.key).join(', ')}${delta.rows.length > 6 ? ', …' : ''}]` : ''}${hasCard ? ' · HAS ARTIFACT CARD' : ''}`)
-        // 有卡就绕过限频单独打一行，保证「卡到底发了没」一定有证据。
-        if (hasCard) rt.timelineLog?.force?.(session.id, `CARD-FRAME t=${Date.now()} keys=[${delta.rows.filter(row => row.kind === 'artifact').map(row => row.key).join(', ')}]`)
-      }
-    }
   })
 
   // Attempts being streamed, by id. A turn that answers another Bot is hidden from the
