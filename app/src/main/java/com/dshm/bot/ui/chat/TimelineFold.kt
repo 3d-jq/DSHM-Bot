@@ -85,9 +85,42 @@ internal object TimelineFold {
 
                 "user/message" -> {
                     val source = data?.optJSONObject("source")
-                    if (source?.optString("kind") != "user") continue
                     val content = data?.optJSONArray("content")
-                    rows += userRow(event, source, content, turn)
+                    when (source?.optString("kind")) {
+                        "user" -> rows += userRow(event, source, content, turn)
+
+                        // 用户回答了提问卡 / 视图卡：出一行「回答过的…」（宿主 `displayItems`）。
+                        REPLY_KIND -> answeredRow(event, content, turn)?.let(rows::add)
+
+                        // Bot 之间的一次往来（request/reply/report/stopped）作为事件行。
+                        // handoff/deferred 是内部交接，不画（宿主同口径）。
+                        SOURCE_KIND -> {
+                            if (source.optBoolean("handoff", false)) continue
+                            if (source.optBoolean("deferred", false)) continue
+                            val role = source.optString("role")
+                            if (role !in BOT_EVENT_ROLES) continue
+                            rows += TimelineRow(
+                                key = "event:${event.seq}",
+                                kind = TimelineRow.KIND_EVENT,
+                                seq = event.seq,
+                                turn = turn,
+                                timeMs = event.timeMs,
+                                payload = TimelineRowPayload.Event(
+                                    eventKind = role,
+                                    code = null,
+                                    botId = source.optString("senderSessionId").takeIf { it.isNotEmpty() },
+                                    name = source.optString("senderName").takeIf { it.isNotEmpty() },
+                                    raw = JSONObject()
+                                        .put("eventKind", role)
+                                        .apply {
+                                            source.optString("senderSessionId").takeIf { it.isNotEmpty() }?.let { put("botId", it) }
+                                            source.optString("senderName").takeIf { it.isNotEmpty() }?.let { put("name", it) }
+                                            source.optString("roomId").takeIf { it.isNotEmpty() }?.let { put("roomId", it) }
+                                        },
+                                ),
+                            )
+                        }
+                    }
                 }
 
                 "assistant/message" -> {
@@ -125,6 +158,29 @@ internal object TimelineFold {
                     val name = data?.optString("name") ?: ""
                     val callId = data?.optString("callId") ?: ""
                     val callTurn = data?.optInt("turn", 0) ?: 0
+                    // `show_view` 的**非交互**卡在时间线上留一行（宿主 `displayItems`）：
+                    // 交互卡（表单/选项/确认/提交）住在待办 dock 里，不在时间线重复。
+                    // 注意：这一行**没有 turn**（宿主没给它 stamp），seq 取本次 tool/call。
+                    if (name == "show_view" && !(callTurn > 0 && callTurn in hidden)) {
+                        val args = argumentsOf(data?.opt("arguments"))
+                        if (args.optBoolean("await_reply", false)) {
+                            // 等用户回复的卡：回答后会出「回答过的…」行，这里不画。
+                        } else if (!hasInteractiveComponent(args.optJSONObject("view"))) {
+                            rows += TimelineRow(
+                                key = "view:" + callId.ifEmpty { "i${event.seq}" },
+                                kind = TimelineRow.KIND_VIEW,
+                                seq = event.seq,
+                                turn = null,
+                                timeMs = event.timeMs,
+                                payload = TimelineRowPayload.View(
+                                    JSONObject()
+                                        .put("title", args.optString("title").trim())
+                                        .put("view", args.optJSONObject("view") ?: JSONObject())
+                                        .put("callId", callId.ifEmpty { JSONObject.NULL }),
+                                ),
+                            )
+                        }
+                    }
                     // produced 口径的扫描：**不受工具白名单限制**（宿主 `artifactRowsOf`
                     // 独立扫所有 tool/call；`write`/`edit` 不成工具行，但写的文件上卡）。
                     if (eligible && callId.isNotEmpty()) {
@@ -586,6 +642,173 @@ internal object TimelineFold {
             if (block.optString("type") == "text") out.append(block.optString("text"))
         }
         return out.toString().trim()
+    }
+
+
+    /** 用户回答提问卡/视图卡的消息来源（宿主 `REPLY_KIND`）。 */
+    private const val REPLY_KIND = "user-question-reply"
+
+    /** Bot 之间往来的消息来源（宿主 `SOURCE_KIND`）。 */
+    private const val SOURCE_KIND = "bot"
+
+    /** 会画成事件行的 Bot 往来角色（宿主 `displayItems` 的白名单）。 */
+    private val BOT_EVENT_ROLES = setOf("request", "reply", "report", "stopped")
+
+    /** 交互式组件（宿主 `INTERACTIVE = ANSWERS`）：含这些的视图卡住在待办 dock，
+     * **不在时间线重复**。 */
+    private val INTERACTIVE_COMPONENTS = setOf("options", "confirm", "form", "submit")
+
+    /** 工具参数：可能是 JSON 对象，也可能是 JSON **字符串**（部分模型这么发）。 */
+    private fun argumentsOf(raw: Any?): JSONObject = when (raw) {
+        is JSONObject -> raw
+        is String -> if (raw.isBlank()) JSONObject() else runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+        else -> JSONObject()
+    }
+
+    /** 视图树里是否有交互式组件（递归 children / 各数组字段）。 */
+    private fun hasInteractiveComponent(view: JSONObject?): Boolean {
+        if (view == null) return false
+        if (view.optString("type") in INTERACTIVE_COMPONENTS) return true
+        val keys = view.keys()
+        while (keys.hasNext()) {
+            when (val value = view.opt(keys.next())) {
+                is JSONObject -> if (hasInteractiveComponent(value)) return true
+                is JSONArray -> for (index in 0 until value.length()) {
+                    val item = value.optJSONObject(index)
+                    if (item != null && hasInteractiveComponent(item)) return true
+                }
+            }
+        }
+        return false
+    }
+
+    /**
+     * 用户回答提问卡/视图卡的那条消息 → 一行「回答过的…」。
+     * 解析口径与宿主 `readReply` 一致：视图回答要求 `kind == answer_to_pending_view`
+     * （或带非空 views 且不是提问回答），提问回答要求非空 questions。
+     */
+    private fun answeredRow(event: SessionEvent, content: JSONArray?, turn: Int?): TimelineRow? {
+        val text = foldTextOf(content)
+        val reply = readReplyOf(text) ?: return null
+        val payload = JSONObject()
+        val views = reply.optJSONArray("views")
+        if (views != null) {
+            payload.put("text", replyTextOf(text))
+            payload.put("views", views)
+            payload.put("answers", reply.optJSONArray("answers") ?: JSONArray())
+        } else {
+            payload.put("questions", reply.optJSONArray("questions") ?: JSONArray())
+            payload.put("answers", reply.optJSONArray("answers") ?: JSONArray())
+        }
+        return TimelineRow(
+            key = "answer:${event.seq}",
+            kind = TimelineRow.KIND_ANSWERED,
+            seq = event.seq,
+            turn = turn,
+            timeMs = event.timeMs,
+            payload = TimelineRowPayload.Answered(payload),
+        )
+    }
+
+    /** 宿主 `readReply`：从回答消息的正文里解析出 views 或 questions。 */
+    private fun readReplyOf(text: String): JSONObject? {
+        val value = runCatching { JSONObject(text) }.getOrNull() ?: return null
+        val kind = value.optString("kind")
+        val viewsArray = value.optJSONArray("views")
+        val looksLikeViewAnswer = kind == "answer_to_pending_view" ||
+            (viewsArray != null && viewsArray.length() > 0 && kind != "answer_to_pending_question")
+        if (looksLikeViewAnswer) {
+            val views = ArrayList<JSONObject>()
+            if (viewsArray != null) {
+                for (index in 0 until viewsArray.length()) {
+                    val item = viewsArray.optJSONObject(index) ?: continue
+                    if (item.optString("id").isEmpty()) continue
+                    if (item.opt("title") !is String) continue
+                    if (item.optJSONObject("view") == null) continue
+                    views += item
+                }
+            }
+            if (views.isEmpty()) return null
+            return JSONObject().put("views", JSONArray(views)).put("answers", filterAnswers(value.optJSONArray("answers"), bySelected = false))
+        }
+        val questions = ArrayList<JSONObject>()
+        val questionsArray = value.optJSONArray("questions")
+        if (questionsArray != null) {
+            for (index in 0 until questionsArray.length()) {
+                val item = questionsArray.optJSONObject(index) ?: continue
+                if (item.optString("id").isEmpty()) continue
+                if (item.opt("question") !is String) continue
+                questions += item
+            }
+        }
+        if (questions.isEmpty()) return null
+        return JSONObject()
+            .put("questions", JSONArray(questions))
+            .put("answers", filterAnswers(value.optJSONArray("answers"), bySelected = true))
+    }
+
+    /** 宿主：视图回答的 answers 要 `values` 是对象；提问回答的 answers 要 `selected` 是数组。 */
+    private fun filterAnswers(array: JSONArray?, bySelected: Boolean): JSONArray {
+        val out = JSONArray()
+        if (array == null) return out
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            if (item.optString("id").isEmpty()) continue
+            if (bySelected) {
+                if (item.optJSONArray("selected") == null) continue
+            } else {
+                if (item.optString("action").isEmpty()) continue
+                if (item.optJSONObject("values") == null) continue
+            }
+            out.put(item)
+        }
+        return out
+    }
+
+    /** 宿主 `replyText`：视图回答的展示文本。
+     *
+     * 与宿主的差异：宿主会把 `values.inputs` 里的表单输入也总结进去（`inputsSummary`），
+     * 这里只取 selected / confirmed / fields / action。视图回答会走 `AnsweredViewCard`
+     * 渲染（不用这段文本），所以差异不可见。 */
+    private fun replyTextOf(text: String): String {
+        val NL = Char(10).toString()
+        val reply = readReplyOf(text) ?: return text
+        val views = reply.optJSONArray("views") ?: return text
+        val answers = reply.optJSONArray("answers") ?: JSONArray()
+        val out = ArrayList<String>()
+        for (index in 0 until views.length()) {
+            val view = views.optJSONObject(index) ?: continue
+            val id = view.optString("id")
+            var answer: JSONObject? = null
+            for (answerIndex in 0 until answers.length()) {
+                val candidate = answers.optJSONObject(answerIndex) ?: continue
+                if (candidate.optString("id") == id) {
+                    answer = candidate
+                    break
+                }
+            }
+            val title = view.optString("title")
+            val header = if (title.isEmpty()) "[Answer to view card]" else "[Answer to view card] $title"
+            out += header + NL + "Answer: " + actionSummaryOf(answer)
+        }
+        return out.joinToString(NL + NL)
+    }
+
+    /** 宿主 `actionSummary`（textarea 的 inputs 摘要除外，见上）。 */
+    private fun actionSummaryOf(answer: JSONObject?): String {
+        val values = answer?.optJSONObject("values") ?: return "(skipped)"
+        val selected = values.optJSONArray("selected")
+        var text = when {
+            selected != null -> "selected: " + (0 until selected.length()).map { selected.optString(it) }.joinToString(", ")
+            values.has("confirmed") -> if (values.optBoolean("confirmed")) "confirmed" else "cancelled"
+            values.optJSONObject("fields") != null -> {
+                val fields = values.optJSONObject("fields")!!
+                fields.keys().asSequence().joinToString("; ") { "$it: ${fields.opt(it)}" }
+            }
+            else -> answer.optString("action").ifEmpty { "(skipped)" }
+        }
+        if (text.isEmpty()) text = "(empty)"
+        return if (text.length > 500) text.take(500) else text
     }
 
     /** 宿主 `firstNonBlank` 语义：按 key 顺序取第一个 trim 后非空的值。 */

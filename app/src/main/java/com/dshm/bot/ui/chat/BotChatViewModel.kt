@@ -1285,15 +1285,12 @@ class BotChatViewModel internal constructor(
         //   ⚠️ 早先把两段都换成折叠，结果「加载更早历史」转圈却加载不出来。
         val hostCurrent = parityLog.currentRows()
         val earlierRows = parityLog.earlierRows()
-        // 折叠**不产**的三类行（只读视图卡 / 回答过的提问 / Bot 互答提示）：从宿主当前段
-        // 补进来。否则 4c 切换后它们在私聊里**整类消失**（看不到「你回答过的问题」、
-        // 非交互 show_view 卡、Bot 间往来行）—— 而影子比对把 view/answered 排除在外、
-        // fixture 也没这三类，所以「oracle 全绿」并不代表与宿主一致（审查发现的盲区）。
-        // 折叠补齐这三类是后续工作；此前先不让消息丢。
+        // 折叠已覆盖 view / answered / Bot 互答 event 三类（曾经折不出，只能从宿主补行；
+        // 现在折叠自己产，影子比对也把这三种 kind 纳入比对，才算是真闭环）。
         val foldedRows = if (isGroup) {
             null
         } else {
-            clientFoldedRows()?.let { foldedWithSupplement(it, hostCurrent) }
+            clientFoldedRows()
         }
         // 队列行（排队/插话）**始终来自宿主**：它读的是 agent inbox，不是事件，
         // 客户端自折叠折不出来（对齐 dsh-Go：inbox 是独立的一层，不写回日志）。
@@ -1498,40 +1495,6 @@ class BotChatViewModel internal constructor(
     /** 四期 4a：当前会话事件日志的连续游标（诊断/测试用；-1 = 还没有种子）。 */
     internal fun sessionEventCursor(): Long = sessionLogOf(sessionId ?: botId)?.cursor ?: -1L
 
-
-    /** 折叠覆盖不到、必须从宿主当前段补的行类型。 */
-    private val FOLD_UNSUPPORTED_KINDS = setOf(
-        TimelineRow.KIND_VIEW,
-        TimelineRow.KIND_ANSWERED,
-    )
-
-    /** 折叠覆盖不到的 Bot 互答事件行（`request`/`reply`/`report`/`stopped`）。
-     * 折叠自己产的是 `retry`/`turnfail` 两种 event，不要重复补。 */
-    private val FOLD_UNSUPPORTED_EVENT_KINDS = setOf("request", "reply", "report", "stopped")
-
-    /**
-     * 折叠行 + 宿主里「折叠不产」的那几类行，按 seq 归位。
-     *
-     * 为什么必须补：4c 把私聊显示切到客户端折叠后，折叠没实现的 kind 会**整类消失**
-     * （只读视图卡、回答过的提问、Bot 互答提示）。这些行是纯事件派生的、且折叠不产，
-     * 直接用宿主的行补上，既不丢消息也不必先把 `parts.js` 的文本解析整套搬过来。
-     */
-    private fun foldedWithSupplement(
-        folded: List<TimelineRow>,
-        host: List<TimelineRow>,
-    ): List<TimelineRow> {
-        val present = folded.mapTo(HashSet()) { it.key }
-        val extra = host.filter { row ->
-            val kind = row.kind
-            val unsupportedKind = kind in FOLD_UNSUPPORTED_KINDS
-            val unsupportedEvent = kind == TimelineRow.KIND_EVENT &&
-                (row.payload as? TimelineRowPayload.Event)?.eventKind?.let { it in FOLD_UNSUPPORTED_EVENT_KINDS } == true
-            (unsupportedKind || unsupportedEvent) && row.key !in present
-        }
-        if (extra.isEmpty()) return folded
-        // 按 seq 归位（无 seq 的排最后）；同 seq 保持折叠在前、补充在后的稳定序。
-        return (folded + extra).sortedWith(compareBy { it.seq ?: Long.MAX_VALUE })
-    }
 
     /** 最近一次代码产物卡对应的 seq（diff 的锚：算「那一轮」的改动）。 */
     private var lastChangesSeq: Long? = null

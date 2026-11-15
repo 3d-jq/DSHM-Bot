@@ -269,5 +269,95 @@
         "text": "好了"
       }
     }
+  ],
+  "viewCard": [
+    {
+      "key": "view:v1",
+      "kind": "view",
+      "seq": 2,
+      "turn": null,
+      "timeMs": 1100,
+      "payload": {
+        "title": "只读视图",
+        "view": {
+          "type": "text",
+          "text": "内容"
+        },
+        "callId": "v1"
+      }
+    }
+  ],
+  "interactiveViewCard": [],
+  "answeredQuestion": [
+    {
+      "key": "answer:2",
+      "kind": "answered",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "questions": [
+          {
+            "id": "q1",
+            "question": "要几个？"
+          }
+        ],
+        "answers": [
+          {
+            "id": "q1",
+            "selected": [
+              "3 个"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "answeredView": [
+    {
+      "key": "answer:2",
+      "kind": "answered",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "answers": [
+          {
+            "id": "o1",
+            "action": "submit",
+            "values": {
+              "selected": [
+                "A"
+              ]
+            }
+          }
+        ],
+        "views": [
+          {
+            "id": "o1",
+            "title": "选一个",
+            "view": {
+              "type": "stack",
+              "children": []
+            }
+          }
+        ],
+        "text": "[Answer to view card] 选一个\nAnswer: selected: A"
+      }
+    }
+  ],
+  "botExchangeEvent": [
+    {
+      "key": "event:2",
+      "kind": "event",
+      "seq": 2,
+      "turn": 1,
+      "timeMs": 1100,
+      "payload": {
+        "eventKind": "request",
+        "botId": "s2",
+        "name": "小助手"
+      }
+    }
   ]
 }

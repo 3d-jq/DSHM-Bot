@@ -121,6 +121,33 @@ const SCENARIOS = {
     { type: 'deliverables/presented', seq: 3, time: 1200, data: { turn: 1, callId: 'p1', files: [{ path: '晚到的.pdf', description: '太晚' }] } },
     { type: 'turn/end', seq: 4, time: 1300, data: { turn: 1 } },
   ],
+  // 只读视图卡：show_view 非交互、不 await_reply → 时间线上留一行（无 turn）。
+  viewCard: [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
+    { type: 'tool/call', seq: 2, time: 1100, data: { turn: 1, callId: 'v1', name: 'show_view', arguments: { title: '只读视图', view: { type: 'text', text: '内容' } } } },
+    { type: 'tool/result', seq: 3, time: 1200, data: { turn: 1, message: { toolCallId: 'v1', content: [text('ok')] } } },
+  ],
+  // 交互式视图卡（含 options）→ 住在待办 dock，时间线**不出**行。
+  interactiveViewCard: [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
+    { type: 'tool/call', seq: 2, time: 1100, data: { turn: 1, callId: 'v2', name: 'show_view', arguments: { title: '选一个', view: { type: 'stack', children: [{ type: 'options', id: 'o1', question: '哪个', options: [{ id: 'a', label: 'A' }] }] } } } },
+    { type: 'tool/result', seq: 3, time: 1200, data: { turn: 1, message: { toolCallId: 'v2', content: [text('ok')] } } },
+  ],
+  // 用户回答了提问卡 → 一行「回答过的提问」。
+  answeredQuestion: [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
+    { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'user-question-reply' }, content: [text(JSON.stringify({ kind: 'answer_to_pending_question', questions: [{ id: 'q1', question: '要几个？' }], answers: [{ id: 'q1', selected: ['3 个'] }] }))] } },
+  ],
+  // 用户回答了视图卡 → 一行「回答过的视图卡」（带 text）。
+  answeredView: [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
+    { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'user-question-reply' }, content: [text(JSON.stringify({ kind: 'answer_to_pending_view', views: [{ id: 'o1', title: '选一个', view: { type: 'stack', children: [] } }], answers: [{ id: 'o1', action: 'submit', values: { selected: ['A'] } }] }))] } },
+  ],
+  // Bot 之间的一次往来（request）→ 事件行。
+  botExchangeEvent: [
+    { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
+    { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'bot', role: 'request', senderSessionId: 's2', senderName: '小助手' }, content: [text('帮我查一下')] } },
+  ],
 }
 
 const out = {}

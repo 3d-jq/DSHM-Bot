@@ -53,6 +53,11 @@ internal object ShadowDiff {
         TimelineRow.KIND_EVENT,
         TimelineRow.KIND_CHANGES,
         TimelineRow.KIND_ARTIFACT,
+        // 这三类曾经折不出来、被排除在比对之外，于是「oracle 全绿」掩盖了它们整类
+        // 丢失（真机看不到「你回答过的问题」/ 只读视图卡 / Bot 互答行）。折叠补齐后
+        // 必须纳入比对，否则同样的问题还会再犯。
+        TimelineRow.KIND_VIEW,
+        TimelineRow.KIND_ANSWERED,
     )
 
     /**
@@ -126,6 +131,24 @@ internal object ShadowDiff {
                 val hostFiles = hp.files.map { it.path }
                 val clientFiles = cp.files.map { it.path }
                 if (hostFiles != clientFiles) return "文件 ${hostFiles}≠${clientFiles}"
+                null
+            }
+
+            is TimelineRowPayload.View -> {
+                val cp = client.payload as? TimelineRowPayload.View
+                    ?: return "载荷类型不同（${client.payload::class.java.simpleName}）"
+                if (hp.view.optString("title") != cp.view.optString("title")) return "view.title 不一致"
+                if (hp.view.optString("callId") != cp.view.optString("callId")) return "view.callId 不一致"
+                if (hp.view.optJSONObject("view")?.toString() != cp.view.optJSONObject("view")?.toString()) {
+                    return "view 内容不一致"
+                }
+                null
+            }
+
+            is TimelineRowPayload.Answered -> {
+                val cp = client.payload as? TimelineRowPayload.Answered
+                    ?: return "载荷类型不同（${client.payload::class.java.simpleName}）"
+                if (hp.answered.toString() != cp.answered.toString()) return "answered 内容不一致"
                 null
             }
 

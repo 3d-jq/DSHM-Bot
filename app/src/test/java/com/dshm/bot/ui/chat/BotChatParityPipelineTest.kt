@@ -634,51 +634,45 @@ class BotChatParityPipelineTest {
     /**
      * 回归（2026-11-15 全面 review 发现）：4c 把私聊显示切到客户端折叠后，
      * 折叠**没实现**的三类行（只读视图卡 / 回答过的提问 / Bot 互答提示）会整类消失。
-     * 这些行必须从宿主当前段补进来 —— 否则「你回答过的问题」「show_view 卡」
-     * 「Bot 间往来」在私聊里永久看不到，而且影子比对把它们排除在外、测试全绿。
+     *
+     * 现在折叠自己产这三类（不再从宿主补行），这里验「折叠产出的它们真的进了显示」。
      */
     @Test
-    fun rowsTheFoldCannotProduceAreSupplementedFromTheHost() {
+    fun theFoldProducesViewAnsweredAndBotExchangeRows() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler
         val api = FakeApi()
-        val viewRow = TimelineRow(
-            key = "view:c1",
-            kind = TimelineRow.KIND_VIEW,
-            seq = 12L,
-            turn = 1,
-            timeMs = 1200L,
-            payload = TimelineRowPayload.View(
-                JSONObject().put("title", "只读视图").put("callId", "c1").put("view", JSONObject()),
-            ),
-        )
-        val b2bRow = TimelineRow(
-            key = "event:14",
-            kind = TimelineRow.KIND_EVENT,
-            seq = 14L,
-            turn = 1,
-            timeMs = 1400L,
-            payload = TimelineRowPayload.Event(
-                eventKind = "request",
-                code = null,
-                botId = "bot-2",
-                name = "小助手",
-                raw = JSONObject().put("eventKind", "request"),
-            ),
-        )
-        // 宿主当前段：一条 user + 这两类折叠产不出的行。
-        api.snapshotRows = listOf(api.row("user:10", "user", 10L), viewRow, b2bRow)
+        // 宿主当前段只给一条 user 行；其余靠折叠从事件里产出。
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L))
         api.snapshotEventFrom = 10L
-        api.snapshotEventTo = 14L
-        // 事件日志可用 → 折叠接管显示（折叠只折得出 user:10）。
-        api.eventsResponse = listOf(userEvent(10L, 1000L, "你好"))
+        api.snapshotEventTo = 12L
+        api.eventsResponse = listOf(
+            userEvent(10L, 1000L, "你好"),
+            SessionEvent(
+                11L, "tool/call", 1200L,
+                JSONObject().put("turn", 1).put("callId", "v1").put("name", "show_view").put(
+                    "arguments",
+                    JSONObject().put("title", "只读视图")
+                        .put("view", JSONObject().put("type", "text").put("text", "内容")),
+                ),
+            ),
+            // Bot 之间的一次往来。
+            SessionEvent(
+                12L, "user/message", 1400L,
+                JSONObject().put(
+                    "source",
+                    JSONObject().put("kind", "bot").put("role", "request")
+                        .put("senderSessionId", "s2").put("senderName", "小助手"),
+                ).put("content", org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "帮我查一下"))),
+            ),
+        )
 
         val viewModel = viewModel(api, scheduler)
         scheduler.runCurrent()
 
         val ids = viewModel.uiState.value.entries.map { it.id }
         assertTrue("当前段由折叠接管：$ids", "user:10" in ids)
-        assertTrue("折叠产不出的只读视图卡必须从宿主补进来：$ids", "view:c1" in ids)
-        assertTrue("折叠产不出的 Bot 互答行必须从宿主补进来：$ids", "event:14" in ids)
+        assertTrue("折叠要产出只读视图卡：$ids", "view:v1" in ids)
+        assertTrue("折叠要产出 Bot 互答行：$ids", "event:12" in ids)
     }
 
     /**

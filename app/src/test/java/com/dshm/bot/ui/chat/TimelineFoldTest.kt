@@ -196,7 +196,27 @@ class TimelineFoldTest {
                 if (p.code != null) payload.put("code", p.code)
                 if (p.botId != null) payload.put("botId", p.botId)
                 if (p.name != null) payload.put("name", p.name)
-                payload.put("text", p.raw.optString("text"))
+                p.raw.optString("roomId").takeIf { it.isNotEmpty() }?.let { payload.put("roomId", it) }
+                // 只在 raw 真的带 text 时输出（宿主的 Bot 互答行没有 text 键，
+                // 无条件补一个 "" 会让 payload 比对永远不等）。
+                if (p.raw.has("text")) payload.put("text", p.raw.optString("text"))
+            }
+
+            is TimelineRowPayload.View -> {
+                payload.put("title", p.view.optString("title"))
+                payload.put("view", p.view.optJSONObject("view") ?: JSONObject())
+                payload.put("callId", if (p.view.isNull("callId")) JSONObject.NULL else p.view.optString("callId"))
+            }
+
+            is TimelineRowPayload.Answered -> {
+                if (p.answered.has("text")) payload.put("text", p.answered.optString("text"))
+                if (p.answered.has("views")) {
+                    payload.put("views", p.answered.optJSONArray("views") ?: JSONArray())
+                    payload.put("answers", p.answered.optJSONArray("answers") ?: JSONArray())
+                } else {
+                    payload.put("questions", p.answered.optJSONArray("questions") ?: JSONArray())
+                    payload.put("answers", p.answered.optJSONArray("answers") ?: JSONArray())
+                }
             }
 
             is TimelineRowPayload.Changes -> {
@@ -309,6 +329,123 @@ class TimelineFoldTest {
     @Test
     fun aDeclarationAfterTheClosingReplyIsNotOnTheCard() = assertMatchesOracle("presentedAfterClosing", presentedAfterClosing)
 
+    // ---- 折叠补齐的三类行（曾经整类丢失，见全面 review）----
+
+    private val viewCard = listOf(
+        event("turn/start", 1, JSONObject().put("turn", 1), 1000),
+        event(
+            "tool/call", 2,
+            JSONObject().put("turn", 1).put("callId", "v1").put("name", "show_view")
+                .put(
+                    "arguments",
+                    JSONObject().put("title", "只读视图")
+                        .put("view", JSONObject().put("type", "text").put("text", "内容")),
+                ),
+            1100,
+        ),
+        event("tool/result", 3, JSONObject().put("turn", 1).put("message", JSONObject().put("toolCallId", "v1").put("content", JSONArray().put(text("ok")))), 1200),
+    )
+
+    private val interactiveViewCard = listOf(
+        event("turn/start", 1, JSONObject().put("turn", 1), 1000),
+        event(
+            "tool/call", 2,
+            JSONObject().put("turn", 1).put("callId", "v2").put("name", "show_view")
+                .put(
+                    "arguments",
+                    JSONObject().put("title", "选一个").put(
+                        "view",
+                        JSONObject().put("type", "stack").put(
+                            "children",
+                            JSONArray().put(
+                                JSONObject().put("type", "options").put("id", "o1").put("question", "哪个"),
+                            ),
+                        ),
+                    ),
+                ),
+            1100,
+        ),
+        event("tool/result", 3, JSONObject().put("turn", 1).put("message", JSONObject().put("toolCallId", "v2").put("content", JSONArray().put(text("ok")))), 1200),
+    )
+
+    private val answeredQuestion = listOf(
+        event("turn/start", 1, JSONObject().put("turn", 1), 1000),
+        event(
+            "user/message", 2,
+            JSONObject().put("source", JSONObject().put("kind", "user-question-reply")).put(
+                "content",
+                JSONArray().put(
+                    text(
+                        JSONObject().put("kind", "answer_to_pending_question")
+                            .put("questions", org.json.JSONArray().put(JSONObject().put("id", "q1").put("question", "要几个？")))
+                            .put("answers", org.json.JSONArray().put(JSONObject().put("id", "q1").put("selected", org.json.JSONArray().put("3 个"))))
+                            .toString(),
+                    ),
+                ),
+            ),
+            1100,
+        ),
+    )
+
+    private val answeredView = listOf(
+        event("turn/start", 1, JSONObject().put("turn", 1), 1000),
+        event(
+            "user/message", 2,
+            JSONObject().put("source", JSONObject().put("kind", "user-question-reply")).put(
+                "content",
+                JSONArray().put(
+                    text(
+                        JSONObject().put("kind", "answer_to_pending_view")
+                            .put(
+                                "views",
+                                org.json.JSONArray().put(
+                                    JSONObject().put("id", "o1").put("title", "选一个")
+                                        .put("view", JSONObject().put("type", "stack").put("children", JSONArray())),
+                                ),
+                            )
+                            .put(
+                                "answers",
+                                org.json.JSONArray().put(
+                                    JSONObject().put("id", "o1").put("action", "submit")
+                                        .put("values", JSONObject().put("selected", org.json.JSONArray().put("A"))),
+                                ),
+                            )
+                            .toString(),
+                    ),
+                ),
+            ),
+            1100,
+        ),
+    )
+
+    private val botExchangeEvent = listOf(
+        event("turn/start", 1, JSONObject().put("turn", 1), 1000),
+        event(
+            "user/message", 2,
+            JSONObject().put(
+                "source",
+                JSONObject().put("kind", "bot").put("role", "request")
+                    .put("senderSessionId", "s2").put("senderName", "小助手"),
+            ).put("content", JSONArray().put(text("帮我查一下"))),
+            1100,
+        ),
+    )
+
+    @Test
+    fun aReadOnlyViewCardMakesARow() = assertMatchesOracle("viewCard", viewCard)
+
+    @Test
+    fun anInteractiveViewCardMakesNoRow() = assertMatchesOracle("interactiveViewCard", interactiveViewCard)
+
+    @Test
+    fun anAnsweredQuestionMakesARow() = assertMatchesOracle("answeredQuestion", answeredQuestion)
+
+    @Test
+    fun anAnsweredViewMakesARow() = assertMatchesOracle("answeredView", answeredView)
+
+    @Test
+    fun aBotExchangeMakesAnEventRow() = assertMatchesOracle("botExchangeEvent", botExchangeEvent)
+
     @Test
     fun theOracleFixtureCoversEveryScenario() {
         // fixture 必须覆盖上面每个场景（漏一个场景 = 少一层保护）。
@@ -320,6 +457,7 @@ class TimelineFoldTest {
             "basicTurn", "multiBlock", "hiddenTurn", "withAttachments", "multiTextUser",
             "trimmedUser", "retryRow", "turnFailed", "changesRow", "deliverableCard", "toolRow",
             "producedCard", "producedRelativePath", "presentedAfterClosing",
+            "viewCard", "interactiveViewCard", "answeredQuestion", "answeredView", "botExchangeEvent",
         )
         assertTrue("fixture 缺少场景：${expected - names}", expected.all { it in names })
     }
