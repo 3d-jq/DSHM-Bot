@@ -88,7 +88,15 @@ android {
         // 版本更新提示不是代码缺陷；依赖版本在 gradle/libs.versions.toml 里手动钉住，
         // 升级是独立任务（见 docs/roadmap.md），不阻塞每次构建。
         // ExpiredTargetSdkVersion：targetSdk 28 是 PRoot 的取舍，见 docs/architecture.md。
-        disable += setOf("GradleDependency", "NewerVersionAvailable", "ExpiredTargetSdkVersion")
+        // AndroidGradlePluginVersion 是**独立**的 check id（不在 GradleDependency 里）：
+        // 它需要联网查「有没有更新的 AGP」，本地常常因为缓存/网络判定「没有更新」而
+        // 看不到，CI 上却每次报 Error → 长期红，且只给「exit code 1」。
+        disable += setOf(
+            "GradleDependency",
+            "NewerVersionAvailable",
+            "AndroidGradlePluginVersion",
+            "ExpiredTargetSdkVersion",
+        )
     }
 
     testOptions {
