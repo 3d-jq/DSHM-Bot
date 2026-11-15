@@ -89,10 +89,36 @@ class TimelineEventLogTest {
     }
 
     @Test
-    fun rowsWithoutSeqStayAtTheTail() {
+    fun rowsWithoutSeqKeepHostDisplayOrder() {
         val log = TimelineEventLog()
-        log.merge(listOf(row("inbox", null), row("a", 10), row("b", 20)))
-        assertEquals(listOf("a", "b", "inbox"), keys(log))
+        // 私聊：divider（无 seq）插在两个有 seq 行之间，不能被挪到尾部。
+        log.merge(listOf(row("a", 10), row("divider", null), row("b", 20)))
+        assertEquals(listOf("a", "divider", "b"), keys(log))
+    }
+
+    /** 回归（2026-11-15 真机）：群聊是位置序，relay 回复行 seq=null，不能被挪到后面。 */
+    @Test
+    fun groupPositionOrderIsPreserved() {
+        val log = TimelineEventLog()
+        log.merge(
+            listOf(
+                row("user:1", 1),
+                row("bot:relay-1:0", null),
+                row("user:relay-1:1", null),
+                row("bot:relay-1:2", null),
+                row("user:5", 5),
+            ),
+        )
+        assertEquals(listOf("user:1", "bot:relay-1:0", "user:relay-1:1", "bot:relay-1:2", "user:5"), keys(log))
+    }
+
+    /** 回归：有 seq 的新行仍要插到正确位置，且不打断已排好的无 seq 行。 */
+    @Test
+    fun lateSeqRowLandsBetweenSeqRowsWithoutDisturbingNoSeqRows() {
+        val log = TimelineEventLog()
+        log.merge(listOf(row("a", 10), row("divider", null), row("c", 30)))
+        log.put(row("b", 20)) // 迟到的中间 seq 行
+        assertEquals(listOf("a", "divider", "b", "c"), keys(log))
     }
 
     @Test
