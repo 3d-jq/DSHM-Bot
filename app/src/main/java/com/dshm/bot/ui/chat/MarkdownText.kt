@@ -236,9 +236,13 @@ fun MarkdownText(
     streaming: Boolean = false,
 ) {
     val colors = Dshm.colors
+    // 正文行高对齐 DeepSeek 官方 demo 的 markdown token（16/28 = **1.75**）。
+    // 原来是 composerText 的 23.2sp（1.45）—— 长回复会明显「挤」，这是官方看起来
+    // 更舒展的主要原因（见 docs 里的对比表）。
+    val fontSize = Dshm.typography.composerText.fontSize * fontScale
     val base = Dshm.typography.composerText.copy(
-        fontSize = Dshm.typography.composerText.fontSize * fontScale,
-        lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
+        fontSize = fontSize,
+        lineHeight = fontSize * MARKDOWN_LINE_HEIGHT_RATIO,
         color = colors.textPrimary,
     )
 
@@ -251,10 +255,7 @@ fun MarkdownText(
     val fragments = splitStreamingFragments(markdown)
     val liveFade = if (streaming) rememberStreamingFade() else null
     if (liveFade != null) StreamingFadeDriver(liveFade)
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(Dshm.spacing.xs),
-    ) {
+    Column(modifier = modifier) {
         fragments.forEachIndexed { fragmentIndex, fragment ->
             val live = streaming && fragmentIndex == fragments.lastIndex
             key(fragmentIndex) {
@@ -815,3 +816,28 @@ private fun bareUrlEnd(text: String, start: Int): Int {
     return end
 }
 
+/** markdown 正文行高倍率：对齐 DeepSeek 官方 demo 的 `--dsw-font-markdown-base`
+ * （16px/28px = 1.75）。 */
+internal const val MARKDOWN_LINE_HEIGHT_RATIO = 1.75f
+
+/**
+ * 块与块之间的上间距（对齐官方 markdown.css）：
+ * - h1–h3：上留 32（官方 `margin: 32px 0 16px`）
+ * - h4–h6 / 段落 / 代码块 / 表格 / 引用 / 分隔线：16
+ * - 列表项之间：6（官方 `li:not(:first-child) { margin-top: 6px }`）
+ *
+ * 只在「上一块之后」加，所以第一个块永远不加（由调用方判断）。
+ */
+internal fun markdownTopSpace(block: MarkdownBlock): androidx.compose.ui.unit.Dp = when (block) {
+    is MarkdownBlock.Heading -> if (block.level <= 3) 32.dp else 16.dp
+    is MarkdownBlock.ListItem -> 6.dp
+    else -> 16.dp
+}
+
+/** 标题字号倍率（官方 h1 24 / h2 22 / h3 20 / h4 16，正文 16）。 */
+internal fun markdownHeadingScale(level: Int): Float = when (level) {
+    1 -> 1.5f      // 24 / 16
+    2 -> 1.375f    // 22 / 16
+    3 -> 1.25f     // 20 / 16
+    else -> 1f     // h4–h6 = 正文字号，靠字重区分
+}

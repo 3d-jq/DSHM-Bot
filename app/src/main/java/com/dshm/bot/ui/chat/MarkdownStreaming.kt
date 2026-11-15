@@ -108,15 +108,20 @@ internal fun RenderMarkdownBlock(
             fillWidth = fillWidth,
         )
 
-        is MarkdownBlock.Heading -> ShardText(
-            text = withFade(inline(block.text), block.text),
-            style = base.copy(
-                fontSize = base.fontSize * if (block.level <= 2) 1.18f else 1.08f,
-                lineHeight = base.lineHeight * if (block.level <= 2) 1.18f else 1.08f,
-                fontWeight = FontWeight.Bold,
-            ),
-            fillWidth = fillWidth,
-        )
+        is MarkdownBlock.Heading -> {
+            // 官方 token：h1 24 / h2 22 / h3 20 / h4 16（正文 16），行高约 1.42。
+            // h1–h3 粗体 700，h4–h6 用 600（与正文区分但不刺眼）。
+            val size = base.fontSize * markdownHeadingScale(block.level)
+            ShardText(
+                text = withFade(inline(block.text), block.text),
+                style = base.copy(
+                    fontSize = size,
+                    lineHeight = size * 1.42f,
+                    fontWeight = if (block.level >= 4) FontWeight.SemiBold else FontWeight.Bold,
+                ),
+                fillWidth = fillWidth,
+            )
+        }
 
         is MarkdownBlock.ListItem -> ListLine(
             text = block.text,

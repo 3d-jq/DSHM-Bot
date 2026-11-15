@@ -1,5 +1,9 @@
 package com.dshm.bot.ui.chat
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,25 +44,33 @@ internal fun MarkdownFragment(
         val computed = withContext(kotlinx.coroutines.Dispatchers.Default) {
             MarkdownParseCache.blocks(raw)
         }
+        val parseMs = (System.nanoTime() - parseStart) / 1_000_000L
         StreamRenderLog.slowParse(
             layer = "fragment",
             chars = raw.length,
-            parseMs = (System.nanoTime() - parseStart) / 1_000_000L,
+            parseMs = parseMs,
             thread = "DefaultDispatcher",
         )
+        // 自适应节流的代价信号：解析越贵，下一次刷新间隔越宽（官方同款公式）。
+        if (live) StreamRenderCost.observeRenderCost(parseMs)
         state.value = computed
     }
     val blocks = state.value
     blocks.forEachIndexed { index, block ->
-        RenderMarkdownBlock(
-            block = block,
-            baseId = "f${fragmentIndex}b$index",
-            live = live,
-            colors = colors,
-            base = base,
-            mentionMembers = mentionMembers,
-            fillWidth = fillWidth,
-            fade = fade,
-        )
+        // 块间距按类型给（对齐官方 markdown.css）：标题上留 32、段落 16、列表项 6。
+        // 第一个片段的第一块不加（气泡顶部已有 padding）；其余块都加上间距。
+        val topSpace = if (index == 0 && fragmentIndex == 0) 0.dp else markdownTopSpace(block)
+        Column(modifier = Modifier.padding(top = topSpace)) {
+            RenderMarkdownBlock(
+                block = block,
+                baseId = "f${fragmentIndex}b$index",
+                live = live,
+                colors = colors,
+                base = base,
+                mentionMembers = mentionMembers,
+                fillWidth = fillWidth,
+                fade = fade,
+            )
+        }
     }
 }
