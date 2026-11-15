@@ -637,6 +637,38 @@ class BotChatParityPipelineTest {
      *
      * 现在折叠自己产这三类（不再从宿主补行），这里验「折叠产出的它们真的进了显示」。
      */
+    /**
+     * 回归（2026-11-15 真机报「浏览器网页卡每次都在发信息的后面」）：
+     * 缩略图卡原先**永远追加到 entries 末尾**，于是下一条消息一来，它就跑到新消息
+     * 后面去了。现在按「截图那一刻的 seq」地锚插回它所属那一轮的轮末。
+     */
+    @Test
+    fun aBrowserShotStaysInItsTurnInsteadOfFollowingTheNextMessage() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("bot:10", "bot", 10L))
+        api.snapshotSeq = 40
+        val viewModel = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        val url = "https://example.com/a"
+        viewModel.addBrowserShot(
+            ChatBrowserShot(path = "/tmp/a.png", url = url, title = "A", timeMs = 1_000L),
+        )
+        scheduler.runCurrent()
+        val shotId = "shot:1000:${url.hashCode()}"
+        assertEquals(listOf("bot:10", shotId), viewModel.uiState.value.entries.map { it.id })
+
+        // 又来一条新消息（seq 更大）：缩略图必须留在它自己那一轮，不能被顶到后面。
+        api.emitTimeline(api.row("user:42", "user", 42L))
+        scheduler.runCurrent()
+        assertEquals(
+            "缩略图应留在它那一轮之后、新消息之前",
+            listOf("bot:10", shotId, "user:42"),
+            viewModel.uiState.value.entries.map { it.id },
+        )
+    }
+
     @Test
     fun theFoldProducesViewAnsweredAndBotExchangeRows() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler

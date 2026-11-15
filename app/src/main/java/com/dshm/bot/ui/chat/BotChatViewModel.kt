@@ -582,16 +582,20 @@ class BotChatViewModel internal constructor(
      * 只在内存里留最近 [MAX_BROWSER_SHOTS] 张：它不是历史内容，重新进对话就不该再出现。
      */
     fun addBrowserShot(shot: ChatBrowserShot) {
+        // 地锚 = 截图那一刻的时间线 seq（刚收尾那一轮的位置）。
+        // 以前传 null，缩略图只能永远追加到末尾 —— 下一条消息一来，这张卡就跑到
+        // 「新消息后面」去了（真机报的位置问题）。
+        val anchor = paritySeq.takeIf { it > 0L }
         browserShots += ChatEntry(
             id = "shot:${shot.timeMs}:${shot.url.hashCode()}",
             kind = ChatEntryKind.BROWSER_SHOT,
             text = "",
             timeMs = shot.timeMs,
+            seq = anchor,
             shot = shot,
         )
-        browserShotStore?.add(browserShotSessionId ?: sessionId ?: botId, shot, null)
+        browserShotStore?.add(browserShotSessionId ?: sessionId ?: botId, shot, anchor)
         while (browserShots.size > MAX_BROWSER_SHOTS) browserShots.removeAt(0)
-        // 缩略图拼在行管线 entries 的尾部（1c 换贴 turntail 行 seq）。
         rebuildParityEntries()
     }
 
@@ -1301,6 +1305,10 @@ class BotChatViewModel internal constructor(
         // 相同，LazyColumn 会因 key 冲突抛「Key was already used」→ 列表挂掉
         // （真机：加载历史后分割线下面的气泡消失）。**数据 key 不动**，只隔开渲染 id。
         val timelineRows: List<TimelineRow> = earlierRows + currentRows + inboxRows
+        // ③ 落定行已经到位 → **立刻**收掉流式气泡。
+        // 否则同一条回复会同时画两遍（折叠行 + 流式气泡），要等 stream/end 后 200ms
+        // 的兜底清理才少掉一块 —— 完成那一下的「跳」就是这么来的。
+        settleStreamingWhenLanded(timelineRows)
         val earlierKeys = earlierRows.mapTo(HashSet()) { it.key }
         // 同一条消息已经在时间线上是 `user` 气泡了 → 它的 `inbox`（排队/插话）行是
         // 同一句话的第二份显示。队列条里留着它，就会每次刷新都把「撤回」又摆出来
@@ -1356,8 +1364,9 @@ class BotChatViewModel internal constructor(
         for (echoRow in pendingEchoRows.values) {
             chatEntryOf(echoRow, botName)?.let(mapped::add)
         }
-        // 浏览器缩略图：客户端本地功能，拼在最后（1c 换贴 turntail 行 seq）。
-        for (shotEntry in browserShots) mapped.add(shotEntry)
+        // 浏览器缩略图：按**地锚 seq** 插回它所属那一轮的轮末，而不是永远排最后
+        // （以前追加到末尾 → 下一条消息一来，卡就跑到新消息后面）。
+        insertBrowserShots(mapped)
         // 队列行与时间线分开：inbox 行只进队列条，不画进对话。
         val queue = mapped.filter { it.kind == ChatEntryKind.PENDING }
         val timeline = mapped.filterNot { it.kind == ChatEntryKind.PENDING }
@@ -2469,6 +2478,58 @@ class BotChatViewModel internal constructor(
         _streamingText.value = ""
     }
 
+
+
+    /**
+     * 把浏览器缩略图卡插回时间线的正确位置。
+     *
+     * 每张卡带 `seq`（截图那一刻的时间线位置）：插在「最后一条 seq ≤ 地锚」之后，
+     * 也就是它所属那一轮的轮末。没有地锚（旧数据）才退回追加到末尾。
+     */
+    private fun insertBrowserShots(target: MutableList<ChatEntry>) {
+        if (browserShots.isEmpty()) return
+        var cursor = 0
+        for (shot in browserShots) {
+            val anchor = shot.seq
+            if (anchor == null) {
+                target.add(shot)
+                continue
+            }
+            var index = target.size
+            var scan = cursor
+            while (scan < target.size) {
+                val seq = target[scan].seq
+                if (seq != null && seq > anchor) {
+                    index = scan
+                    break
+                }
+                scan += 1
+            }
+            target.add(index, shot)
+            cursor = index + 1
+        }
+    }
+
+    /**
+     * 落定的 bot 行已经到了，就立刻清掉流式气泡（不必等 `stream/end` 的 200ms 兜底）。
+     *
+     * 判据：流式缓冲的文本以「最后一条 bot 行」的文本**结尾**（多段回复时最后一段）。
+     * 只在文本确实对上时才清 —— 否则正常流式中途会被误清。长度下限 20 字，
+     * 避免极短片段（如「好的」）跟历史里的同款短句误撞。
+     */
+    private fun settleStreamingWhenLanded(rows: List<TimelineRow>) {
+        if (streamBuffer.isEmpty()) return
+        val streaming = streamBuffer.trim()
+        if (streaming.length < 20) return
+        val lastBot = rows.lastOrNull { it.payload is TimelineRowPayload.Bot } ?: return
+        val settled = (lastBot.payload as? TimelineRowPayload.Bot)?.text?.trim().orEmpty()
+        if (settled.length < 20) return
+        if (streaming == settled || streaming.endsWith(settled)) {
+            DshMuxLog.log("流式收尾：落定行已到位（${settled.length} 字），立刻收掉流式气泡")
+            clearStreaming()
+        }
+    }
+
     /**
      * 双路 flush（对齐 DeepSearch `updateAssistantMessage`）：
      * - 时间路径：按当前总长度取自适应间隔，短回答 30ms、长回答逐级放宽；
@@ -2483,7 +2544,9 @@ class BotChatViewModel internal constructor(
         val state = streamFlush
         val now = System.currentTimeMillis()
         val elapsed = now - state.lastFlushMs
-        val throttle = streamingThrottleMs(content.length)
+        // 自适应节流（对齐官方 demo）：长度给**下限**（短回答照样 30ms 就推），
+        // 若上一帧解析很贵，`StreamRenderCost` 会把间隔拉宽（耗时 × 2，上限 2s）。
+        val throttle = maxOf(streamingThrottleMs(content.length), StreamRenderCost.delayFromNowMs())
         val newChunk = if (content.length > state.lastFlushedLen) {
             content.substring(state.lastFlushedLen.coerceAtMost(content.length))
         } else ""
@@ -2493,7 +2556,10 @@ class BotChatViewModel internal constructor(
 
         fun publish(text: String) {
             StreamRenderLog.flush(text.length, throttle)
-            _streamingText.value = text
+            // 显示时去掉尾部空白：落地段落走 `flushParagraph()` 的 trim，流式若保留
+            // 尾随空格/换行，完成那一下会少一行或换行点变化 → 视觉微跳。
+            // 长度记账仍用原始 text（chunk 计算依赖它）。
+            _streamingText.value = text.trimEnd()
             state.lastFlushMs = System.currentTimeMillis()
             state.lastFlushedLen = text.length
             state.pending = null

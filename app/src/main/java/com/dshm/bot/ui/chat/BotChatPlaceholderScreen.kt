@@ -74,7 +74,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.conflate
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -811,9 +810,18 @@ private fun ChatMessages(
     var viewingImage by remember { mutableStateOf<ChatAttachmentItem?>(null) }
     val appContextForMenu = LocalContext.current
     val streamingNow = streaming.isNotEmpty()
+    // 本轮**是否已经流过文字**。用来避免「结束瞬间活动行闪一下」：
+    // 旧条件 `!streamingNow || kind != THINKING` 在流式一清空时恒真 →
+    // 「思考中」行突然出现，等回合真结束又消失，看起来就是结束后来回跳。
+    var streamedThisRun by remember { mutableStateOf(false) }
+    LaunchedEffect(streamingNow, working) {
+        if (streamingNow) streamedThisRun = true else if (!working) streamedThisRun = false
+    }
     // DS Bot `rowVisible`：正在写文字时不显示活动行（文字气泡自己就是「在做」），
     // 但如果这一刻有工具在跑（写入/搜索…），活动行仍然留着。
-    val typing = activity != null && (!streamingNow || activity.kind != ChatActivityKind.THINKING)
+    // 「思考中」只在本轮**还没出过文字**时显示（已经写完就不要再把它叫回来）。
+    val typing = activity != null &&
+        (activity.kind != ChatActivityKind.THINKING || (!streamingNow && !streamedThisRun))
 
     // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
     // 显示在底部。Compose 的 reverseLayout 原生就会把底部锚住 ——
@@ -878,16 +886,19 @@ private fun ChatMessages(
         listState.scrollToItem(0)
     }
 
-    // 流式输出时跟着到底（照 DeepSearch 的 T256 流水线）：
-    // snapshotFlow 发元组 → conflate 丢掉中间值 → sample 限频到约 8Hz。
-    // 不用「每个 token 都重启一次滚动动画」—— 那会把 UI 线程压垮。
+    // 流式输出时跟着到底 —— 对齐 DeepSeek 官方 demo 的 `useLayoutEffect` 跟随：
+    // 内容一变、**布局落定就滚**，不按固定间隔采样。
+    //
+    // 以前这里是 `sample(120L)`：每 120ms 才滚一次，视觉上是一格一格往上跳；
+    // 官方是每次渲染更新都跟着走（渲染本身已被 markdown 节流合并），所以顺。
+    // `conflate()` 保证高频 token 只处理最新值，不会把 UI 线程压垮。
     LaunchedEffect(listState, bottomChromeHeight) {
         snapshotFlow { streaming.length to bottomChromeHeight }
             .conflate()
-            .sample(120L)
             .collect { (length, _) ->
                 if (length == 0 || userDragged || draggedByUser) return@collect
                 if (listState.isScrollInProgress) return@collect
+                // 布局已落定（snapshotFlow 在重组后取值），这一帧直接贴底。
                 listState.scrollToItem(0)
             }
     }
@@ -973,7 +984,9 @@ private fun ChatMessages(
                 item(key = "typing") {
                     // 活动行单独固定 12dp 上间距（官方 `[data-chat-running] > .bt-typing`），
                     // 不跟气泡/事件行的间距规则走。
-                    Box(Modifier.padding(top = Dshm.spacing.md)) {
+                    // **只有活动行**带动画（用户 2026-11-15 定）：它出现/消失最频繁、
+                    // 又只占一行，滑入更顺。产物卡/改动卡与气泡都不加。
+                    Box(Modifier.animateItem().padding(top = Dshm.spacing.md)) {
                         ChatActivityRow(
                             bot = bot,
                             activity = requireNotNull(activity),
@@ -1031,6 +1044,8 @@ private fun ChatMessages(
                     olderBotId = older?.botId,
                     isGroup = bot.isGroup,
                 )
+                // 列表动画**只给活动行**（用户 2026-11-15 定：产物卡/改动卡与气泡都不加，
+                // 见上面的 `typing` item）。其余条目保持瞬时增删。
                 Column(
                     modifier = Modifier
                         .padding(top = spacing.top)
