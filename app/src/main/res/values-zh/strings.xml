@@ -57,13 +57,8 @@
     <string name="chat_load_failed">对话加载失败</string>
     <string name="chat_retry">重试</string>
     <string name="chat_send_failed">消息发送失败：%1$s</string>
-    <string name="chat_queue_title">%1$d 条待发送</string>
     <string name="chat_member_stop">停止 %1$s</string>
     <string name="chat_member_stopped">已让 %1$s 停下</string>
-    <string name="chat_pending_queued">排队中</string>
-    <string name="chat_pending_steering">插话中…</string>
-    <string name="chat_pending_steer">改为插话</string>
-    <string name="chat_pending_recall">撤回</string>
     <string name="approval_waiting">等你确认</string>
     <string name="approval_reject">拒绝</string>
     <string name="approval_allow_once">允许一次</string>

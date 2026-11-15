@@ -57,13 +57,8 @@
     <string name="chat_load_failed">Couldn’t load this conversation</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_send_failed">Message not sent: %1$s</string>
-    <string name="chat_queue_title">%1$d pending</string>
     <string name="chat_member_stop">Stop %1$s</string>
     <string name="chat_member_stopped">Stopped %1$s</string>
-    <string name="chat_pending_queued">Queued</string>
-    <string name="chat_pending_steering">Steering into the running turn…</string>
-    <string name="chat_pending_steer">Steer now</string>
-    <string name="chat_pending_recall">Recall</string>
     <string name="approval_waiting">Waiting for your approval</string>
     <string name="approval_reject">Reject</string>
     <string name="approval_allow_once">Allow once</string>

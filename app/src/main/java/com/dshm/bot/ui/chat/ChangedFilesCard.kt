@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,8 +65,11 @@ private const val CHANGED_FILES_SHOWN = 4 // 对齐官方 COLLAPSED_ROWS
  *
  * 数据来自 DSH `workspace/changes` 通告（行里只有 `turn`）+ 按 `(sessionId, seq)` 取的
  * `/api/changes.summary` 摘要。单文件只画标题行（官方做法）；多文件列出行。
- * 点一行：走现有产物打开链路（`ChatArtifactFiles` 取字节 + FileProvider/ACTION_VIEW）。
- * 官方网页端的 hover 内联 diff 预览属平台取舍（`docs/parity-checklist.md` §4），不做。
+ *
+ * **点一行**：打开**改动详情**（diff 页，对齐 dsh-go 的 `ChangeDiffPage`；数据由客户端
+ * 从事件日志自己算）。
+ * **长按一行**：走现有产物打开链路（`ChatArtifactFiles` 取字节 + FileProvider/ACTION_VIEW）
+ * —— 两个能力都留着。
  */
 @Composable
 fun ChangedFilesCard(
@@ -73,6 +77,8 @@ fun ChangedFilesCard(
     endpoint: RuntimeEndpoint?,
     sessionId: String,
     modifier: Modifier = Modifier,
+    /** 打开改动详情（diff 页）；为 null 时点击直接打开文件。 */
+    onShowDiff: ((ChangedFile) -> Unit)? = null,
 ) {
     if (summary.files.isEmpty()) return
     val context = LocalContext.current
@@ -117,13 +123,21 @@ fun ChangedFilesCard(
             .background(Dshm.colors.surface)
             .border(Dshm.spacing.hairline, Dshm.colors.divider, shape),
     ) {
-        // 标题行：单文件直接可点打开；多文件是卡片的抬头（点文件行走行内动作）。
+        // 标题行：单文件可直接点（看 diff）；多文件是卡片的抬头（点文件行走行内动作）。
         val headerClickable = single != null
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (headerClickable) Modifier.clickable(enabled = busyPath == null) { open(single) } else Modifier)
+                .then(
+                    if (headerClickable) {
+                        Modifier.clickable(enabled = busyPath == null) {
+                            if (onShowDiff != null) onShowDiff(single) else open(single)
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
                 .padding(
                     start = Dshm.spacing.md,
                     end = Dshm.spacing.md,
@@ -187,7 +201,15 @@ fun ChangedFilesCard(
                     .height(Dshm.spacing.hairline)
                     .background(Dshm.colors.divider),
             )
-            shown.forEach { file -> ChangedFileRow(file, busyPath == file.path, notes[file.path]) { open(file) } }
+            shown.forEach { file ->
+                ChangedFileRow(
+                    file = file,
+                    busy = busyPath == file.path,
+                    note = notes[file.path],
+                    onOpen = { if (onShowDiff != null) onShowDiff(file) else open(file) },
+                    onLongPress = { open(file) },
+                )
+            }
             if (collapsible) {
                 Spacer(Modifier.size(Dshm.spacing.xxs))
                 Row(
@@ -226,17 +248,19 @@ fun ChangedFilesCard(
 
 /** 一个改动文件一行：类型图标 + 展示名 + 增删行数（binary/oversized 特判）。 */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun ChangedFileRow(
     file: ChangedFile,
     busy: Boolean,
     note: String?,
     onOpen: () -> Unit,
+    onLongPress: () -> Unit = {},
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = !busy, onClick = onOpen)
+            .combinedClickable(enabled = !busy, onClick = onOpen, onLongClick = onLongPress)
             .padding(start = Dshm.spacing.md, end = Dshm.spacing.md, top = Dshm.spacing.sm, bottom = Dshm.spacing.sm),
     ) {
         Box(

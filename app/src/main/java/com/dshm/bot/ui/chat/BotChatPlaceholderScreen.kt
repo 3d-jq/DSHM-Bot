@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import com.dshm.bot.MainActivity
+import com.dshm.bot.data.remote.ChangedFile
 import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -172,6 +173,10 @@ fun BotChatScreen(
         }
     }
     var pendingAttachments by remember { mutableStateOf<List<ChatAttachmentDraft>>(emptyList()) }
+    // 四期 4b-2：改动详情（diff 页）。全屏覆盖层，不用新 Activity——数据来自
+    // 客户端自己的事件日志（viewModel.changesForDiff()），与 dsh-go 同数据源。
+    // 路径 + 这张卡对应的 seq（diff 的锚：算「那一轮」的改动，而不是最新一轮）。
+    var diffTarget by remember { mutableStateOf<Pair<String, Long?>?>(null) }
     val attachContext = LocalContext.current
     val attachScope = rememberCoroutineScope()
     var cameraFile by remember { mutableStateOf<File?>(null) }
@@ -330,8 +335,10 @@ fun BotChatScreen(
     /** 正在提交上方的模型选择：chip 禁用，避免重复点。 */
     var pickingModel by remember { mutableStateOf(false) }
 
+    // 四期 4b-2：改动详情（diff 页）要盖住**整个**界面（含聊天的顶栏），
+    // 所以根是一个 Box：Scaffold 在里，diff 覆盖层在外层最后画。
+    Box(modifier = modifier.fillMaxSize()) {
     Scaffold(
-        modifier = modifier.fillMaxSize(),
         containerColor = Dshm.colors.background,
         // 系统栏 inset 全部自己消化，内容铺满整屏；只有输入法顶开内容区。
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -453,6 +460,9 @@ fun BotChatScreen(
                         endpoint = endpoint,
                         members = if (bot.isGroup) bot.roomMembers else state.teamMembers,
                         rooms = state.teamRooms,
+                        onShowDiff = { file, anchor ->
+                            diffTarget = file.path to anchor
+                        },
                         fontScale = fontScale,
                         topPadding = innerPadding.calculateTopPadding(),
                         // 最后一条消息避开输入框（输入框浮在列表上面）：
@@ -473,8 +483,6 @@ fun BotChatScreen(
                         onOpenExchange = { id -> exchangeWith = id },
                         onOpenBrowser = onOpenBrowser,
                         onEditMessage = { text -> draft = text },
-                        onRecallPending = viewModel::recallPending,
-                        onSteerPending = viewModel::steerPending,
                     )
                 }
             }
@@ -592,14 +600,13 @@ fun BotChatScreen(
                     viewModel.continueRoom { error -> if (error != null) chatError = error }
                 },
             )
-            // 已进宿主队列的消息：输入框上方的队列条（时间线里不画排队行）。
-            PendingQueueStrip(
-                items = state.pendingQueue,
-                isGroup = bot.isGroup,
-                busy = state.sending,
-                onRecall = viewModel::recallPending,
-                onSteer = viewModel::steerPending,
-            )
+            // 已进宿主队列的消息**不在界面上画**（对齐官方网页端：它把
+            // `placement === 'queued'` 的项从活动行里滤掉，见 ds-bot
+            // `client/activity-row.js`）。排队状态由**本地乐观气泡**承担：
+            // 发出即上屏（发送中），服务端认领后原地变成正式气泡。
+            // 之前这里有个输入框上方的「N 条待发送」队列条：群聊里 Bot 的群帖
+            // （无 requestId、relay 后增量帧不再提及）会永远残留在上面，
+            // 而官方并没有这个 UI —— 现在整条去掉。
             // 一次性轻提示（如「已让 X 停下」）。
             state.actionNotice?.let { notice ->
                 Text(
@@ -645,6 +652,25 @@ fun BotChatScreen(
             )
             }
         }
+    }
+    // 四期 4b-2：改动详情（diff 页）——**盖住整个界面**（含聊天顶栏），数据来自
+    // 客户端自己的事件日志（dsh-go 同一数据源：工具结果 meta 的 diffs）。
+    diffTarget?.let { (path, anchor) ->
+        val changes = remember(path, anchor) { viewModel.changesForDiff(anchor) }
+        val index = changes.indexOfFirst { it.path == path }.coerceAtLeast(0)
+        // 返回键先关详情页，别把整个对话退回首页。
+        androidx.activity.compose.BackHandler(enabled = true) { diffTarget = null }
+        ChangeDiffScreen(
+            changes = changes,
+            initialIndex = index,
+            modifier = Modifier.fillMaxSize(),
+            onBack = { diffTarget = null },
+            onCopyPatch = { patch ->
+                val clipboard = attachContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                clipboard?.setPrimaryClip(ClipData.newPlainText("diff", patch))
+            },
+        )
+    }
     }
     if (quickSettings) {
         if (bot.isGroup) {
@@ -743,6 +769,8 @@ private fun ChatMessages(
     members: List<com.dshm.bot.ui.home.RoomMemberUi>,
     /** 团队的群聊（事件行「阅读群聊 / 群发言」要画成员头像堆叠）。 */
     rooms: List<com.dshm.bot.ui.home.TeamRoomUi>,
+    /** 四期 4b-2：点代码产物卡的文件行 → 打开改动详情（带这张卡的 seq 当锚）。 */
+    onShowDiff: (ChangedFile, Long?) -> Unit,
     fontScale: Float,
     topPadding: Dp,
     bottomPadding: Dp,
@@ -765,9 +793,7 @@ private fun ChatMessages(
     /** 长按用户气泡 → 编辑：把内容填回输入框。 */
     onEditMessage: (String) -> Unit = {},
     /** 撤回一条排队中的消息（timeline 行管线的 `session/updateQueue {remove}`）。 */
-    onRecallPending: (ChatEntry) -> Unit = {},
     /** 把一条排队中的消息改成插话（`session/updateQueue {steer}`）。 */
-    onSteerPending: (ChatEntry) -> Unit = {},
 ) {
     // 普通引用，不用 `mutableStateOf`：`onGloballyPositioned` 每帧都会触发，
     // 写快照状态会让滑动时整页跟着无效重组。
@@ -1115,6 +1141,7 @@ private fun ChatMessages(
                             summary = summary,
                             endpoint = endpoint,
                             sessionId = bot.id,
+                            onShowDiff = { file -> onShowDiff(file, entry.seq) },
                         )
                     }
 
@@ -1135,15 +1162,10 @@ private fun ChatMessages(
                         AnsweredQuestionCard(answered = entry.answered)
                     }
 
-                    // inbox 行（timeline 行管线）：排队 / 插话中的消息。撤回与改插话
-                    // 只在单聊提供——群聊的排队真身在插件 roomInbox，行没有稳定
-                    // itemId，本轮只显示「谁在排队」（Phase 1c 实现级口径）。
-                    ChatEntryKind.PENDING -> PendingRow(
-                        entry = entry,
-                        isGroup = bot.isGroup,
-                        onRecall = onRecallPending,
-                        onSteer = onSteerPending,
-                    )
+                    // inbox 行（排队 / 插话中的消息）**不画**：对齐官方网页端
+                    // （它把 `placement === 'queued'` 的项滤掉，见 ds-bot
+                    // `client/activity-row.js`）。排队状态由本地乐观气泡承担。
+                    ChatEntryKind.PENDING -> Unit
                 }
                 }
             }
@@ -1449,62 +1471,6 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
                 .clickable(onClick = onRetry)
                 .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
         )
-    }
-}
-
-/**
- * inbox 行（timeline 行管线）：排队（`next-turn`）中的消息。
- *
- * - 单聊：行内「改为插话 / 撤回」（走 `session/updateQueue`）。
- * - 群聊：只有**自己排的项**（`sourceKind == "user"`）给「撤回」（走 `room-queue`）；
- *   成员/系统项只显示。**群聊不给「改为插话」**——群队列要等下一个 relay 才 drain，
- *   没有「插进当前回合」的语义。
- */
-@Composable
-private fun PendingRow(
-    entry: ChatEntry,
-    isGroup: Boolean,
-    onRecall: (ChatEntry) -> Unit = {},
-    onSteer: (ChatEntry) -> Unit = {},
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.End,
-    ) {
-        Text(
-            text = if (entry.pendingSlot == "next-step") {
-                stringResource(R.string.chat_pending_steering)
-            } else {
-                stringResource(R.string.chat_pending_queued)
-            },
-            style = Dshm.typography.rowPreview,
-            color = Dshm.colors.textTertiary,
-        )
-        Text(
-            text = entry.text,
-            style = Dshm.typography.composerText,
-            color = Dshm.colors.textSecondary,
-        )
-        val canRecall = if (isGroup) entry.pendingSourceKind == "user" else true
-        val canSteer = !isGroup
-        if (canSteer || canRecall) {
-            Row {
-                if (canSteer) {
-                    TextButton(onClick = { onSteer(entry) }) {
-                        Text(stringResource(R.string.chat_pending_steer), style = Dshm.typography.rowPreview)
-                    }
-                }
-                if (canRecall) {
-                    TextButton(onClick = { onRecall(entry) }) {
-                        Text(
-                            stringResource(R.string.chat_pending_recall),
-                            style = Dshm.typography.rowPreview,
-                            color = Dshm.colors.danger,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
