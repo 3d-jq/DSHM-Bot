@@ -57,24 +57,48 @@ class EngineLogTest {
     }
 
     @Test
-    fun truncatesToTailWhenFileGrowsOverCap() {
-        val target = freshLog(tempDir("log-cap"))
-        val marker = "oldest-line-that-must-not-survive"
-        EngineLog.raw(marker)
-        // 1 MiB 上限：每行 ~1KB，写 3 MiB 必触发多次截断。
-        repeat(3 * 1024) { index ->
+    fun rotatesIntoHistorySegmentsInsteadOfLosingOldLines() {
+        val dir = tempDir("log-rotate")
+        val target = freshLog(dir)
+        EngineLog.raw("oldest-line-from-previous-run")
+        // 单段 512 KiB：每行 ~1KB，写 1 MiB 必触发轮转。
+        repeat(1024) { index ->
             EngineLog.raw("chunk-$index-" + "x".repeat(960))
         }
         EngineLog.raw("the-latest-line")
 
+        assertTrue("当前段应 ≤ 512 KiB + 一行余量，实际 ${target.length()}", target.length() <= 512L * 1024L + 4096)
+        assertTrue(target.readText().contains("the-latest-line"))
+        // 旧行进了历史段，而不是被截断丢掉。
+        val history = File(dir, "engine.1.log")
+        assertTrue("轮转后应有 engine.1.log", history.isFile)
+        assertTrue("历史段应保留上一轮的行", history.readText().contains("oldest-line-from-previous-run") ||
+            (2..4).any { File(dir, "engine.$it.log").takeIf { f -> f.isFile }?.readText()?.contains("oldest-line-from-previous-run") == true })
+    }
+
+    @Test
+    fun resetKeepsHistoryAndMarksANewStart() {
+        val dir = tempDir("log-reset")
+        val target = freshLog(dir)
+        EngineLog.raw("evidence-from-before-restart")
+        EngineLog.reset()
         val text = target.readText()
-        // 体积被压回上限以内（允许最后一行的零头），且保留的是尾部而不是开头。
-        assertTrue("日志体积应 ≤ 1 MiB + 一行的余量，实际 ${target.length()}", target.length() <= (1L shl 20) + 4096)
-        assertFalse(text.contains(marker))
-        assertTrue(text.contains("the-latest-line"))
-        // 只保留尾部：靠后的 chunk 还在，前半段（1 MiB 附近）的旧行已被截掉。
-        assertTrue(text.contains("chunk-${3 * 1024 - 1}-"))
-        assertFalse(text.contains("chunk-1023-"))
+
+        assertTrue("重启前的证据不能丢", text.contains("evidence-from-before-restart"))
+        assertTrue("启动应有分隔线", text.contains("===== engine start"))
+    }
+
+    @Test
+    fun readAllIncludesPreviousSegments() {
+        val dir = tempDir("log-readall")
+        val target = freshLog(dir)
+        File(dir, "engine.1.log").writeText("older-session-line\n")
+        target.writeText("current-session-line\n")
+
+        val all = EngineLog.readAll(target, 4096)
+        assertTrue(all.contains("older-session-line"))
+        assertTrue(all.contains("current-session-line"))
+        assertTrue("旧段应排在当前段之前", all.indexOf("older-session-line") < all.indexOf("current-session-line"))
     }
 
     @Test

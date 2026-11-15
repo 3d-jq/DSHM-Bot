@@ -331,13 +331,15 @@ class EngineViewModel(
         connection = connection,
     )
 
-    /** 运行日志：与 dsh-Go 一样只展示当前引擎进程的 stdout 流，避免多份文件拼接后顺序混乱。 */
+    /**
+     * 运行日志：拼最近几段（engine.1.log … engine.log），**包含重启前的历史** ——
+     * 单次启动就清空日志会把诊断证据抹掉（产物卡排查吃过亏）。每段只读尾部，
+     * 不整读进内存；落盘前已打过码，这里再过一遍是冗余防线。
+     */
     fun logText(): String = runCatching {
         val engineLog = File(appContext.filesDir, "engine.log")
             .takeIf { it.isFile } ?: return@runCatching ""
-        // 日志文件可能很大，只读尾部再裁剪，不整读进内存。
-        // 落盘前已打过码，这里再过一遍是冗余防线。
-        TextMasking.maskSecrets(EngineLog.readTail(engineLog, LOG_TAIL_BYTES).trim().takeLast(300_000))
+        TextMasking.maskSecrets(EngineLog.readAll(engineLog, LOG_TAIL_BYTES).trim().takeLast(300_000))
     }.getOrDefault("")
 
 
