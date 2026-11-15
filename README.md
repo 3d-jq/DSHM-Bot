@@ -1,7 +1,13 @@
 # DSHM Bot
 
-[![app](https://github.com/3d-jq/DSHM-Bot/actions/workflows/app.yml/badge.svg)](https://github.com/3d-jq/DSHM-Bot/actions/workflows/app.yml)
-[![runtime](https://github.com/3d-jq/DSHM-Bot/actions/workflows/runtime.yml/badge.svg)](https://github.com/3d-jq/DSHM-Bot/actions/workflows/runtime.yml)
+<p align="center">
+  <img src="docs/images/app-icon-preview.png" width="128" alt="DSHM Bot 图标">
+</p>
+
+<p align="center">
+  <a href="https://github.com/3d-jq/DSHM-Bot/actions/workflows/app.yml"><img src="https://github.com/3d-jq/DSHM-Bot/actions/workflows/app.yml/badge.svg" alt="app"></a>
+  <a href="https://github.com/3d-jq/DSHM-Bot/actions/workflows/runtime.yml"><img src="https://github.com/3d-jq/DSHM-Bot/actions/workflows/runtime.yml/badge.svg" alt="runtime"></a>
+</p>
 
 一个原生 Android 客户端，把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上的
 [DS Bot](https://github.com/Fei2411/DeepSeek-Bot) 搬到手机上：Bot 团队、群聊、浏览器操控与手机操控，
