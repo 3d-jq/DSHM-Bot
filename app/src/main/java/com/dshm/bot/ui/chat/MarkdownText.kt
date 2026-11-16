@@ -821,23 +821,32 @@ private fun bareUrlEnd(text: String, start: Int): Int {
 internal const val MARKDOWN_LINE_HEIGHT_RATIO = 1.75f
 
 /**
- * 块与块之间的上间距（对齐官方 markdown.css）：
- * - h1–h3：上留 32（官方 `margin: 32px 0 16px`）
- * - h4–h6 / 段落 / 代码块 / 表格 / 引用 / 分隔线：16
- * - 列表项之间：6（官方 `li:not(:first-child) { margin-top: 6px }`）
+ * 块与块之间的上间距 —— **气泡内以紧凑为主**（用户 2026-11-16 定，两轮收紧）。
  *
- * 只在「上一块之后」加，所以第一个块永远不加（由调用方判断）。
+ * 之前直接照搬官方 demo 的 `markdown.css`（h1–h3 上留 32、段落 16、列表 6）。
+ * 官方那套 token 是给**全宽页面**的；我们的回复画在气泡里，宽度只有 90%，
+ * 同样的间距读起来就是「段与段之间空一大块」。现在：
+ * - h1–h3：12（下面还有字号差，不需要再用大留白分隔）
+ * - h4–h6 / 段落 / 代码块 / 表格 / 引用 / 分隔线：8
+ * - 列表项之间：3
+ *
+ * 行高（1.75）由 [MARKDOWN_LINE_HEIGHT_RATIO] 单独管，这里只收「块间」。
  */
 internal fun markdownTopSpace(block: MarkdownBlock): androidx.compose.ui.unit.Dp = when (block) {
-    is MarkdownBlock.Heading -> if (block.level <= 3) 32.dp else 16.dp
-    is MarkdownBlock.ListItem -> 6.dp
-    else -> 16.dp
+    is MarkdownBlock.Heading -> if (block.level <= 3) 12.dp else 8.dp
+    is MarkdownBlock.ListItem -> 3.dp
+    else -> 8.dp
 }
 
-/** 标题字号倍率（官方 h1 24 / h2 22 / h3 20 / h4 16，正文 16）。 */
+/**
+ * 标题字号倍率 —— **气泡内收一档**（用户 2026-11-16 定：标题太大了）。
+ *
+ * 官方 demo 是 h1 24 / h2 22 / h3 20（正文 16），那是页面标题的尺度；
+ * 气泡里正文只有 16sp，24sp 的 h1 会明显压过气泡本身。现在 18 / 17 / 16，
+ * 层级靠字号 + 字重一起给，但不再抢戏。
+ */
 internal fun markdownHeadingScale(level: Int): Float = when (level) {
-    1 -> 1.5f      // 24 / 16
-    2 -> 1.375f    // 22 / 16
-    3 -> 1.25f     // 20 / 16
-    else -> 1f     // h4–h6 = 正文字号，靠字重区分
+    1 -> 1.125f    // 18 / 16
+    2 -> 1.0625f   // 17 / 16
+    else -> 1f     // h3–h6 = 正文字号，靠字重区分
 }
