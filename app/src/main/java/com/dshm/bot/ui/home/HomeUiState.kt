@@ -37,11 +37,20 @@ data class TeamRoomUi(
 )
 
 /** 主界面状态：单一数据源，UI 只渲染，不判断业务。 */
+/** 正文搜索的一条命中：跳到哪一行、那一行叫什么、命中片段的预览。 */
+data class SearchHitUi(
+    val rowId: String,
+    val name: String,
+    val snippet: String,
+)
+
 data class HomeUiState(
     val isLoading: Boolean = true,
     val hasError: Boolean = false,
     val query: String = "",
     val rows: List<ChatRowUi> = emptyList(),
+    /** 正文搜索命中（`session/search`）；查询不足 2 字或引擎未起时为空。 */
+    val messageHits: List<SearchHitUi> = emptyList(),
 ) {
     val unreadTotal: Int get() = rows.sumOf { it.unreadCount }
     val showEmptyState: Boolean get() = !isLoading && !hasError && rows.isEmpty()

@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
@@ -25,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -114,7 +119,7 @@ fun SearchScreen(
         ) {
             when {
                 uiState.query.isBlank() -> SearchHint(stringResource(R.string.search_hint))
-                uiState.rows.isEmpty() -> SearchHint(
+                uiState.rows.isEmpty() && uiState.messageHits.isEmpty() -> SearchHint(
                     stringResource(R.string.home_no_results, uiState.query.trim()),
                 )
                 else -> LazyColumn(
@@ -128,9 +133,60 @@ fun SearchScreen(
                     items(items = uiState.rows, key = { it.id }) { row ->
                         BotRow(row = row, onClick = { onOpenBot(row.id) })
                     }
+                    // 正文命中（对齐网页端 CommandPalette 的 Messages 段）：标题是
+                    // Bot / 群的名字，副标题是命中片段；点它进那个对话。
+                    if (uiState.messageHits.isNotEmpty()) {
+                        item(key = "hits-header") {
+                            Text(
+                                text = stringResource(R.string.search_section_messages),
+                                style = Dshm.typography.settingsSectionTitle,
+                                color = Dshm.colors.textSecondary,
+                                modifier = Modifier.padding(top = Dshm.spacing.md, bottom = Dshm.spacing.xxs),
+                            )
+                        }
+                        itemsIndexed(
+                            items = uiState.messageHits,
+                            key = { index, hit -> "hit:$index:${hit.rowId}" },
+                        ) { _, hit ->
+                            SearchHitRow(name = hit.name, snippet = hit.snippet, onClick = { onOpenBot(hit.rowId) })
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+
+/** 一条正文命中：名字 + 片段。 */
+@Composable
+private fun SearchHitRow(name: String, snippet: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dshm.radius.md))
+            .background(Dshm.colors.surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = name,
+            style = Dshm.typography.rowTitleSm,
+            color = Dshm.colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 96.dp),
+        )
+        Spacer(Modifier.width(Dshm.spacing.sm))
+        Text(
+            text = snippet,
+            style = Dshm.typography.rowPreview,
+            color = Dshm.colors.textSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

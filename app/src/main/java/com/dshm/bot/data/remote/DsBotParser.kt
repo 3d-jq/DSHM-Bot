@@ -95,6 +95,11 @@ object DsBotParser {
                             ?: BotShapeDefaults.shapeFor(id),
                         isMain = id in mainIds,
                         activity = live.bots[id],
+                        // 自己的会话 id（宿主 `view()` 里 `sessionId: chatOf(bot.id)`）与更早分段。
+                        sessionId = item.optString("sessionId").takeIf { it.isNotEmpty() },
+                        parts = item.optJSONArray("parts")?.let { list ->
+                            (0 until list.length()).mapNotNull { at -> list.optString(at).takeIf { it.isNotEmpty() } }
+                        }.orEmpty(),
                     ),
                 )
             }
@@ -122,6 +127,11 @@ object DsBotParser {
                         }.orEmpty(),
                         roomAdmin = item.optString("admin").takeIf { it.isNotEmpty() },
                         activity = live.rooms[id],
+                        // 群聊的房间 id **就是**它的会话 id；`parts` 是成员在群里的隐藏会话。
+                        sessionId = id,
+                        parts = item.optJSONArray("parts")?.let { list ->
+                            (0 until list.length()).mapNotNull { at -> list.optString(at).takeIf { it.isNotEmpty() } }
+                        }.orEmpty(),
                     ),
                 )
             }

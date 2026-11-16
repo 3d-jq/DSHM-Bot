@@ -62,6 +62,7 @@ ICONS = [
     "download",
     "globe",
     "copy",
+    "quote",
     "wrap-text",
     "circle-stop",
     "box",

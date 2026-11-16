@@ -13,6 +13,7 @@
     <string name="home_search_cancel">Cancel</string>
     <string name="home_empty_title">Nothing here yet</string>
     <string name="home_empty_hint">Bots and group chats will show up here.</string>
+    <string name="search_section_messages">Messages</string>
     <string name="home_no_results">No bots match “%1$s”</string>
     <string name="home_error_title">Bots couldn’t load</string>
     <string name="home_error_hint">Check the connection and try again later.</string>
@@ -203,6 +204,7 @@
     <string name="chat_menu_copy">Copy</string>
     <string name="chat_menu_select_text">Select text</string>
     <string name="chat_copy_all">Copy all</string>
+    <string name="chat_menu_quote">Quote</string>
     <string name="chat_menu_share">Share</string>
     <string name="chat_menu_edit_resend">Edit and resend</string>
     <string name="chat_menu_edit_resend_hint">Change it, then send again</string>

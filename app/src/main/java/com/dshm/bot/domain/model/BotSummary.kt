@@ -37,6 +37,13 @@ data class BotSummary(
     val roomMembers: List<RoomMemberUi> = emptyList(),
     /** 群管理员 id；单 Bot 为空。 */
     val roomAdmin: String? = null,
+    /**
+     * 这个 Bot 当前自己那段会话的 DSH session id（群聊就是房间 id）。
+     * 用来把 DSH 侧按 sessionId 返回的结果（如 `session/search`）映射回这一行。
+     */
+    val sessionId: String? = null,
+    /** 更早的分段（DS Bot `parts`）；搜索命中历史分段时也要能定位到本行。 */
+    val parts: List<String> = emptyList(),
     /** 是不是主 Bot（DS Bot `mainBotIds`，可以同时有多个）。 */
     val isMain: Boolean = false,
     /**

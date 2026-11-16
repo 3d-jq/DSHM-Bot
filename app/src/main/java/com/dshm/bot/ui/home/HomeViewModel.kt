@@ -30,6 +30,9 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
+import com.dshm.bot.data.remote.DshSearchHit
+import com.dshm.bot.data.remote.DshSessionRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -52,6 +55,9 @@ class HomeViewModel(
     private val query = MutableStateFlow("")
     private val loading = MutableStateFlow(bots.value.isEmpty())
     private val failed = MutableStateFlow(false)
+    /** 正文搜索命中（`session/search`）；空查询时是空表。 */
+    private val hits = MutableStateFlow<List<SearchHitUi>>(emptyList())
+    private var searchJob: Job? = null
 
     private val timeFormatter = RelativeTimeFormatter(zoneId = zoneId, clock = clock, locale = locale)
 
@@ -66,14 +72,16 @@ class HomeViewModel(
         }
     }
 
-    val uiState: StateFlow<HomeUiState> = combine(bots, query, loading, failed) { list, currentQuery, isLoading, hasError ->
-        HomeUiState(
-            isLoading = isLoading,
-            hasError = hasError,
-            query = currentQuery,
-            rows = buildRows(list, currentQuery),
-        )
-    }.stateIn(
+    val uiState: StateFlow<HomeUiState> =
+        combine(bots, query, loading, failed, hits) { list, currentQuery, isLoading, hasError, messageHits ->
+            HomeUiState(
+                isLoading = isLoading,
+                hasError = hasError,
+                query = currentQuery,
+                rows = buildRows(list, currentQuery),
+                messageHits = messageHits,
+            )
+        }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = HomeUiState(),
@@ -137,7 +145,41 @@ class HomeViewModel(
 
     fun setQuery(value: String) {
         query.value = value
+        scheduleMessageSearch(value)
     }
+
+    /**
+     * 正文搜索（对齐网页端 CommandPalette 的 Messages 段）：走 DSH `session/search`，
+     * 把结果里的 sessionId 映射回 Bot / 群聊那一行（命中更早分段也算）。
+     *
+     * 网页端要求查询至少 2 个字符；这里同样，且做 300ms 防抖 —— 打字时不要每键一查。
+     */
+    private fun scheduleMessageSearch(value: String) {
+        searchJob?.cancel()
+        val text = value.trim()
+        if (text.length < 2 || client == null) {
+            hits.value = emptyList()
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(300)
+            val connection = client ?: return@launch
+            val found = runCatching { DshSessionRepository(connection).searchSessions(text) }
+                .getOrNull() ?: return@launch
+            // 查询期间用户又改了输入：作废这次结果。
+            if (query.value.trim() != text) return@launch
+            hits.value = mapSearchHits(found.items, bots.value)
+        }
+    }
+
+    /** 命中的 sessionId → 那一行（Bot 的当前段 / 更早分段 / 群聊房间 id）。 */
+    internal fun mapSearchHits(items: List<DshSearchHit>, rows: List<BotSummary>): List<SearchHitUi> =
+        items.mapNotNull { item ->
+            val row = rows.firstOrNull { bot ->
+                bot.sessionId == item.sessionId || item.sessionId in bot.parts
+            } ?: return@mapNotNull null
+            SearchHitUi(rowId = row.id, name = row.name, snippet = item.snippet)
+        }
 
     /** 主界面长按面板：置顶 / 取消置顶（`set-flags`，Bot 与群聊同一套）。 */
     fun setPinned(id: String, pinned: Boolean, onDone: (String?) -> Unit = {}) {

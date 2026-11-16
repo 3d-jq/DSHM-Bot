@@ -696,6 +696,7 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   不画），点开进群详情（2026-11-09）。
 - ☑️ 模型选择 dock（输入框上方，`ModelChoiceDock`）：Bot 没模型 / 模型没了时出卡 + 模型 chip
   （`update-bot {model}`）—— 之前新建的 Bot 没选模型会直接卡住（2026-11-09）。
+- ☑️ 长按消息「引用」：以 Markdown 引用块拼进正文（对齐 dsh-Go `composer_quote` + 网页 hover 的 Reply），输入框上方有引用条（2026-11-16）。
 - ⬜ 输入框上方的 usage dock / btw dock（DS Bot 里 activity/usage 两个 dock 被隐藏，btw 显示）。
 - ⬜ 斜杠命令 / 技能引用（DSH 输入触发器）。
 
@@ -722,7 +723,7 @@ dsh-Go 注释所述（pending 会带同样 eventId 重新投递、答完发 canc
   只多了「表单字段的 `value` 不当数字转」这一处 → provider 的数组编码**不是**「上游修了我们没拉」。
   ⬜ 升到 `0.3.x` 是大动作（新依赖 `deep-view`，还多了 `skills` / `goals` / `office` / `im` 等模块），单独排期。
 - ⬜ `/side` 侧聊。
-- ⬜ 会话搜索（`session/search`）与命令面板 `CommandPalette`。
+- ☑️ 正文搜索：主界面顶栏搜索已接 `session/search`，命中按会话聚成「消息」段，点开进对应对话（2026-11-16）。命令面板 `CommandPalette` 的其余入口（新建/设置等）仍未做。
 
 ### 启动体验与对话附件（2026-11-08，第十六轮）
 

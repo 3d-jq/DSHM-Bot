@@ -2,6 +2,7 @@ package com.dshm.bot.ui.home
 
 import com.dshm.bot.MainDispatcherRule
 import com.dshm.bot.TestTime
+import com.dshm.bot.data.remote.DshSearchHit
 import com.dshm.bot.domain.model.AvatarGlyph
 import com.dshm.bot.domain.model.BotSummary
 import com.dshm.bot.domain.repository.BotRepository
@@ -181,6 +182,39 @@ class HomeViewModelTest {
         val inks = viewModel.uiState.value.rows.associate { it.id to it.inkId }
         assertEquals("blue", inks["bot-1"])
         assertEquals("orange", inks["group-42"])
+    }
+
+
+    /**
+     * 正文搜索命中要映射回「哪一行」：Bot 的当前段、Bot 的更早分段、群聊房间 id 都算；
+     * 映射不到的行（比如 DSH Agent 会话）直接丢掉，不显示成无名条目。
+     */
+    @Test
+    fun searchHitsMapBackToTheOwningRow() {
+        val vm = HomeViewModel()
+        val rows = listOf(
+            bot("bot-1", "小助手", Instant.parse("2026-01-01T00:00:00Z")).copy(
+                sessionId = "sess-1",
+                parts = listOf("sess-0"),
+            ),
+            bot("group-9", "项目群", Instant.parse("2026-01-01T00:00:00Z")).copy(
+                isGroup = true,
+                sessionId = "group-9",
+            ),
+        )
+        val hits = vm.mapSearchHits(
+            listOf(
+                DshSearchHit("sess-1", "命中的片段"),
+                DshSearchHit("sess-0", "命中更早的分段"),
+                DshSearchHit("group-9", "群里的片段"),
+                DshSearchHit("unknown-agent-session", "映射不到"),
+            ),
+            rows,
+        )
+        assertEquals(3, hits.size)
+        assertEquals(listOf("bot-1", "bot-1", "group-9"), hits.map { it.rowId })
+        assertEquals(listOf("小助手", "小助手", "项目群"), hits.map { it.name })
+        assertEquals("命中的片段", hits.first().snippet)
     }
 
     private class FakeBotRepository(private val bots: List<BotSummary>) : BotRepository {

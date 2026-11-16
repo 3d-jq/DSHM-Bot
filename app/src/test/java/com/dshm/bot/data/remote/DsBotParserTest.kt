@@ -205,4 +205,25 @@ class DsBotParserTest {
         assertEquals(BotShapeDefaults.shapeFor("bot-42"), shape)
         assertTrue(shape != null && shape in BotShapeDefaults.shapes)
     }
+
+    /** 会话 id 与更早分段：正文搜索要把命中的 sessionId 映射回 Bot / 群那一行。 */
+    @Test
+    fun aBotCarriesItsSessionIdAndEarlierParts() {
+        val state = JSONObject(
+            """
+            {
+              "bots": [{"id": "bot-a", "name": "A", "sessionId": "sess-a", "parts": ["sess-a0"]}],
+              "rooms": [{"id": "room-1", "name": "群", "parts": ["sess-m1"]}]
+            }
+            """.trimIndent(),
+        )
+        val rows = DsBotParser.parseState(state)
+        val bot = rows.first { it.id == "bot-a" }
+        assertEquals("sess-a", bot.sessionId)
+        assertEquals(listOf("sess-a0"), bot.parts)
+        val room = rows.first { it.isGroup }
+        assertEquals("群聊的房间 id 就是它的会话 id", "room-1", room.sessionId)
+        assertEquals(listOf("sess-m1"), room.parts)
+    }
+
 }

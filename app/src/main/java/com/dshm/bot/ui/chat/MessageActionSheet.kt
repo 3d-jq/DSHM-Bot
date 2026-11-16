@@ -57,6 +57,8 @@ internal fun MessageActionSheet(
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
     onSelectText: () -> Unit,
+    /** 引用这段原文再追问（对齐 dsh-Go `MessageAction.quote` / 网页 hover 的 Reply）。 */
+    onQuote: (() -> Unit)? = null,
     onShare: () -> Unit,
     onEdit: (() -> Unit)? = null,
 ) {
@@ -99,6 +101,13 @@ internal fun MessageActionSheet(
                 label = stringResource(R.string.chat_menu_select_text),
                 onClick = onSelectText,
             )
+            if (onQuote != null) {
+                MessageMenuRow(
+                    icon = R.drawable.ic_lucide_quote,
+                    label = stringResource(R.string.chat_menu_quote),
+                    onClick = onQuote,
+                )
+            }
             MessageMenuRow(
                 icon = R.drawable.ic_lucide_share_2,
                 label = stringResource(R.string.chat_menu_share),

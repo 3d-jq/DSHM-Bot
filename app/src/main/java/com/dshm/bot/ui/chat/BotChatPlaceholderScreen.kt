@@ -62,6 +62,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -176,6 +177,9 @@ fun BotChatScreen(
     // 客户端自己的事件日志（viewModel.changesForDiff()），与 dsh-go 同数据源。
     // 路径 + 这张卡对应的 seq（diff 的锚：算「那一轮」的改动，而不是最新一轮）。
     var diffTarget by remember { mutableStateOf<Pair<String, Long?>?>(null) }
+    // 引用追问（对齐 dsh-Go `composer_quote`）：长按消息「引用」后挂在这里，
+    // 显示成输入框上方的一条引用条；发送时以 Markdown 引用块拼进正文。
+    var quoted by rememberSaveable(bot.id) { mutableStateOf<String?>(null) }
     val attachContext = LocalContext.current
     val attachScope = rememberCoroutineScope()
     var cameraFile by remember { mutableStateOf<File?>(null) }
@@ -462,6 +466,7 @@ fun BotChatScreen(
                         onShowDiff = { file, anchor ->
                             diffTarget = file.path to anchor
                         },
+                        onQuoteMessage = { quoted = it },
                         fontScale = fontScale,
                         topPadding = innerPadding.calculateTopPadding(),
                         // 最后一条消息避开输入框（输入框浮在列表上面）：
@@ -615,6 +620,21 @@ fun BotChatScreen(
                     modifier = Modifier.padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.xxs),
                 )
             }
+            // 引用条：挂在输入框上方（对齐 dsh-Go 的 composer quote chip）——
+            // 一行预览 + × 取消；发出后自动消失。
+            quoted?.let { passage ->
+                QuoteStrip(
+                    preview = quoteLine(passage),
+                    onClear = { quoted = null },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = Dshm.spacing.lg,
+                            end = Dshm.spacing.lg,
+                            bottom = Dshm.spacing.xs,
+                        ),
+                )
+            }
             ChatComposer(
                 value = draft,
                 onValueChange = { draft = it },
@@ -622,8 +642,11 @@ fun BotChatScreen(
                     if ((ComposerRules.canSend(draft) || pendingAttachments.isNotEmpty()) && !state.sending) {
                         // 悬浮条「插话」预填的那条：用 steer 模式插进当前正在跑的回合，
                         // 而不是排到下一轮。发完清掉标记。
-                        viewModel.send(draft, pendingAttachments, steer = interject)
+                        // 引用：以 Markdown 引用块拼在正文前面（DSH 的 prompt 没有引用字段，
+                        // 对齐 dsh-Go `withQuote`），气泡里会重新显示成引用块。
+                        viewModel.send(withQuote(quoted.orEmpty(), draft), pendingAttachments, steer = interject)
                         draft = ""
+                        quoted = null
                         interject = false
                         pendingAttachments = emptyList()
                         sendCount += 1
@@ -770,6 +793,8 @@ private fun ChatMessages(
     rooms: List<com.dshm.bot.ui.home.TeamRoomUi>,
     /** 四期 4b-2：点代码产物卡的文件行 → 打开改动详情（带这张卡的 seq 当锚）。 */
     onShowDiff: (ChangedFile, Long?) -> Unit,
+    /** 长按消息 →「引用」：把这段原文挂到输入框上方。 */
+    onQuoteMessage: (String) -> Unit,
     fontScale: Float,
     topPadding: Dp,
     bottomPadding: Dp,
@@ -1207,6 +1232,10 @@ private fun ChatMessages(
                     // 两种气泡都是底部面板（对齐 dsh-Go `showSelectTextSheet`）。
                     selectText = target
                 },
+                onQuote = {
+                    messageMenu = null
+                    onQuoteMessage(target.text)
+                },
                 onShare = {
                     messageMenu = null
                     shareText(appContextForMenu, target.text)
@@ -1486,6 +1515,55 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
                 .clickable(onClick = onRetry)
                 .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
         )
+    }
+}
+
+
+/**
+ * 输入框上方的引用条：一行预览 + 取消。
+ *
+ * 引用以 Markdown 引用块随消息发出（DSH 的 prompt 没有引用字段，对齐 dsh-Go
+ * `composer_quote`），所以这里只提示「即将引用哪一段」，不参与发送逻辑。
+ */
+@Composable
+private fun QuoteStrip(
+    preview: String,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(Dshm.radius.md))
+            .background(Dshm.colors.surfaceMuted)
+            .padding(start = Dshm.spacing.md, end = Dshm.spacing.xs, top = Dshm.spacing.xs, bottom = Dshm.spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 左侧竖线，示意这是引用块（与 Markdown 引用块的观感一致）。
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(Dshm.spacing.lg)
+                .clip(RoundedCornerShape(Dshm.radius.xs))
+                .background(Dshm.colors.accent),
+        )
+        Text(
+            text = preview,
+            style = Dshm.typography.rowPreview,
+            color = Dshm.colors.textSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = Dshm.spacing.sm),
+        )
+        IconButton(onClick = onClear, modifier = Modifier.size(Dshm.spacing.iconButton - Dshm.spacing.sm)) {
+            Icon(
+                painter = painterResource(R.drawable.ic_lucide_x),
+                contentDescription = stringResource(R.string.action_cancel),
+                tint = Dshm.colors.textTertiary,
+                modifier = Modifier.size(Dshm.spacing.icon - Dshm.spacing.xxs),
+            )
+        }
     }
 }
 
