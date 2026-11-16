@@ -269,11 +269,28 @@ private const val secretCardLingerMs = 20_000L
 /** DS Bot `secrets.js` 的 `MIN_VALUE`：一把钥匙至少 4 个字符。 */
 private const val SECRET_MIN_LENGTH = 4
 
+/**
+ * 流式气泡的渲染键前缀（`live:<n>`）。
+ *
+ * 流式期这条乐观 bot 行是 entries 里的普通一条；落定行的渲染键被认领成同一个 id，
+ * 于是 LazyColumn 认为「还是那一项」—— 元素复用、位置不变、markdown 片段状态保留，
+ * 落定只是原地换内容（对齐 dsh-Go / DeepSearch 的同 key 换内容）。
+ */
+internal const val LIVE_ROW_ID_PREFIX = "live:"
+
 data class BotChatUiState(
     val loading: Boolean = true,
     val engineOff: Boolean = false,
     val error: String? = null,
     val entries: List<ChatEntry> = emptyList(),
+    /**
+     * 当前**正在接字**的那条乐观 bot 行 id（`live:<n>`）；不在流式时为 null。
+     *
+     * UI 必须按**等值**判断要不要用侧通道文本覆盖这一条 —— 不能只看 id 前缀：
+     * 已经落定的历史回复会一直保留 `live:<n>` 的渲染键，按前缀判断会让每一次新的
+     * 流式都把它们的内容换成新回复（整页跳动）。
+     */
+    val liveEntryId: String? = null,
     val sending: Boolean = false,
     /** 消息已发出，等 Bot 的第一段回复；此时显示思考动画。 */
     val waitingForReply: Boolean = false,
@@ -471,6 +488,32 @@ class BotChatViewModel internal constructor(
 
     /** 本次流式开始时的时间线游标（落定行的 seq 超过它就说明这条流已成正式消息）。 */
     private var streamStartedAtSeq = 0L
+    /**
+     * 流式气泡的「乐观 bot 行」状态（对齐 DeepSearch：流式与落定是**同一个 item**）。
+     *
+     * 为什么要这样：落定那一刻如果流式气泡（key=`streaming`）被换成正式行
+     * （key=`bot:<seq>`），LazyColumn 只能丢掉旧元素、新建一个 —— 新的 markdown 片段
+     * 组合期缓存未命中就画 0 高，整列会位移一次（真机「用户气泡闪现」）。
+     * dsh-Go/DeepSearch 都是**同 key 原地换内容**，从不换元素。
+     *
+     * 做法：流式首个 chunk 到达时，往 entries 尾部插一条**乐观 bot 行**
+     * （id = `live:<generation>`）；落定行一到，把它在 [parityRenderKeys] 里的渲染键
+     * 设成同一个 id，于是同 key、同位置，元素被复用。
+     */
+    private var streamLive = false
+    /** 乐观 bot 行是否已经插进 entries（每个流只插一次）。 */
+    private var liveRowInserted = false
+    /** 本次流的渲染键（`live:<n>`）：每次 start 自增，避免多段回复撞 key。 */
+    private var liveStreamKey = ""
+    private var liveStreamGeneration = 0
+    /**
+     * **待认领**的流式渲染键。
+     *
+     * 在乐观 bot 行插入时记下；落定行到达时把它写进 [parityRenderKeys] 完成认领。
+     * 之所以要独立于 [streamLive]：`stream/end` 的 200ms 兜底可能先把流式气泡清掉，
+     * 之后正式行才到 —— 那种顺序下也要接管同一个 id，否则又退化成「换 item + 冷解析」。
+     */
+    private var claimableLiveKey: String? = null
     /** 正在补洞（防同一缺口并发重复请求）。 */
     private var sessionEventsFilling = false
     /** 影子比对「一致」的限频时刻（不一致每次都记）。 */
@@ -957,6 +1000,15 @@ class BotChatViewModel internal constructor(
                         // 流式开始时的游标：之后落定的 bot 行 seq 比它大，就说明这条流已经
                         // 变成正式消息了（对应 dsh-Go 的 `startedAfterSeq` 判据）。
                         streamStartedAtSeq = paritySeq
+                        // 每个流一个独立的渲染键：多段回复时上一段落的正式行还占着旧键，
+                        // 不能复用（LazyColumn 撞 key 会直接抛「Key was already used」）。
+                        liveStreamGeneration += 1
+                        liveStreamKey = "$LIVE_ROW_ID_PREFIX$liveStreamGeneration"
+                        streamLive = true
+                        liveRowInserted = false
+                        // 新的一段：上一段没等到落定行的待认领键就此作废，
+                        // 免得下一段/下一条回复被它抢走 id。
+                        claimableLiveKey = null
                         streamBuffer = ""
                         streamFlush.trailingJob?.cancel()
                         streamFlush.trailingJob = null
@@ -995,6 +1047,13 @@ class BotChatViewModel internal constructor(
                         val chunk = data.optString("text")
                         if (chunk.isNotEmpty()) {
                             streamBuffer += chunk
+                            // 乐观 bot 行要在**第一次 publish 之前**插进 entries，
+                            // 否则会有一帧「有流式文本、却没有承载它的条目」。
+                            if (!isGroup && streamLive && !liveRowInserted) {
+                                liveRowInserted = true
+                                claimableLiveKey = liveStreamKey
+                                rebuildParityEntries()
+                            }
                             flushStreamingText()
                         }
                     }
@@ -1314,6 +1373,22 @@ class BotChatViewModel internal constructor(
         // 否则同一条回复会同时画两遍（折叠行 + 流式气泡），要等 stream/end 后 200ms
         // 的兜底清理才少掉一块 —— 完成那一下的「跳」就是这么来的。
         settleStreamingWhenLanded(timelineRows)
+        // 流式 → 落定的**认领**：落定行接管流式气泡的渲染键（同一个 id）。
+        // 放在这里的理由：即使 `stream/end` 的 200ms 兜底先把流式气泡清掉了
+        // （[streamLive] 已复位），只要这条流曾经显示过（[claimableLiveKey] 还在），
+        // 正式行到达时仍然接管同一个 id —— 元素复用、不换 item。
+        claimableLiveKey?.let { liveKey ->
+            val landed = timelineRows.lastOrNull { row ->
+                row.kind == TimelineRow.KIND_BOT && (row.seq ?: -1L) > streamStartedAtSeq
+            }
+            if (landed != null) {
+                if (parityRenderKeys[landed.key] != liveKey) {
+                    parityRenderKeys[landed.key] = liveKey
+                    DshMuxLog.log("流式认领：落定行=${landed.key} → 渲染键=$liveKey（原地接管，不换 item）")
+                }
+                claimableLiveKey = null
+            }
+        }
         val earlierKeys = earlierRows.mapTo(HashSet()) { it.key }
         // 同一条消息已经在时间线上是 `user` 气泡了 → 它的 `inbox`（排队/插话）行是
         // 同一句话的第二份显示。队列条里留着它，就会每次刷新都把「撤回」又摆出来
@@ -1372,12 +1447,28 @@ class BotChatViewModel internal constructor(
         // 浏览器缩略图：按**地锚 seq** 插回它所属那一轮的轮末，而不是永远排最后
         // （以前追加到末尾 → 下一条消息一来，卡就跑到新消息后面）。
         insertBrowserShots(mapped)
+        // 流式中的**乐观 bot 行**：entries 里始终有一条承载流式文本的 bot 条目，
+        // 落定行随后认领同一个渲染键（[LIVE_ROW_ID_PREFIX]）—— 于是「流式气泡」和
+        // 「落定气泡」是同一个 LazyColumn item：同 key、同位置、元素复用，
+        // markdown 片段状态保留，落定只换内容（对齐 dsh-Go / DeepSearch）。
+        //
+        // 群聊不插：群聊的 live 行由宿主按 `bot:<id>` 给，且它自己不产生流式文本。
+        if (!isGroup && streamLive && liveRowInserted) {
+            mapped += ChatEntry(
+                id = liveStreamKey,
+                kind = ChatEntryKind.BOT,
+                text = "",
+                author = botName,
+            )
+        }
         // 队列行与时间线分开：inbox 行只进队列条，不画进对话。
         val queue = mapped.filter { it.kind == ChatEntryKind.PENDING }
         val timeline = mapped.filterNot { it.kind == ChatEntryKind.PENDING }
         _uiState.update { state ->
             state.copy(
                 entries = timeline,
+                // 只有「这条乐观行真的在接字」时才把 id 交给 UI 做覆盖判断。
+                liveEntryId = if (!isGroup && streamLive && liveRowInserted) liveStreamKey else null,
                 pendingQueue = queue,
                 loading = loading ?: state.loading,
                 engineOff = false,
@@ -2484,6 +2575,10 @@ class BotChatViewModel internal constructor(
         streamFlush.pending = null
         streamingAttempt = null
         streamBuffer = ""
+        // 乐观 bot 行随流结束退场：落定行如果认领了渲染键，entries 里同 id 的那一条
+        // 会由正式行顶上；没认领（中止/失败）就直接消失。
+        streamLive = false
+        liveRowInserted = false
         _streamingText.value = ""
     }
 

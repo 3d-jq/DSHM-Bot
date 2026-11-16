@@ -689,6 +689,16 @@ class BotChatParityPipelineTest {
         scheduler.runCurrent()
         assertTrue("流式气泡应在显示", vm.streamingText.value.isNotEmpty())
 
+        // 流式与落定必须是**同一个 LazyColumn item**（同一个渲染键）：流式期 entries
+        // 尾部有一条乐观 bot 行（id = live:<n>），落定行认领它 → 元素原地复用。
+        // 换 item 会让 markdown 片段重新组合（缓存冷未命中时高度为 0 → 整列跳一下）。
+        val liveEntry = vm.uiState.value.entries.last()
+        assertEquals(ChatEntryKind.BOT, liveEntry.kind)
+        assertTrue(
+            "流式中的条目应是乐观 bot 行：${liveEntry.id}",
+            liveEntry.id.startsWith(LIVE_ROW_ID_PREFIX),
+        )
+
         // 落定行（seq 41 > 流式起点 40）到达 → 流式气泡必须**立刻**消失，不留双份。
         // 注意要走「事件进日志」这条路：私聊的显示由折叠产出，光发 timeline 行不会进显示。
         // 日志必须连续（折叠只在连续区间上工作），把 11..40 用折叠不认的事件补齐。
@@ -712,6 +722,13 @@ class BotChatParityPipelineTest {
         assertTrue(
             "落定行到位后流式气泡必须立刻消失（否则会看到两个）：${vm.streamingText.value}",
             vm.streamingText.value.isEmpty(),
+        )
+        val botEntries = vm.uiState.value.entries.filter { it.kind == ChatEntryKind.BOT }
+        assertEquals("落定后只能有一条 bot 条目（乐观行应被认领，不能残留第二条）", 1, botEntries.size)
+        assertEquals(
+            "落定行必须接管流式气泡的渲染键（同一个 LazyColumn item，不换元素）",
+            liveEntry.id,
+            botEntries.single().id,
         )
     }
 

@@ -74,6 +74,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
 import androidx.compose.runtime.derivedStateOf
@@ -458,6 +459,7 @@ fun BotChatScreen(
                     else -> ChatMessages(
                         entries = state.entries,
                         streaming = streaming,
+                        liveEntryId = state.liveEntryId,
                         activity = shownActivity,
                         lastSendAt = lastSendAt,
                         bot = bot,
@@ -757,6 +759,12 @@ private const val EARLIER_TRIGGER_PX = 400
 private const val EARLIER_TRIGGER_ITEMS = 3
 
 /**
+ * 手指抬起后的宽限期（对齐 DeepSearch `lastInterruptMs`，T196 定为 1s）：
+ * 这段时间里流式跟随不主动钉底 —— 甩动的惯性还在跑，钉底会读成「被拽回去」。
+ */
+private const val STREAM_FOLLOW_GRACE_MS = 1_000L
+
+/**
  * 往前翻页时的顶部转圈。
  *
  * 尺寸照 dsh-Go（`bot_chat_kit.dart`）：18dp、strokeWidth 2、上下 16dp 留白。
@@ -782,6 +790,8 @@ private fun LoadingEarlierRow() {
 private fun ChatMessages(
     entries: List<ChatEntry>,
     streaming: String,
+    /** 当前正在接字的乐观 bot 行 id（没在流式时为 null）；见 [BotChatUiState.liveEntryId]。 */
+    liveEntryId: String?,
     activity: ChatActivity?,
     bot: ChatRowUi,
     endpoint: RuntimeEndpoint?,
@@ -918,14 +928,61 @@ private fun ChatMessages(
     // 以前这里是 `sample(120L)`：每 120ms 才滚一次，视觉上是一格一格往上跳；
     // 官方是每次渲染更新都跟着走（渲染本身已被 markdown 节流合并），所以顺。
     // `conflate()` 保证高频 token 只处理最新值，不会把 UI 线程压垮。
+    //
+    // 这里再按 DeepSearch `[T-android-stream-grow-anim]` 补两点：
+    // 1. `scrollToItem(0)` 在视口落后 ≥1 条时是「瞬间吸底、只对最后一小段做动画」，
+    //    读起来像没有动画 —— 改成**逐帧 ease-out 滑行**（每帧走剩余距离 22%，
+    //    步长 14px 起、上限≈平均条高 40% 并夹在 28..80px）。
+    // 2. 拖拽结束后 1s 内不跟随（DeepSearch `lastInterruptMs` / T196）：甩动惯性
+    //    还没停，这时候钉底就是「被列表拽回去」。
+    var lastInterruptMs by remember { mutableStateOf(0L) }
+    var wasDragging by remember { mutableStateOf(false) }
+    LaunchedEffect(draggedByUser) {
+        if (wasDragging && !draggedByUser) lastInterruptMs = System.currentTimeMillis()
+        wasDragging = draggedByUser
+    }
     LaunchedEffect(listState, bottomChromeHeight) {
         snapshotFlow { streaming.length to bottomChromeHeight }
             .conflate()
             .collect { (length, _) ->
                 if (length == 0 || userDragged || draggedByUser) return@collect
                 if (listState.isScrollInProgress) return@collect
-                // 布局已落定（snapshotFlow 在重组后取值），这一帧直接贴底。
-                listState.scrollToItem(0)
+                if (System.currentTimeMillis() - lastInterruptMs < STREAM_FOLLOW_GRACE_MS) return@collect
+                if (listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset == 0
+                ) {
+                    return@collect
+                }
+                val visible = listState.layoutInfo.visibleItemsInfo
+                val avg = if (visible.isEmpty()) {
+                    0f
+                } else {
+                    visible.sumOf { it.size }.toFloat() / visible.size
+                }
+                if (avg <= 0f) {
+                    // 冷启动：条目尺寸还没量出来，剩余距离估不准，直接贴底。
+                    listState.scrollToItem(0)
+                    return@collect
+                }
+                val stepCeil = (avg * 0.40f).coerceIn(28f, 80f)
+                runCatching {
+                    listState.scroll {
+                        var guard = 0
+                        while (
+                            (listState.firstVisibleItemIndex != 0 ||
+                                listState.firstVisibleItemScrollOffset != 0) &&
+                            guard < 120
+                        ) {
+                            guard++
+                            val remaining = listState.firstVisibleItemIndex * avg +
+                                listState.firstVisibleItemScrollOffset
+                            val step = (remaining * 0.22f).coerceIn(14f, stepCeil)
+                            // 倒序列表：往最新（底部）是负方向。
+                            val consumed = withFrameNanos { scrollBy(-step) }
+                            if (consumed == 0f) break
+                        }
+                    }
+                }
             }
     }
 
@@ -946,18 +1003,6 @@ private fun ChatMessages(
         pinnedOnce = true
         listState.scrollToItem(0)
     }
-
-    // 流式态 / 思考行和正式条目走同一套间距规则（`chatItemSpacing`）：
-    // 否则「流式中 8dp → 落地 12dp」会抖一下。这里要在 LazyColumn 外算好 ——
-    // `Dshm.spacing` 是 @Composable，LazyListScope 里取不到。
-    val pendingSpacing = chatItemSpacing(
-        spacing = Dshm.spacing,
-        entryKind = ChatEntryKind.BOT,
-        entryBotId = bot.id,
-        olderKind = entries.lastOrNull()?.kind,
-        olderBotId = entries.lastOrNull()?.botId,
-        isGroup = bot.isGroup,
-    )
 
     // 长按已全部走 MessageActionSheet（面板里用系统 SelectionContainer 选字），
     // 聊天列表不再挂任何自定义选区层。
@@ -1016,47 +1061,41 @@ private fun ChatMessages(
                     }
                 }
             }
-            if (streaming.isNotEmpty()) {
-                item(key = "streaming") {
-                    val boundsListener = rememberBubbleBounds(
-                        key = "streaming",
-                        registry = bubbleBounds,
-                        target = MessageMenuTarget(
-                            messageId = "streaming",
-                            text = streaming,
-                            isUser = false,
-                        ),
-                    )
-                    Box(
-                        Modifier
-                            .padding(top = pendingSpacing.top)
-                            .onGloballyPositioned(boundsListener),
-                    ) {
-                        // 与落定行同一个宽度上限（流式/落地形状一致，不抖）。
-                        AssistantBubbleWidth { cap ->
-                            BotBubble(
-                                text = streaming,
-                                author = bot.name,
-                                fontScale = fontScale,
-                                // 和最终那条 BOT 条目画得一模一样（群聊里同样有头像 + 名字），
-                                // 这样文字写完落地时形状不变。
-                                isGroup = bot.isGroup,
-                                showName = pendingSpacing.groupStart,
-                                botId = bot.id,
-                                members = bot.roomMembers,
-                                adminId = bot.roomAdmin,
-                                onOpenMember = onOpenMember,
-                                streaming = true,
-                                maxBubbleWidth = cap,
-                            )
-                        }
-                    }
-                }
-            }
-            items(displayEntries.size, key = { index -> displayEntries[displayEntries.size - 1 - index].entry.id }) { index ->
+            // 流式气泡不再是独立 item：它由 entries 里那条**乐观 bot 行**
+            // （id = `live:<n>`）承载，落定行认领同一个渲染键 → 同一个 item。
+            // 见 `BotChatViewModel.LIVE_ROW_ID_PREFIX`。
+            items(
+                count = displayEntries.size,
+                key = { index -> displayEntries[displayEntries.size - 1 - index].entry.id },
+                // 复用提示（对齐 DeepSearch `items(..., contentType = ...)`）：
+                // 不同 kind 的行不共享可复用槽位 —— 气泡的槽拿去复用卡片会在滚回
+                // 历史时多一次整块重组。
+                contentType = { index -> displayEntries[displayEntries.size - 1 - index].entry.kind },
+            ) { index ->
                 val chrono = displayEntries.size - 1 - index
                 val display = displayEntries[chrono]
                 val entry = display.entry
+                // 流式中的**乐观 bot 行**：正文来自侧通道 `streaming`（每个 token 只
+                // 更新侧通道，不碰 entries —— 整页不会跟着重组）。落定后侧通道清空、
+                // 正式行接管同一个 id，于是还是这一个 item 直接显示 entry.text。
+                //
+                // 必须按 **id 等值**判断（不能只看 `live:` 前缀）：历史回复落定后也一直
+                // 保留 `live:<n>` 的渲染键，按前缀判断会让每次新流式都覆盖它们。
+                val isLiveRow = liveEntryId != null && entry.id == liveEntryId
+                val liveText = if (
+                    isLiveRow &&
+                    entry.kind == ChatEntryKind.BOT &&
+                    streaming.isNotEmpty()
+                ) {
+                    streaming
+                } else {
+                    null
+                }
+                val bubbleText = liveText ?: entry.text
+                // 乐观行还没等到第一个字（或流被中止）：不画空气泡。
+                if (isLiveRow && entry.kind == ChatEntryKind.BOT && bubbleText.isEmpty()) {
+                    return@items
+                }
                 // 视觉相邻：older 在上面，newer 在下面（chronological 顺序）。
                 // 折叠组以代表条目参与间距规则（组内全是同款事件行，间距一致）。
                 val older = displayEntries.getOrNull(chrono - 1)?.entry
@@ -1082,7 +1121,7 @@ private fun ChatMessages(
                                         registry = bubbleBounds,
                                         target = MessageMenuTarget(
                                             messageId = entry.id,
-                                            text = entry.text,
+                                            text = bubbleText,
                                             isUser = false,
                                         ),
                                     ),
@@ -1122,7 +1161,9 @@ private fun ChatMessages(
                     // 宽度上限 80%（对齐网页端 `.bt-bubble`）：气泡右边留白。
                     ChatEntryKind.BOT -> AssistantBubbleWidth { cap ->
                         BotBubble(
-                            text = entry.text,
+                            // 流式中 = 侧通道文本（streaming=true 走 live tail 解析）；
+                            // 落定后同一个 item 换成正式行的文本，形状/宽度完全一致。
+                            text = bubbleText,
                             author = entry.author,
                             fontScale = fontScale,
                             isGroup = bot.isGroup,
@@ -1135,6 +1176,9 @@ private fun ChatMessages(
                             durationMs = null,
                             whole = entry.whole,
                             endpoint = endpoint,
+                            // 只有乐观行还在接字时是「流式态」；落定后同一个 item
+                            // 自动切回正式渲染，不需要换 key。
+                            streaming = liveText != null,
                             maxBubbleWidth = cap,
                         )
                     }
