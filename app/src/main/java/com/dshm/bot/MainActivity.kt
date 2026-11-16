@@ -22,6 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dshm.bot.core.design.DshmColors
 import com.dshm.bot.core.design.DshmTheme
+import com.dshm.bot.core.design.HapticsRoot
 import com.dshm.bot.domain.model.AppLanguage
 import com.dshm.bot.ui.settings.SettingsViewModel
 
@@ -123,7 +124,11 @@ class MainActivity : ComponentActivity() {
                 // 否则 rememberLauncherForActivityResult 会因拿不到 Activity 而崩溃。
                 CompositionLocalProvider(LocalResources provides localizedContext.resources) {
                     DshmTheme(darkTheme = dark) {
-                        DshmBotApp(settingsViewModel = settingsViewModel)
+                        // 触感总开关（「设置 → 外观 → 震动反馈」）注入整棵树；
+                        // 关掉后所有 rememberHaptics() 都变空操作。
+                        HapticsRoot(enabled = settings.hapticsEnabled) {
+                            DshmBotApp(settingsViewModel = settingsViewModel)
+                        }
                     }
                 }
         }

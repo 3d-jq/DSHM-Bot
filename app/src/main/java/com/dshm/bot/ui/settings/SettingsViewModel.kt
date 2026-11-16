@@ -27,6 +27,7 @@ data class SettingsUiState(
     val language: AppLanguage = AppLanguage.SYSTEM,
     val interfaceMode: InterfaceMode = InterfaceMode.NATIVE,
     val notificationsEnabled: Boolean = true,
+    val hapticsEnabled: Boolean = true,
     val voiceMode: VoiceMode = VoiceMode.AUTO,
     val phoneControlEnabled: Boolean = false,
     val phoneConfirmMode: PhoneConfirmMode = PhoneConfirmMode.ASK,
@@ -50,6 +51,11 @@ class SettingsViewModel(
         listOf(theme, font, language, interfaceMode, notifications)
     }
 
+    private val corePlusHaptics = combine(
+        core,
+        repository.observeHapticsEnabled(),
+    ) { base, haptics -> base + haptics }
+
     private val phone = combine(
         repository.observePhoneControlEnabled(),
         repository.observePhoneConfirmMode(),
@@ -58,7 +64,7 @@ class SettingsViewModel(
     ) { enabled, mode, storage, botId -> listOf(enabled, mode, storage, botId) }
 
     val uiState: StateFlow<SettingsUiState> = combine(
-        core,
+        corePlusHaptics,
         repository.observeVoiceMode(),
         phone,
         repository.observeDshGoPreferences(),
@@ -70,6 +76,7 @@ class SettingsViewModel(
             language = base[2] as AppLanguage,
             interfaceMode = base[3] as InterfaceMode,
             notificationsEnabled = base[4] as Boolean,
+            hapticsEnabled = base[5] as Boolean,
             voiceMode = voice,
             phoneControlEnabled = phoneValues[0] as Boolean,
             phoneConfirmMode = phoneValues[1] as PhoneConfirmMode,
@@ -92,6 +99,8 @@ class SettingsViewModel(
     fun setInterfaceMode(mode: InterfaceMode) = repository.setInterfaceMode(mode)
 
     fun setNotificationsEnabled(enabled: Boolean) = repository.setNotificationsEnabled(enabled)
+
+    fun setHapticsEnabled(enabled: Boolean) = repository.setHapticsEnabled(enabled)
 
     fun setVoiceMode(mode: VoiceMode) = repository.setVoiceMode(mode)
 

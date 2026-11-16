@@ -38,6 +38,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.ui.components.rememberWindowHeightDp
 
 /**
@@ -132,10 +134,15 @@ private fun MessageMenuRow(
     hint: String? = null,
     onClick: () -> Unit,
 ) {
+    // 触感：菜单里每一行都是一个动作（复制/选择/引用/分享/重发），统一轻震。
+    val haptics = rememberHaptics()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable {
+                haptics(HapticLevel.LIGHT)
+                onClick()
+            }
             .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {

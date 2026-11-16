@@ -38,6 +38,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.data.remote.ChangedFile
 import com.dshm.bot.data.remote.ChangesSummary
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -256,11 +258,20 @@ private fun ChangedFileRow(
     onOpen: () -> Unit,
     onLongPress: () -> Unit = {},
 ) {
+    // 触感：打开这份文件的 diff 是动作，轻震（对齐 dsh-Go diff_page 的 lightImpact）。
+    val haptics = rememberHaptics()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(enabled = !busy, onClick = onOpen, onLongClick = onLongPress)
+            .combinedClickable(
+                enabled = !busy,
+                onClick = {
+                    haptics(HapticLevel.LIGHT)
+                    onOpen()
+                },
+                onLongClick = onLongPress,
+            )
             .padding(start = Dshm.spacing.md, end = Dshm.spacing.md, top = Dshm.spacing.sm, bottom = Dshm.spacing.sm),
     ) {
         Box(

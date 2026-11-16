@@ -27,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.domain.model.ChatApproval
 
 /**
@@ -49,6 +51,8 @@ fun ApprovalCard(
 ) {
     val shape = RoundedCornerShape(Dshm.radius.md)
     var selected by remember(approval.key) { mutableStateOf(emptyList<String>()) }
+    // 触感：同意是授权动作（中档），拒绝与多选选项是轻档。
+    val haptics = rememberHaptics()
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -118,6 +122,7 @@ fun ApprovalCard(
                         .clip(RoundedCornerShape(Dshm.radius.sm))
                         .background(if (picked) Dshm.colors.accent.copy(alpha = 0.12f) else Dshm.colors.surfaceMuted)
                         .clickable(enabled = !busy) {
+                            haptics(HapticLevel.LIGHT)
                             if (approval.multiSelect) {
                                 selected = if (picked) selected - option else selected + option
                             } else {
@@ -140,7 +145,10 @@ fun ApprovalCard(
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
                 ) {
                     TextButton(
-                        onClick = { onAnswerQuestion(selected) },
+                        onClick = {
+                            haptics(HapticLevel.LIGHT)
+                            onAnswerQuestion(selected)
+                        },
                         enabled = selected.isNotEmpty() && !busy,
                     ) {
                         Text(
@@ -164,7 +172,13 @@ fun ApprovalCard(
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { onAnswer(false) }, enabled = clickable) {
+                TextButton(
+                    onClick = {
+                        haptics(HapticLevel.LIGHT)
+                        onAnswer(false)
+                    },
+                    enabled = clickable,
+                ) {
                     Text(
                         text = stringResource(R.string.approval_reject),
                         style = Dshm.typography.sheetAction,
@@ -172,7 +186,13 @@ fun ApprovalCard(
                     )
                 }
                 Spacer(Modifier.width(Dshm.spacing.sm))
-                TextButton(onClick = { onAnswer(true) }, enabled = clickable) {
+                TextButton(
+                    onClick = {
+                        haptics(HapticLevel.MEDIUM)
+                        onAnswer(true)
+                    },
+                    enabled = clickable,
+                ) {
                     Text(
                         text = stringResource(R.string.approval_allow_once),
                         style = Dshm.typography.sheetAction,

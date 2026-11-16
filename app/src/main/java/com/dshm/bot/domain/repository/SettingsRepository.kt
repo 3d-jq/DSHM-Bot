@@ -31,6 +31,11 @@ interface SettingsRepository {
 
     fun setNotificationsEnabled(enabled: Boolean)
 
+    /** 触感反馈（发送/停止/审批等动作时的轻震动）。 */
+    fun observeHapticsEnabled(): Flow<Boolean>
+
+    fun setHapticsEnabled(enabled: Boolean)
+
     fun observeVoiceMode(): Flow<VoiceMode>
 
     fun setVoiceMode(mode: VoiceMode)

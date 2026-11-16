@@ -119,6 +119,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.FileProvider
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.core.design.rememberLoopValue
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -829,6 +831,9 @@ private fun ChatMessages(
     val bubbleBounds = remember { BubbleBoundsRegistry() }
     /** 长按消息弹出的操作面板（用户气泡 + 助手气泡共用一套）。 */
     var messageMenu by remember { mutableStateOf<MessageMenuTarget?>(null) }
+    // 触感：长按认出气泡、操作面板真的弹出来时给一档轻震（手势已生效的反馈）。
+    // 面板里的每一行动作另有轻震（MessageMenuRow）。
+    val haptics = rememberHaptics()
     /** 「选择文字」面板（两种气泡共用；回复按 markdown 画）。 */
     var selectText by remember { mutableStateOf<MessageMenuTarget?>(null) }
     /** 正在全屏查看的图片。 */
@@ -983,6 +988,7 @@ private fun ChatMessages(
                         val origin = root.positionInWindow()
                         val windowPoint = Offset(origin.x + offset.x, origin.y + offset.y)
                         bubbleBounds.targetAt(windowPoint)?.let { target ->
+                            haptics(HapticLevel.LIGHT)
                             messageMenu = target
                         }
                     })
@@ -1106,9 +1112,13 @@ private fun ChatMessages(
                             items = entry.attachmentItems,
                             images = entry.images,
                             timeMs = null,
-                            onOpenImage = { viewingImage = it },
+                            onOpenImage = {
+                                haptics(HapticLevel.LIGHT)
+                                viewingImage = it
+                            },
                             maxBubbleWidth = cap,
                             onLongPress = {
+                                haptics(HapticLevel.LIGHT)
                                 messageMenu = MessageMenuTarget(
                                     messageId = entry.id,
                                     text = entry.text,
@@ -1584,6 +1594,8 @@ private fun QuoteStrip(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 触感：取消引用是动作，轻震。
+    val haptics = rememberHaptics()
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(Dshm.radius.md))
@@ -1615,7 +1627,13 @@ private fun QuoteStrip(
                 .weight(1f)
                 .padding(horizontal = Dshm.spacing.sm),
         )
-        IconButton(onClick = onClear, modifier = Modifier.size(Dshm.spacing.iconButton - Dshm.spacing.sm)) {
+        IconButton(
+            onClick = {
+                haptics(HapticLevel.LIGHT)
+                onClear()
+            },
+            modifier = Modifier.size(Dshm.spacing.iconButton - Dshm.spacing.sm),
+        ) {
             Icon(
                 painter = painterResource(R.drawable.ic_lucide_x),
                 contentDescription = stringResource(R.string.action_cancel),

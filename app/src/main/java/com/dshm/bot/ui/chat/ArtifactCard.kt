@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.data.remote.ArtifactKind
 import com.dshm.bot.data.remote.artifactKindOf
 import com.dshm.bot.data.runtime.RuntimeEndpoint
@@ -255,11 +257,16 @@ private fun ArtifactTile(
     onOpen: () -> Unit,
     onMore: () -> Unit,
 ) {
+    // 触感：打开文件 / 打开更多菜单都是动作，轻震（菜单里的行由 SettingsRow 统一触发）。
+    val haptics = rememberHaptics()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = !busy, onClick = onOpen)
+            .clickable(enabled = !busy) {
+                haptics(HapticLevel.LIGHT)
+                onOpen()
+            }
             .padding(start = Dshm.spacing.md, end = Dshm.spacing.xs, top = Dshm.spacing.sm, bottom = Dshm.spacing.sm),
     ) {
         Box(
@@ -320,7 +327,10 @@ private fun ArtifactTile(
                 modifier = Modifier
                     .size(Dshm.spacing.iconButton)
                     .clip(RoundedCornerShape(Dshm.radius.sm))
-                    .clickable(onClick = onMore),
+                    .clickable {
+                        haptics(HapticLevel.LIGHT)
+                        onMore()
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(

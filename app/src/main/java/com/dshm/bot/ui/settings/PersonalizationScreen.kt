@@ -45,6 +45,9 @@ fun PersonalizationScreen(
     viewModel: BotPrefsViewModel,
     onBack: () -> Unit,
     onOpenAgentPresets: () -> Unit = {},
+    /** 触感总开关（本机偏好，不走团队 `set-prefs`）。 */
+    hapticsEnabled: Boolean = true,
+    onHapticsChange: (Boolean) -> Unit = {},
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val prefs = state.prefs
@@ -126,6 +129,23 @@ fun PersonalizationScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // 触感总开关：**本机**偏好（存 SharedPreferences），不走上面那些团队 `set-prefs`。
+        // 放在 `when` 之外：引擎偏好加载失败时它也仍然可改。
+        item {
+            SettingsSection(
+                title = stringResource(R.string.settings_haptics),
+                footer = stringResource(R.string.settings_haptics_footer),
+            ) {
+                SettingsSwitchRow(
+                    title = stringResource(R.string.settings_haptics),
+                    subtitle = stringResource(R.string.settings_haptics_hint),
+                    icon = R.drawable.ic_lucide_smartphone,
+                    checked = hapticsEnabled,
+                    onCheckedChange = onHapticsChange,
+                )
             }
         }
 

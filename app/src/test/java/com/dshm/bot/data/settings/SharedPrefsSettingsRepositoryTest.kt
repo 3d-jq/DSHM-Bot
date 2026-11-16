@@ -79,4 +79,23 @@ class SharedPrefsSettingsRepositoryTest {
         assertEquals(!before, after.notifyTurnDone)
         assertEquals(!before, prefs.values["notify_turn_done"])
     }
+
+    /** 触感总开关：默认开（新功能默认生效），关掉后读端立刻看到。 */
+    @Test
+    fun `震动总开关默认开且写读互通`() = runTest {
+        val prefs = FakeSharedPreferences()
+        val repo = SharedPrefsSettingsRepository.forPrefs(prefs)
+
+        assertTrue("默认应是开的，用户才不会觉得做了个假功能", repo.observeHapticsEnabled().first())
+
+        repo.setHapticsEnabled(false)
+        assertFalse(repo.observeHapticsEnabled().first())
+        assertEquals(false, prefs.values[SharedPrefsSettingsRepository.KEY_HAPTICS])
+
+        // 重开一次（模拟冷启动）：从同一份 prefs 读回来仍是关的。
+        assertFalse(
+            "关掉的开关必须持久化，冷启动不能被重置成开",
+            SharedPrefsSettingsRepository.forPrefs(prefs).observeHapticsEnabled().first(),
+        )
+    }
 }

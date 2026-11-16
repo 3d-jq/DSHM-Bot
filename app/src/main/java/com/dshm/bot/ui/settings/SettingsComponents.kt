@@ -67,6 +67,8 @@ import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.DshmColors
 import com.dshm.bot.core.design.DshmMotion
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.ui.components.FloatingIconButton
 
 /** 测试用 tag：设置列表。 */
@@ -263,11 +265,22 @@ fun SettingsRow(
     singleLineTitle: Boolean = false,
     maxValueWidth: Dp? = null,
 ) {
+    // 触感：可点的设置行（含主题选择、产物菜单项）＝「选中/进入」类动作，轻震。
+    val haptics = rememberHaptics()
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = Dshm.spacing.rowMinHeight - Dshm.spacing.sm)
-            .then(if (onClick != null && enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                if (onClick != null && enabled) {
+                    Modifier.clickable {
+                        haptics(HapticLevel.LIGHT)
+                        onClick()
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -346,6 +359,8 @@ fun SettingsSwitchRow(
     subtitleColor: androidx.compose.ui.graphics.Color? = null,
     enabled: Boolean = true,
 ) {
+    // 触感：拨动开关也是「选中/切换」类动作（对齐 dsh-Go 的 selectionClick）。
+    val haptics = rememberHaptics()
     SettingsRow(
         title = title,
         modifier = modifier,
@@ -356,7 +371,10 @@ fun SettingsSwitchRow(
         trailing = {
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = { next ->
+                    haptics(HapticLevel.LIGHT)
+                    onCheckedChange(next)
+                },
                 enabled = enabled,
             )
         },

@@ -28,6 +28,7 @@ class SharedPrefsSettingsRepository private constructor(private val prefs: Share
     private val language = MutableStateFlow(readEnum(KEY_LANGUAGE, AppLanguage.SYSTEM))
     private val interfaceMode = MutableStateFlow(readEnum(KEY_INTERFACE, InterfaceMode.NATIVE))
     private val notifications = MutableStateFlow(prefs.getBoolean(KEY_NOTIFICATIONS, true))
+    private val haptics = MutableStateFlow(prefs.getBoolean(KEY_HAPTICS, true))
     private val voiceMode = MutableStateFlow(readEnum(KEY_VOICE, VoiceMode.AUTO))
     private val phoneControlEnabled = MutableStateFlow(prefs.getBoolean(KEY_PHONE_ENABLED, false))
     private val phoneConfirmMode = MutableStateFlow(readEnum(KEY_PHONE_CONFIRM, PhoneConfirmMode.ASK))
@@ -68,6 +69,13 @@ class SharedPrefsSettingsRepository private constructor(private val prefs: Share
     override fun setNotificationsEnabled(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_NOTIFICATIONS, enabled) }
         notifications.value = enabled
+    }
+
+    override fun observeHapticsEnabled(): Flow<Boolean> = haptics
+
+    override fun setHapticsEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_HAPTICS, enabled) }
+        haptics.value = enabled
     }
 
     override fun observeVoiceMode(): Flow<VoiceMode> = voiceMode
@@ -150,6 +158,7 @@ class SharedPrefsSettingsRepository private constructor(private val prefs: Share
         const val KEY_LANGUAGE = "language"
         const val KEY_INTERFACE = "interface_mode"
         const val KEY_NOTIFICATIONS = "notifications_enabled"
+        const val KEY_HAPTICS = "haptics_enabled"
         const val KEY_VOICE = "voice_mode"
         const val KEY_PHONE_ENABLED = "phone_control_enabled"
         const val KEY_PHONE_CONFIRM = "phone_confirm_mode"

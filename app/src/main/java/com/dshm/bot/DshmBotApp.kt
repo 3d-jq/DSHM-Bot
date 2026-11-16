@@ -819,6 +819,8 @@ fun DshmBotApp(
                             navForward = true
                             settingsStack = settingsStack + SettingsPageId.AGENT_PRESETS.name
                         },
+                        hapticsEnabled = settingsUiState.hapticsEnabled,
+                        onHapticsChange = settingsViewModel::setHapticsEnabled,
                     )
 
                     SettingsPageId.AGENT_PRESETS -> AgentPresetsScreen(

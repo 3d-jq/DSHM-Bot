@@ -71,6 +71,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.data.remote.SpeechRepository
 import com.dshm.bot.domain.model.VoiceMode
 import java.util.Locale
@@ -616,12 +618,23 @@ internal fun ComposerFieldSurface(
 /** 发送键：有内容主色实心 + ↑；无内容淡底灰箭头（禁用）。 */
 @Composable
 internal fun SendKey(enabled: Boolean, onSend: () -> Unit) {
+    // 触感：发送是高频确认动作（dsh-Go composer 的 lightImpact 级）。
+    val haptics = rememberHaptics()
     Box(
         modifier = Modifier
             .size(Dshm.spacing.composerKey)
             .clip(CircleShape)
             .background(if (enabled) Dshm.colors.accent else Dshm.colors.surfaceMuted)
-            .then(if (enabled) Modifier.clickable(onClick = onSend) else Modifier),
+            .then(
+                if (enabled) {
+                    Modifier.clickable {
+                        haptics(HapticLevel.LIGHT)
+                        onSend()
+                    }
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -654,12 +667,17 @@ private fun TranscribingKey() {
 /** 听写中的停止键：主色实心 + 方块。 */
 @Composable
 private fun StopKey(onStop: () -> Unit) {
+    // 触感：停止是打断动作，用中档（dsh-Go composer 的 mediumImpact 级）。
+    val haptics = rememberHaptics()
     Box(
         modifier = Modifier
             .size(Dshm.spacing.composerKey)
             .clip(CircleShape)
             .background(Dshm.colors.accent)
-            .clickable(onClick = onStop),
+            .clickable {
+                haptics(HapticLevel.MEDIUM)
+                onStop()
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -674,12 +692,17 @@ private fun StopKey(onStop: () -> Unit) {
 /** 对话执行中的停止键：主色实心 + 方块，照 DeepSearch 的三态发送键。 */
 @Composable
 private fun StopRunKey(onStop: () -> Unit) {
+    // 触感：停止正在跑的回合 = 打断，用中档（比发送重一级）。
+    val haptics = rememberHaptics()
     Box(
         modifier = Modifier
             .size(Dshm.spacing.composerKey)
             .clip(CircleShape)
             .background(Dshm.colors.accent)
-            .clickable(onClick = onStop),
+            .clickable {
+                haptics(HapticLevel.MEDIUM)
+                onStop()
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(

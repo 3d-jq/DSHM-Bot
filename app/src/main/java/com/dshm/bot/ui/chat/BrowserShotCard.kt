@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 
 /**
  * 对话里的浏览器缩略图卡：一轮浏览器操作结束后贴一张「它当时看到的页面」。
@@ -45,6 +47,8 @@ fun BrowserShotCard(
     val bitmap = remember(shot.path) {
         runCatching { BitmapFactory.decodeFile(shot.path) }.getOrNull()
     }
+    // 触感：点卡片打开浏览器是动作，轻震。
+    val haptics = rememberHaptics()
     val shape = RoundedCornerShape(Dshm.radius.md)
     Column(
         modifier = modifier
@@ -52,7 +56,10 @@ fun BrowserShotCard(
             .clip(shape)
             .background(Dshm.colors.surface)
             .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
-            .clickable(onClick = onClick),
+            .clickable {
+                haptics(HapticLevel.LIGHT)
+                onClick()
+            },
     ) {
         if (bitmap != null) {
             Box(

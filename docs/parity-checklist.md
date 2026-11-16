@@ -26,8 +26,18 @@
 | 引用追问（长按「引用」→ Markdown 引用块） | 对齐 dsh-Go `composer_quote` + 网页 hover 的 Reply（2026-11-16） |
 | 通知栏（回合完成/错误/审批/提问） | |
 | 正文搜索（`session/search`，结果聚成「消息」段） | 对齐网页端 CommandPalette 的 Messages 段（2026-11-16） |
+| 震动反馈（三档 + 总开关） | 对齐 dsh-Go 85 处 `HapticFeedback.*` 的**动作**落点（2026-11-16）：发送/复制/选择=轻、停止/审批同意=中；总开关在「设置 → 个性化 → 震动反馈」（本机偏好，存 SharedPreferences，`Haptics.kt`）。档位映射必须用 API≤23 的 `View` 常量（`Confirm/Reject` 是 API 30，minSdk 26 上会静默失效）；无权限 |
+| **宿主插件升级到 0.3.6**（2026-11-16） | 上游从我们内嵌的 dev 快照（0.2.x）直接跳到 **v0.3.6**。做法：官方 `chat`/`room-chat`/feed `message`/`notices` 当**接口**，界面仍走我们的 `timeline` schema（`src/host/dshm-timeline.js`，由原 `projection.js` 移植）。新增 3 个兼容别名的 channel 动作：`stop`（→`stop-chat`/`stop-room-work`）、`room-continue`（→goal resume）、`room-queue`（按下标删除）；`room-artifacts` 在适配器里重实现（成员 `deliverables/presented`）。`hello` 的 capabilities 由适配器补 `timeline`/`events`。**手机操控**模块改名 `phone-control.js`（与上游手机配对 `phone.js` 同名冲突）。内置 `node_modules`（deep-view/ws/@modelcontextprotocol 全链，排除会遮蔽宿主的 `@deepseek-ai/*`） |
+
+> **ds-bot 私有 fork（2026-11-16）**：用户拍板不再同步上游，把内嵌插件做成专门版本 ——
+> 改名 `ds-bot-dshm`、版本 `0.3.6-dshm.1`；**host-only**（删 `client.js`/`src/client`，DSH 原生网页不再加载插件前端、`web boot failed` 报错随之消失），保留 host 需要的 `link.js`/`office.js`/`src/office`；`cordis.patch.yml` 全部用绝对路径、恢复 DSH 自带设置壳。APK 25.9MB→24.3MB。JS 57 + JVM 740 绿。
 
 ## 2. 必修（官方有、我们缺；按建议优先级）
+
+> **0.3.6 升级后的待办清单（2026-11-16）**
+> - **连接器 UI（阶段二，本轮只升级宿主）**：官方 0.3.x 重写了连接器引擎（catalog / OAuth / 网关 / 邮箱），端点 `connector-*`（12 个）+ `mail-*`（5 个）；我们客户端还没有页面。MCP OAuth 依赖已内置，可直接接。
+> - 0.3.6 新增但**未接**：IM 通道（微信/飞书/钉钉/TG/Slack…）、Computer use、本地 CLI agent、记忆分层/整理、侧栏分组、群目标（goal-*）面板、官方手机 App 的 `phone-*` 配对。
+> - 已知退化（0.3.6 官方条目不带该字段）：群内**插话消息**的 echo 认领少了 `rpcId`；群队列项无 id，撤回按 `roominx:<roomId>:<index>` 下标删除。
 
 ### ★★★ P1：代码产物卡（ChangedFiles）
 - **官方出处**：DSH `workspace/changes` 事件（只带 `{turn}`）+ 路由 `GET /api/changes.summary?sessionId=..&seq=..` → `{files:[{path,display,binary,oversized}], total, added, deleted}`；`/api/changes.diff`、`/api/changes.open`。

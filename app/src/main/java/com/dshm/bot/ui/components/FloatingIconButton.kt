@@ -15,6 +15,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.res.painterResource
 import com.dshm.bot.core.design.Dshm
+import com.dshm.bot.core.design.HapticLevel
+import com.dshm.bot.core.design.rememberHaptics
 
 /**
  * 悬浮圆钮：填充色与页面底色一致，四周阴影让它在页面上浮起来。
@@ -28,6 +30,8 @@ fun FloatingIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    // 触感：顶栏动作（复制 diff、换行、返回…）统一轻震。
+    val haptics = rememberHaptics()
     Box(
         modifier = modifier
             .size(Dshm.spacing.iconButton)
@@ -44,7 +48,10 @@ fun FloatingIconButton(
             .border(Dshm.spacing.hairline, Dshm.colors.divider, CircleShape)
             .then(
                 if (enabled) {
-                    Modifier.clickable(onClick = onClick)
+                    Modifier.clickable {
+                        haptics(HapticLevel.LIGHT)
+                        onClick()
+                    }
                 } else {
                     Modifier
                 },
