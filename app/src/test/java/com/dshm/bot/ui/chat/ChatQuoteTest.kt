@@ -62,11 +62,58 @@ class ChatQuoteTest {
         assertEquals("标题 加粗 和 代码 嵌套", preview)
     }
 
-    /** 发出去的内容再读回来，开头就是引用块（我们的 MarkdownText 会把 `> ` 渲染成引用块）。 */
+    /** 发出去的内容再读回来，开头就是引用块（气泡里会摘出来单独画）。 */
     @Test
     fun theSentTextOpensWithARenderableQuoteBlock() {
         val sent = withQuote("被引用的原话", "我的追问")
         assertTrue("应以引用块开头", sent.startsWith("> "))
         assertTrue("引用块后要有正文", sent.endsWith("我的追问"))
+    }
+
+    // ---- splitQuote：气泡里把开头引用摘出来单独画（作用于每条消息，写错会吞正文）----
+
+    @Test
+    fun aMessageWithoutAQuoteIsReturnedUntouched() {
+        val text = "普通消息，没有任何引用。\n\n第二段。"
+        val split = splitQuote(text)
+        assertEquals(null, split.quote)
+        assertEquals("正文必须原样返回（不能 trim 掉东西）", text, split.body)
+    }
+
+    @Test
+    fun aLeadingQuoteIsSplitOffWithItsBlankLine() {
+        val split = splitQuote("> 被引用的一段\n> 第二行\n\n我的追问")
+        assertEquals("被引用的一段\n第二行", split.quote)
+        assertEquals("我的追问", split.body)
+    }
+
+    @Test
+    fun aBareArrowLineStaysInsideTheQuoteBlock() {
+        val split = splitQuote("> 上\n>\n> 下\n\n正文")
+        assertEquals("上\n\n下", split.quote)
+        assertEquals("正文", split.body)
+    }
+
+    @Test
+    fun aQuoteOnlyMessageHasAnEmptyBody() {
+        val split = splitQuote("> 只有引用")
+        assertEquals("只有引用", split.quote)
+        assertEquals("", split.body)
+    }
+
+    @Test
+    fun aNonLeadingQuoteIsLeftInTheBody() {
+        // 正文中间出现的引用块是模型自己的排版，不摘。
+        val split = splitQuote("先说话\n\n> 中间引用")
+        assertEquals(null, split.quote)
+        assertEquals("先说话\n\n> 中间引用", split.body)
+    }
+
+    /** 发出去的内容再拆回来，应还原成「引用段 + 正文」。 */
+    @Test
+    fun sendingAndSplittingRoundTrips() {
+        val split = splitQuote(withQuote("原话第一行\n原话第二行", "我的追问"))
+        assertEquals("原话第一行\n原话第二行", split.quote)
+        assertEquals("我的追问", split.body)
     }
 }

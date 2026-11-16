@@ -1519,6 +1519,38 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
 }
 
 
+
+/**
+ * 气泡里的引用：左侧竖线 + **一行**预览 + 暗色小一号字（与输入框上方的引用条同款观感）。
+ *
+ * 对齐 dsh-Go `BubbleQuote`：引用单独画，不按 Markdown 引用块整段铺开 —— 手机上整段
+ * 引用会把正文挤走，一行预览 + 点开原文的追问才是常用的读法。
+ */
+@Composable
+private fun BubbleQuote(
+    quote: String,
+    textColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(Dshm.spacing.lg)
+                .clip(RoundedCornerShape(Dshm.radius.xs))
+                .background(Dshm.colors.accent),
+        )
+        Text(
+            text = quoteLine(quote),
+            style = Dshm.typography.rowPreview,
+            color = textColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = Dshm.spacing.sm),
+        )
+    }
+}
+
 /**
  * 输入框上方的引用条：一行预览 + 取消。
  *
@@ -1550,7 +1582,7 @@ private fun QuoteStrip(
             text = preview,
             style = Dshm.typography.rowPreview,
             color = Dshm.colors.textSecondary,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
@@ -1623,14 +1655,26 @@ private fun UserBubble(
                     // 列表整体在 SelectionContainer 里；用户气泡的长按要留给面板，
                     // 所以这段退出文字选择（DeepSearch 也是这么做的）。
                     androidx.compose.foundation.text.selection.DisableSelection {
-                        Text(
-                            text = text,
-                            style = Dshm.typography.composerText.copy(
-                                fontSize = Dshm.typography.composerText.fontSize * fontScale,
-                                lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
-                            ),
-                            color = Dshm.colors.onBubbleUser,
-                        )
+                        val quoted = splitQuote(text)
+                        Column {
+                            quoted.quote?.let { passage ->
+                                BubbleQuote(
+                                    quote = passage,
+                                    textColor = Dshm.colors.onBubbleUser.copy(alpha = 0.72f),
+                                )
+                                if (quoted.body.isNotEmpty()) Spacer(Modifier.height(Dshm.spacing.xs))
+                            }
+                            if (quoted.body.isNotEmpty() || quoted.quote == null) {
+                                Text(
+                                    text = quoted.body,
+                                    style = Dshm.typography.composerText.copy(
+                                        fontSize = Dshm.typography.composerText.fontSize * fontScale,
+                                        lineHeight = Dshm.typography.composerText.lineHeight * fontScale,
+                                    ),
+                                    color = Dshm.colors.onBubbleUser,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1812,14 +1856,27 @@ private fun BotBubble(
                         )
                         .padding(horizontal = Dshm.spacing.md, vertical = Dshm.spacing.sm),
                 ) {
-                    // 正文按 markdown 画（代码块 / 表格 / 列表都走同一套排版）。
-                    MarkdownText(
-                        markdown = text,
-                        fontScale = fontScale,
-                        mentionMembers = members,
-                        fillWidth = false,
-                        streaming = streaming,
-                    )
+                    // 开头的引用单独画（一行预览 + 暗色）；正文仍按 markdown 画。
+                    // 流式态走同一段代码，所以「写完落地」那一瞬间引用不会换样子。
+                    val quoted = splitQuote(text)
+                    Column {
+                        quoted.quote?.let { passage ->
+                            BubbleQuote(
+                                quote = passage,
+                                textColor = Dshm.colors.textTertiary,
+                            )
+                            if (quoted.body.isNotEmpty()) Spacer(Modifier.height(Dshm.spacing.xs))
+                        }
+                        if (quoted.body.isNotEmpty() || quoted.quote == null) {
+                            MarkdownText(
+                                markdown = quoted.body,
+                                fontScale = fontScale,
+                                mentionMembers = members,
+                                fillWidth = false,
+                                streaming = streaming,
+                            )
+                        }
+                    }
                 }
                 if (collapsible) {
                     androidx.compose.material3.HorizontalDivider(color = Dshm.colors.divider)

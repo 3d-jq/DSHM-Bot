@@ -60,3 +60,29 @@ internal fun quoteLine(quote: String): String = quote
     .replace(INLINE_MARKS, "")
     .replace(WHITESPACE, " ")
     .trim()
+
+private val QUOTE_LINE_PREFIX = Regex("^ {0,3}> ?")
+
+/** 一条消息拆成「开头的引用块」与「其余正文」；不以引用块开头时 [quote] 为 null。 */
+internal data class QuotedText(val quote: String?, val body: String)
+
+/**
+ * 把消息开头连续的 `> ` 行拆出来（对齐 dsh-Go `splitQuote`）。
+ *
+ * 气泡里引用要**单独画**（一行预览 + 左侧竖线 + 暗色），所以先把开头那段摘出来；
+ * 正文里（非开头）出现的引用块仍按普通 Markdown 渲染 —— 那是模型自己的排版。
+ */
+internal fun splitQuote(text: String): QuotedText {
+    val lines = text.replace("\r\n", "\n").split('\n')
+    var index = 0
+    val quoted = ArrayList<String>()
+    while (index < lines.size && QUOTE_LINE_PREFIX.containsMatchIn(lines[index])) {
+        quoted += lines[index].replaceFirst(QUOTE_LINE_PREFIX, "")
+        index++
+    }
+    val quote = quoted.joinToString("\n").trim()
+    if (quote.isEmpty()) return QuotedText(quote = null, body = text)
+    // 引用块到空行或第一行非引用行为止。
+    while (index < lines.size && lines[index].isBlank()) index++
+    return QuotedText(quote = quote, body = lines.drop(index).joinToString("\n").trimEnd())
+}
