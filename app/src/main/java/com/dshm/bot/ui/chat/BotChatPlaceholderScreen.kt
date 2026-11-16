@@ -1036,20 +1036,24 @@ private fun ChatMessages(
                             .padding(top = pendingSpacing.top)
                             .onGloballyPositioned(boundsListener),
                     ) {
-                        BotBubble(
-                            text = streaming,
-                            author = bot.name,
-                            fontScale = fontScale,
-                            // 和最终那条 BOT 条目画得一模一样（群聊里同样有头像 + 名字），
-                            // 这样文字写完落地时形状不变。
-                            isGroup = bot.isGroup,
-                            showName = pendingSpacing.groupStart,
-                            botId = bot.id,
-                            members = bot.roomMembers,
-                            adminId = bot.roomAdmin,
-                            onOpenMember = onOpenMember,
-                            streaming = true,
-                        )
+                        // 与落定行同一个宽度上限（流式/落地形状一致，不抖）。
+                        AssistantBubbleWidth { cap ->
+                            BotBubble(
+                                text = streaming,
+                                author = bot.name,
+                                fontScale = fontScale,
+                                // 和最终那条 BOT 条目画得一模一样（群聊里同样有头像 + 名字），
+                                // 这样文字写完落地时形状不变。
+                                isGroup = bot.isGroup,
+                                showName = pendingSpacing.groupStart,
+                                botId = bot.id,
+                                members = bot.roomMembers,
+                                adminId = bot.roomAdmin,
+                                onOpenMember = onOpenMember,
+                                streaming = true,
+                                maxBubbleWidth = cap,
+                            )
+                        }
                     }
                 }
             }
@@ -1093,39 +1097,47 @@ private fun ChatMessages(
                         ),
                 ) {
                 when (entry.kind) {
-                    ChatEntryKind.USER -> UserBubble(
-                        text = entry.text,
-                        fontScale = fontScale,
-                        attachments = entry.attachments,
-                        items = entry.attachmentItems,
-                        images = entry.images,
-                        timeMs = null,
-                        onOpenImage = { viewingImage = it },
-                        onLongPress = {
-                            messageMenu = MessageMenuTarget(
-                                messageId = entry.id,
-                                text = entry.text,
-                                isUser = true,
-                            )
-                        },
-                    )
+                    // 宽度上限 78%（对齐网页端 `.bt-ububble`）：气泡左边留白，右边仍贴边。
+                    ChatEntryKind.USER -> UserBubbleWidth { cap ->
+                        UserBubble(
+                            text = entry.text,
+                            fontScale = fontScale,
+                            attachments = entry.attachments,
+                            items = entry.attachmentItems,
+                            images = entry.images,
+                            timeMs = null,
+                            onOpenImage = { viewingImage = it },
+                            maxBubbleWidth = cap,
+                            onLongPress = {
+                                messageMenu = MessageMenuTarget(
+                                    messageId = entry.id,
+                                    text = entry.text,
+                                    isUser = true,
+                                )
+                            },
+                        )
+                    }
                     // live 行（round 进行中的回复占位）与 settled 行画得一样：同 key
                     // 原位替换，不额外加「发言中」徽标（官方只有活动行，没有逐条徽标）。
-                    ChatEntryKind.BOT -> BotBubble(
-                        text = entry.text,
-                        author = entry.author,
-                        fontScale = fontScale,
-                        isGroup = bot.isGroup,
-                        showName = spacing.groupStart,
-                        botId = entry.botId,
-                        members = bot.roomMembers,
-                        adminId = bot.roomAdmin,
-                        onOpenMember = onOpenMember,
-                        timeMs = null,
-                        durationMs = null,
-                        whole = entry.whole,
-                        endpoint = endpoint,
-                    )
+                    // 宽度上限 80%（对齐网页端 `.bt-bubble`）：气泡右边留白。
+                    ChatEntryKind.BOT -> AssistantBubbleWidth { cap ->
+                        BotBubble(
+                            text = entry.text,
+                            author = entry.author,
+                            fontScale = fontScale,
+                            isGroup = bot.isGroup,
+                            showName = spacing.groupStart,
+                            botId = entry.botId,
+                            members = bot.roomMembers,
+                            adminId = bot.roomAdmin,
+                            onOpenMember = onOpenMember,
+                            timeMs = null,
+                            durationMs = null,
+                            whole = entry.whole,
+                            endpoint = endpoint,
+                            maxBubbleWidth = cap,
+                        )
+                    }
                     ChatEntryKind.EVENT -> {
                         // 工具事件的目标：DS Bot `renderCall` 给的是目标 Bot / 群聊的头像，
                         // 点开的是目标（`openExchange`）。relay 事件的目标是发件人（`botId`）。
@@ -1608,6 +1620,27 @@ private fun QuoteStrip(
     }
 }
 
+
+/**
+ * 气泡宽度上限包装：把「可用宽 × 比例」传下去，气泡自己用 `widthIn(max=…)` 封顶。
+ *
+ * 只封顶不拉伸（短消息仍按内容宽）；比例取官方值，见 [BUBBLE_MAX_FRACTION_ASSISTANT]。
+ */
+@Composable
+private fun CappedBubbleWidth(fraction: Float, content: @Composable (Dp) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) { content(maxWidth * fraction) }
+}
+
+/** 助手气泡的宽度上限包装（对齐网页端 `.bt-bubble` 的 80%）。 */
+@Composable
+private fun AssistantBubbleWidth(content: @Composable (Dp) -> Unit) =
+    CappedBubbleWidth(BUBBLE_MAX_FRACTION_ASSISTANT, content)
+
+/** 用户气泡的宽度上限包装（对齐网页端 `.bt-ububble` 的 78%）。 */
+@Composable
+private fun UserBubbleWidth(content: @Composable (Dp) -> Unit) =
+    CappedBubbleWidth(BUBBLE_MAX_FRACTION_USER, content)
+
 /** 用户消息气泡，右对齐。 */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -1623,6 +1656,8 @@ private fun UserBubble(
     onLongPress: () -> Unit = {},
     /** 点图片缩略图：打开全屏查看器。 */
     onOpenImage: (ChatAttachmentItem) -> Unit = {},
+    /** 气泡宽度上限（由 [UserBubbleWidth] 传入）；默认不限。 */
+    maxBubbleWidth: Dp = Dp.Unspecified,
 ) {
     val hasAttachments = items.isNotEmpty() || attachments.isNotEmpty() || images > 0
     Column(
@@ -1633,9 +1668,11 @@ private fun UserBubble(
         // 图片 / 文档有自己的圆角底色，不该被用户气泡的蓝底包住。
         // 长按挂在整条消息上，所以「只有附件没有文字」的消息也能弹操作面板。
         Column(
-            modifier = Modifier.pointerInput(text) {
-                detectTapGestures(onLongPress = { onLongPress() })
-            },
+            modifier = Modifier
+                .pointerInput(text) {
+                    detectTapGestures(onLongPress = { onLongPress() })
+                }
+                .then(if (maxBubbleWidth == Dp.Unspecified) Modifier else Modifier.widthIn(max = maxBubbleWidth)),
             horizontalAlignment = Alignment.End,
         ) {
             if (items.isNotEmpty()) {
@@ -1843,6 +1880,8 @@ private fun BotBubble(
     endpoint: RuntimeEndpoint? = null,
     /** 流式输出中的临时气泡：行内 markdown 先不扫（对齐 dsh-Go）。 */
     streaming: Boolean = false,
+    /** 气泡宽度上限（由 [AssistantBubbleWidth] 传入）；默认不限。 */
+    maxBubbleWidth: Dp = Dp.Unspecified,
 ) {
     val member = members.firstOrNull { it.id == botId }
     val name = member?.name ?: author
@@ -1853,7 +1892,11 @@ private fun BotBubble(
     val collapsible = isGroup && text.length > 600
 
     val bubble: @Composable () -> Unit = {
-        Column(modifier = Modifier.wrapContentWidth(Alignment.Start)) {
+        Column(
+            modifier = Modifier
+                .wrapContentWidth(Alignment.Start)
+                .then(if (maxBubbleWidth == Dp.Unspecified) Modifier else Modifier.widthIn(max = maxBubbleWidth)),
+        ) {
             Column(
                 modifier = Modifier
                     .clip(RoundedCornerShape(Dshm.radius.lg))
