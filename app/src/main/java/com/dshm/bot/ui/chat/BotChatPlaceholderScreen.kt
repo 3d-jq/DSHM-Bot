@@ -1179,22 +1179,28 @@ private fun ChatMessages(
                             onOpen = clickId?.let { id -> { onOpenExchange(id) } },
                         )
                     }
-                    ChatEntryKind.ARTIFACTS -> ArtifactCard(
-                        artifacts = entry.artifacts,
-                        endpoint = endpoint,
-                        sessionId = bot.id,
-                        delivered = entry.artifactsDelivered,
-                    )
+                    // 卡片封顶到助手气泡同宽（[CARD_MAX_FRACTION]）：卡片是这一轮的
+                    // 产出，和气泡同属左列，比气泡宽会显得错位。
+                    ChatEntryKind.ARTIFACTS -> CappedCardWidth {
+                        ArtifactCard(
+                            artifacts = entry.artifacts,
+                            endpoint = endpoint,
+                            sessionId = bot.id,
+                            delivered = entry.artifactsDelivered,
+                        )
+                    }
 
                     // `changes` 行（Phase 2）：这一轮改动的文件卡（对齐官方 `ChangedFiles`）。
                     // 摘要在 ViewModel 里按需拉到，没拉到就不会有这条 entry（`entry.changes == null`）。
                     ChatEntryKind.CHANGES -> entry.changes?.let { summary ->
-                        ChangedFilesCard(
-                            summary = summary,
-                            endpoint = endpoint,
-                            sessionId = bot.id,
-                            onShowDiff = { file -> onShowDiff(file, entry.seq) },
-                        )
+                        CappedCardWidth {
+                            ChangedFilesCard(
+                                summary = summary,
+                                endpoint = endpoint,
+                                sessionId = bot.id,
+                                onShowDiff = { file -> onShowDiff(file, entry.seq) },
+                            )
+                        }
                     }
 
                     ChatEntryKind.BROWSER_SHOT -> BrowserShotCard(
@@ -1640,6 +1646,19 @@ private fun AssistantBubbleWidth(content: @Composable (Dp) -> Unit) =
 @Composable
 private fun UserBubbleWidth(content: @Composable (Dp) -> Unit) =
     CappedBubbleWidth(BUBBLE_MAX_FRACTION_USER, content)
+
+/**
+ * 卡片（产物卡 / 代码产物卡）的宽度上限包装，与助手气泡同宽。
+ *
+ * 和气泡的差别：卡片自身是 `fillMaxWidth()` 的块（不是按内容收缩的气泡），
+ * 所以这里给一个「最宽 cap」的盒子让它填满 —— 卡片仍然撑满该列，只是列变窄了。
+ */
+@Composable
+private fun CappedCardWidth(content: @Composable () -> Unit) {
+    CappedBubbleWidth(CARD_MAX_FRACTION) { cap ->
+        Box(Modifier.widthIn(max = cap)) { content() }
+    }
+}
 
 /** 用户消息气泡，右对齐。 */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
