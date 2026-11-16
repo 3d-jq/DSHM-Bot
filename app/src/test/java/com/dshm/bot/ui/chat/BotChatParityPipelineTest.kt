@@ -164,8 +164,30 @@ class BotChatParityPipelineTest {
         var snapshotEventTo: Long? = null
         var snapshotCwd: String? = null
 
-        /** 发一帧原始 durable 事件（`session` feed）。 */
-        fun emitSession(seq: Long, type: String, sessionId: String = "s-1") {
+
+        /** 发一帧 `stream` feed 事件（phase=start/chunk/end）。 */
+        fun emitStream(phase: String, attemptId: String, text: String? = null) {
+            feedEvents.tryEmit(
+                BotFeedEvent(
+                    event = "stream",
+                    data = JSONObject()
+                        .put("botId", "bot-1")
+                        .put("sessionId", "s-1")
+                        .put("attemptId", attemptId)
+                        .put("phase", phase)
+                        .apply { if (text != null) put("text", text) }
+                        .toString(),
+                ),
+            )
+        }
+
+        /** 发一帧原始 durable 事件（`session` feed）。带 data 时折叠才产得出对应行。 */
+        fun emitSession(
+            seq: Long,
+            type: String,
+            sessionId: String = "s-1",
+            data: JSONObject? = null,
+        ) {
             feedEvents.tryEmit(
                 BotFeedEvent(
                     event = "session",
@@ -173,6 +195,7 @@ class BotChatParityPipelineTest {
                         .put("sessionId", sessionId)
                         .put("seq", seq)
                         .put("type", type)
+                        .apply { if (data != null) put("data", data) }
                         .toString(),
                 ),
             )
@@ -642,6 +665,56 @@ class BotChatParityPipelineTest {
      * 缩略图卡原先**永远追加到 entries 末尾**，于是下一条消息一来，它就跑到新消息
      * 后面去了。现在按「截图那一刻的 seq」地锚插回它所属那一轮的轮末。
      */
+    /**
+     * 回归（2026-11-16 真机报「流式完成时会看到两个」）：流式气泡必须**按 seq**
+     * 立刻让位给落定行（对齐 dsh-Go：durable 消息一到就删同 turn/step 的草稿），
+     * 不能靠文本比对 + 200ms 定时器 —— 文本对不上时那段时间就是双份。
+     */
+    @Test
+    fun aSettledBotRowClearsTheStreamingBubbleBySeq() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L))
+        api.snapshotEventFrom = 10L
+        api.snapshotEventTo = 10L
+        api.snapshotSeq = 40
+        api.eventsResponse = listOf(userEvent(10L, 1000L, "你好"))
+
+        val vm = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        // 流式开始 + 一段文本（长度随便，判据不再看长度/文本）。
+        api.emitStream(phase = "start", attemptId = "a1")
+        api.emitStream(phase = "chunk", attemptId = "a1", text = "这是模型的回复")
+        scheduler.runCurrent()
+        assertTrue("流式气泡应在显示", vm.streamingText.value.isNotEmpty())
+
+        // 落定行（seq 41 > 流式起点 40）到达 → 流式气泡必须**立刻**消失，不留双份。
+        // 注意要走「事件进日志」这条路：私聊的显示由折叠产出，光发 timeline 行不会进显示。
+        // 日志必须连续（折叠只在连续区间上工作），把 11..40 用折叠不认的事件补齐。
+        api.eventsResponse = buildList {
+            add(userEvent(10L, 1_000L, "你好"))
+            for (seq in 11L..40L) add(SessionEvent(seq, "step/start", 1_000L + seq, null))
+            add(assistantEvent(41L, 1_041L, "这是模型的回复"))
+        }
+        api.emitSession(
+            41L,
+            "assistant/message",
+            data = JSONObject().put("turn", 1).put(
+                "message",
+                JSONObject().put(
+                    "content",
+                    org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "这是模型的回复")),
+                ),
+            ),
+        )
+        scheduler.runCurrent()
+        assertTrue(
+            "落定行到位后流式气泡必须立刻消失（否则会看到两个）：${vm.streamingText.value}",
+            vm.streamingText.value.isEmpty(),
+        )
+    }
+
     @Test
     fun aBrowserShotStaysInItsTurnInsteadOfFollowingTheNextMessage() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler

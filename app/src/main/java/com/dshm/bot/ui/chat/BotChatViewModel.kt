@@ -469,6 +469,8 @@ class BotChatViewModel internal constructor(
         return sessionLogs.getOrPut(id) { SessionEventLog() }
     }
 
+    /** 本次流式开始时的时间线游标（落定行的 seq 超过它就说明这条流已成正式消息）。 */
+    private var streamStartedAtSeq = 0L
     /** 正在补洞（防同一缺口并发重复请求）。 */
     private var sessionEventsFilling = false
     /** 影子比对「一致」的限频时刻（不一致每次都记）。 */
@@ -952,6 +954,9 @@ class BotChatViewModel internal constructor(
                 when (data.optString("phase")) {
                     "start" -> {
                         streamingAttempt = data.optString("attemptId").ifEmpty { "stream" }
+                        // 流式开始时的游标：之后落定的 bot 行 seq 比它大，就说明这条流已经
+                        // 变成正式消息了（对应 dsh-Go 的 `startedAfterSeq` 判据）。
+                        streamStartedAtSeq = paritySeq
                         streamBuffer = ""
                         streamFlush.trailingJob?.cancel()
                         streamFlush.trailingJob = null
@@ -1469,6 +1474,10 @@ class BotChatViewModel internal constructor(
                     DshMuxLog.log(
                         "session-events 补洞 ${gap.first}..${gap.last}：收到 ${list.size} 条，cursor=${log.cursor}",
                     )
+                    // 补洞成功后**立刻重建**：折叠只在连续区间上工作，补之前那次重建
+                    // 拿到的是「有洞」状态（退回宿主行）。不重建就要等下一条事件，
+                    // 显示会短暂停留在旧状态。
+                    if (!isGroup) rebuildParityEntries()
                 }
                 .onFailure {
                     DshMuxLog.log(
@@ -2519,13 +2528,12 @@ class BotChatViewModel internal constructor(
      */
     private fun settleStreamingWhenLanded(rows: List<TimelineRow>) {
         if (streamBuffer.isEmpty()) return
-        val streaming = streamBuffer.trim()
-        if (streaming.length < 20) return
-        val lastBot = rows.lastOrNull { it.payload is TimelineRowPayload.Bot } ?: return
-        val settled = (lastBot.payload as? TimelineRowPayload.Bot)?.text?.trim().orEmpty()
-        if (settled.length < 20) return
-        if (streaming == settled || streaming.endsWith(settled)) {
-            DshMuxLog.log("流式收尾：落定行已到位（${settled.length} 字），立刻收掉流式气泡")
+        val lastBotSeq = rows.lastOrNull { it.payload is TimelineRowPayload.Bot }?.seq ?: return
+        if (lastBotSeq > streamStartedAtSeq) {
+            // 判据用 **seq**（对齐 dsh-Go `transcript.dart`：durable 消息一到就删同
+            // turn/step 的草稿，`startedAfterSeq < event.seq`）。之前用「流式文本以落定
+            // 文本结尾」+ 200ms 兜底 —— 文本对不上时会同时看到两份（真机「出现两个」）。
+            DshMuxLog.log("流式收尾：落定行 seq=$lastBotSeq > 流式起点 seq=$streamStartedAtSeq，立刻收掉流式气泡")
             clearStreaming()
         }
     }
