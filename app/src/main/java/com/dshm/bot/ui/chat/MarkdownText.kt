@@ -10,7 +10,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,19 +38,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import com.dshm.bot.core.design.Dshm
@@ -376,30 +377,70 @@ internal fun MarkdownTable(
     shardBase: String = "table",
 ) {
     if (header.isEmpty()) return
-    // 4dp 圆角、0.5dp 细线。先算固定列宽下的总宽，由 [BoxWithConstraints] 决定是
-    // 「铺满气泡、列等分」还是「保持固定列宽、外层横向滚动」。
+    // 列宽按**内容**量：这一列最宽的那条（不换行量一次），夹在 [最小, 上限] 之间。
+    // 整张表一直放在横向滚动容器里 —— 内容宽了就横滚（用户 2026-11-16 定：
+    // 「宁愿横滚，也不要那么长」）。以前是把格子挤成固定 120dp 让文字竖着换行，
+    // 一张 4 列的表格能长半屏。
     val borderColor = colors.textPrimary.copy(alpha = 0.2f)
     val headerFill = colors.surfaceMuted
     val shape = RoundedCornerShape(4.dp)
     val stroke = 0.5.dp
     val columns = header.size
     val dividerCount = (columns - 1).coerceAtLeast(0)
-    val fixedWidth = Dshm.spacing.tableCellWidth * columns.toFloat() +
-        stroke * dividerCount.toFloat()
-
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val available = if (maxWidth == Dp.Infinity) fixedWidth else maxWidth
-        val fits = fixedWidth <= available
-        val tableWidth = if (fits) available else fixedWidth
-        val cellWidth = if (fits) {
-            (available - stroke * dividerCount.toFloat()) / columns.toFloat()
+    val spacing = Dshm.spacing
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    // 表格是**密集数据**，比正文再紧一档（用户 2026-11-16 定）：字号 ×0.94、
+    // 行高 1.5。官方 demo 的表格也是 15/25（≈1.67），比正文 16/28 紧 —— 正文的
+    // 呼吸感放在表格里就是「一行 40dp」的白。
+    val cellFontSize = base.fontSize * TABLE_FONT_SCALE
+    val cellBase = base.copy(
+        fontSize = cellFontSize,
+        lineHeight = cellFontSize * TABLE_LINE_HEIGHT_RATIO,
+    )
+    val headerStyle = cellBase.copy(fontWeight = FontWeight.Bold, color = colors.textPrimary)
+    val bodyStyle = cellBase.copy(color = colors.textPrimary)
+    val padPx = with(density) { spacing.sm.toPx() * 2f }
+    val minCellPx = with(density) { spacing.tableCellMinWidth.toPx() }
+    val maxCellPx = with(density) { spacing.tableCellMaxWidth.toPx() }
+    val fallbackCellPx = with(density) { spacing.tableCellWidth.toPx() }
+    val columnWidthsPx = remember(header, rows, cellFontSize, padPx, minCellPx, maxCellPx) {
+        if (rows.size * columns > TABLE_MEASURE_CELL_LIMIT) {
+            // 超大表：不逐格量（流式时每帧量几百格会卡），退回固定列宽 + 横滚。
+            List(columns) { fallbackCellPx }
         } else {
-            Dshm.spacing.tableCellWidth
+            List(columns) { column ->
+                var widest = measureCellWidth(
+                    measurer,
+                    inlineMarkdown(header.getOrNull(column).orEmpty(), colors, headerStyle),
+                    headerStyle,
+                )
+                rows.forEach { row ->
+                    val cell = row.getOrNull(column).orEmpty()
+                    if (cell.isEmpty()) return@forEach
+                    val width = measureCellWidth(
+                        measurer,
+                        inlineMarkdown(cell, colors, bodyStyle),
+                        bodyStyle,
+                    )
+                    if (width > widest) widest = width
+                }
+                (widest + padPx).coerceIn(minCellPx, maxCellPx)
+            }
         }
-        val hScrollKey = "$shardBase:${header.joinToString("|")}"
+    }
+    val columnWidths = columnWidthsPx.map { with(density) { it.toDp() } }
+    val tableWidth = columnWidths.fold(0.dp) { acc, width -> acc + width } +
+        stroke * dividerCount.toFloat()
+    val hScrollKey = "$shardBase:${header.joinToString("|")}"
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(TableHScrollStates.stateFor(hScrollKey)),
+    ) {
         Box(
             modifier = Modifier
-                .horizontalScroll(TableHScrollStates.stateFor(hScrollKey))
+                .width(tableWidth)
                 .border(stroke, borderColor, shape)
                 .clip(shape),
         ) {
@@ -407,8 +448,9 @@ internal fun MarkdownTable(
             // 那个组合会让每行都做一次固有测量，表格长的时候滚动明显掉帧。
             val verticalLines: Modifier = Modifier.drawBehind {
                 val lineWidth = stroke.toPx()
-                for (column in 1 until columns) {
-                    val x = cellWidth.toPx() * column + stroke.toPx() * (column - 1)
+                var x = 0f
+                for (column in 0 until columns - 1) {
+                    x += columnWidthsPx[column] + lineWidth
                     drawLine(
                         color = borderColor,
                         start = androidx.compose.ui.geometry.Offset(x, 0f),
@@ -417,7 +459,7 @@ internal fun MarkdownTable(
                     )
                 }
             }
-            Column(Modifier.width(tableWidth)) {
+            Column {
                 // 表头行
                 Row(
                     modifier = verticalLines
@@ -428,9 +470,9 @@ internal fun MarkdownTable(
                             text = cell,
                             alignment = alignments.getOrElse(column) { MarkdownTables.Alignment.LEFT },
                             colors = colors,
-                            base = base,
+                            base = cellBase,
                             bold = true,
-                            modifier = Modifier.width(cellWidth),
+                            modifier = Modifier.width(columnWidths[column]),
                         )
                     }
                 }
@@ -443,9 +485,9 @@ internal fun MarkdownTable(
                                 text = row.getOrNull(column).orEmpty(),
                                 alignment = alignments.getOrElse(column) { MarkdownTables.Alignment.LEFT },
                                 colors = colors,
-                                base = base,
+                                base = cellBase,
                                 bold = false,
-                                modifier = Modifier.width(cellWidth),
+                                modifier = Modifier.width(columnWidths[column]),
                             )
                         }
                     }
@@ -455,6 +497,38 @@ internal fun MarkdownTable(
         }
     }
 }
+
+/**
+ * 量一格「不换行」时有多宽（px）。
+ *
+ * 只用来定列宽：列宽宁可超出气泡、让整张表横滚，也不要挤窄让文字竖排。
+ */
+private fun measureCellWidth(
+    measurer: TextMeasurer,
+    text: androidx.compose.ui.text.AnnotatedString,
+    style: TextStyle,
+): Int = if (text.isEmpty()) {
+    0
+} else {
+    measurer.measure(
+        text = text,
+        style = style,
+        maxLines = 1,
+        softWrap = false,
+    ).size.width
+}
+
+/**
+ * 逐格量表的上限（格数）。超过就退回固定列宽：流式时表格每个 tick 都变，
+ * 几百格重新量会把主线程拖住。
+ */
+private const val TABLE_MEASURE_CELL_LIMIT = 240
+
+/** 表格文字相对正文的字号倍率（官方式 15/16≈0.94；密集数据不需要正文那么大）。 */
+private const val TABLE_FONT_SCALE = 0.94f
+
+/** 表格行高倍率（官方 25/15≈1.67；我们用 1.5，比正文 1.65 更紧）。 */
+private const val TABLE_LINE_HEIGHT_RATIO = 1.5f
 
 /** 表格的一格：固定列宽，按对齐方式排内容。 */
 @Composable
@@ -468,7 +542,7 @@ internal fun TableCell(
 ) {
     Box(
         // 固定列宽：整体交给外层横向滚动，格子本身不再换行挤窄。
-        modifier = modifier.padding(horizontal = Dshm.spacing.sm, vertical = 6.dp),
+        modifier = modifier.padding(horizontal = Dshm.spacing.sm, vertical = 5.dp),
         contentAlignment = when (alignment) {
             MarkdownTables.Alignment.CENTER -> Alignment.Center
             MarkdownTables.Alignment.RIGHT -> Alignment.CenterEnd
@@ -816,9 +890,14 @@ private fun bareUrlEnd(text: String, start: Int): Int {
     return end
 }
 
-/** markdown 正文行高倍率：对齐 DeepSeek 官方 demo 的 `--dsw-font-markdown-base`
- * （16px/28px = 1.75）。 */
-internal const val MARKDOWN_LINE_HEIGHT_RATIO = 1.75f
+/**
+ * markdown 正文行高倍率。
+ *
+ * 起点是 DeepSeek 官方 demo 的 `--dsw-font-markdown-base`（16px/28px = 1.75），
+ * 但那是**全宽页面**的呼吸感；我们的回复装在气泡里，1.75 读起来偏散。
+ * 用户 2026-11-16 定为 **1.65**（全篇高度约少 6%，仍不挤）。
+ */
+internal const val MARKDOWN_LINE_HEIGHT_RATIO = 1.65f
 
 /**
  * 块与块之间的上间距 —— **气泡内以紧凑为主**（用户 2026-11-16 定，两轮收紧）。

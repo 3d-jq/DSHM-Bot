@@ -46,8 +46,15 @@ data class DshmSpacing(
   val composerSendIcon: Dp = 22.dp,
     /** Markdown 表格：一格的最小宽度（内容多了整张表横向滚）。 */
     val tableCellMinWidth: Dp = 88.dp,
-    /** Markdown 表格：一列的固定宽度。 */
+    /** Markdown 表格：一列的固定宽度（超大表退回这个值，不逐格量）。 */
     val tableCellWidth: Dp = 120.dp,
+    /**
+     * Markdown 表格：一列的**宽度上限**。
+     *
+     * 列宽按内容（不换行）量出来，超过这个值才允许换行：宁可整张表横向滚，
+     * 也不要把格子挤窄让文字竖着排（用户 2026-11-16 定）。
+     */
+    val tableCellMaxWidth: Dp = 260.dp,
     /** 顶栏「＋」下拉菜单面板宽度（比默认宽一些）。 */
     val menuWidth: Dp = 220.dp,
     /** 设置页每行的图标尺寸（与 15sp 文字垂直居中对齐）。 */
