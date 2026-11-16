@@ -1530,6 +1530,9 @@ private fun ChatError(message: String, onRetry: () -> Unit) {
 private fun BubbleQuote(
     quote: String,
     textColor: Color,
+    /** 竖线颜色必须跟着**气泡底色**取对比 —— 用户气泡底色就是 accent
+     *  （`bubbleUser == accent == #4D6BFE`），用 accent 画线等于没画。 */
+    barColor: Color,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
@@ -1538,7 +1541,7 @@ private fun BubbleQuote(
                 .width(3.dp)
                 .height(Dshm.spacing.lg)
                 .clip(RoundedCornerShape(Dshm.radius.xs))
-                .background(Dshm.colors.accent),
+                .background(barColor),
         )
         Text(
             text = quoteLine(quote),
@@ -1576,7 +1579,13 @@ private fun QuoteStrip(
                 .width(3.dp)
                 .height(Dshm.spacing.lg)
                 .clip(RoundedCornerShape(Dshm.radius.xs))
-                .background(Dshm.colors.accent),
+                .background(
+                    quoteBarColorOn(
+                        background = Dshm.colors.surfaceMuted,
+                        textColor = Dshm.colors.textPrimary,
+                        accent = Dshm.colors.accent,
+                    ),
+                ),
         )
         Text(
             text = preview,
@@ -1661,6 +1670,12 @@ private fun UserBubble(
                                 BubbleQuote(
                                     quote = passage,
                                     textColor = Dshm.colors.onBubbleUser.copy(alpha = 0.72f),
+                                    // 用户气泡底色 == accent → 换成气泡上的文字色（白）降透明。
+                                    barColor = quoteBarColorOn(
+                                        background = Dshm.colors.bubbleUser,
+                                        textColor = Dshm.colors.onBubbleUser,
+                                        accent = Dshm.colors.accent,
+                                    ),
                                 )
                                 if (quoted.body.isNotEmpty()) Spacer(Modifier.height(Dshm.spacing.xs))
                             }
@@ -1864,6 +1879,12 @@ private fun BotBubble(
                             BubbleQuote(
                                 quote = passage,
                                 textColor = Dshm.colors.textTertiary,
+                                // 助手气泡是浅灰（#F2F3F5）/ 深灰（#1C1F25）底，accent 清楚。
+                                barColor = quoteBarColorOn(
+                                    background = Dshm.colors.bubbleAssistant,
+                                    textColor = Dshm.colors.textPrimary,
+                                    accent = Dshm.colors.accent,
+                                ),
                             )
                             if (quoted.body.isNotEmpty()) Spacer(Modifier.height(Dshm.spacing.xs))
                         }
