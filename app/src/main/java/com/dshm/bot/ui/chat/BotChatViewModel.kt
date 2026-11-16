@@ -2528,12 +2528,19 @@ class BotChatViewModel internal constructor(
      */
     private fun settleStreamingWhenLanded(rows: List<TimelineRow>) {
         if (streamBuffer.isEmpty()) return
-        val lastBotSeq = rows.lastOrNull { it.payload is TimelineRowPayload.Bot }?.seq ?: return
+        val lastBot = rows.lastOrNull { it.payload is TimelineRowPayload.Bot } ?: return
+        val lastBotSeq = lastBot.seq ?: return
         if (lastBotSeq > streamStartedAtSeq) {
             // 判据用 **seq**（对齐 dsh-Go `transcript.dart`：durable 消息一到就删同
             // turn/step 的草稿，`startedAfterSeq < event.seq`）。之前用「流式文本以落定
             // 文本结尾」+ 200ms 兜底 —— 文本对不上时会同时看到两份（真机「出现两个」）。
-            DshMuxLog.log("流式收尾：落定行 seq=$lastBotSeq > 流式起点 seq=$streamStartedAtSeq，立刻收掉流式气泡")
+            // 带上两侧长度：流式最后一次 publish 被节流拖后时这里是「前缀」关系，
+            // 落定行 markdown 缓存会 miss 最后一片（这就是落定闪现的证据链）。
+            val landedLen = (lastBot.payload as? TimelineRowPayload.Bot)?.text?.length ?: -1
+            DshMuxLog.log(
+                "流式收尾：落定行 seq=$lastBotSeq > 流式起点 seq=$streamStartedAtSeq，" +
+                    "立刻收掉流式气泡（流式缓冲 ${streamBuffer.length} 字 / 落定 $landedLen 字）",
+            )
             clearStreaming()
         }
     }
