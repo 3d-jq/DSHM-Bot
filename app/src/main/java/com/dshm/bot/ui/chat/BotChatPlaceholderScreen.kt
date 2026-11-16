@@ -81,7 +81,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -757,9 +756,6 @@ private const val EARLIER_TRIGGER_PX = 400
  */
 private const val EARLIER_TRIGGER_ITEMS = 3
 
-/** 发送后这段时间内强制跟随最新消息，跨过用户气泡→思考→流式气泡的切换。 */
-private const val STREAM_FOLLOW_GRACE_MS = 2_000L
-
 /**
  * 往前翻页时的顶部转圈。
  *
@@ -933,28 +929,22 @@ private fun ChatMessages(
             }
     }
 
-    // 钉到底（照 DeepSearch 的 T170「三段式钉住」）：
-    // 第一次 scrollToItem(0) 钉的是自增高之前的位置，等一帧再钉一次
-    // 就能抓住「同一格子里内容又长高了」之后的位置。
+    // 首次进对话钉到底（对齐 DeepSearch T120 的 scroll-follow rewrite）。
     //
-    // 什么时候钉：
-    // - 第一次有内容（进对话要看到最新消息）—— 无条件钉；
-    // - 来了新消息 —— 用户还在底部才钉（否则会抢走他的滚动）。
+    // DeepSearch 花 v6..v17 十二个版本证明：**任何条目数变化都 scrollToItem(0)**
+    // （尤其机器人消息落定时）只会让落定闪现更糟；它的最终结论是：
+    //   - reverseLayout 原生负责"在底部时贴底"；
+    //   - 只在「用户发送」这个明确意图时主动 scroll（本文件上方 SEND-PATH 已做）；
+    //   - 机器人消息落定不主动 scroll —— mdblock key 集合在 stream-end 前后不变，
+    //     LazyColumn 的 key 复用会自然保持用户的视觉位置。
+    //
+    // 我们之前这里对 entries.size 的每次变化都钉（含落定），正是长回复完成后用户气泡
+    // 闪现的根因；改成只钉首屏，之后交给 SEND-PATH + 流式跟随 + 原生锚定。
     var pinnedOnce by remember { mutableStateOf(false) }
     LaunchedEffect(entries.size) {
-        if (entries.isEmpty()) return@LaunchedEffect
-        val isFirst = !pinnedOnce
+        if (entries.isEmpty() || pinnedOnce) return@LaunchedEffect
         pinnedOnce = true
-        val sendGrace = lastSendAt > 0L &&
-            System.currentTimeMillis() - lastSendAt <= STREAM_FOLLOW_GRACE_MS
-        if (!isFirst && userDragged) return@LaunchedEffect
-        if (!isFirst && !sendGrace && !isNearBottom) return@LaunchedEffect
         listState.scrollToItem(0)
-        // 等一帧再钉一次 —— 抓住同一格子的异步自增高。
-        withFrameNanos { }
-        if (isNearBottom || isFirst || sendGrace) {
-            listState.scrollToItem(0)
-        }
     }
 
     // 流式态 / 思考行和正式条目走同一套间距规则（`chatItemSpacing`）：
