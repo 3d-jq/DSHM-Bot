@@ -6,9 +6,6 @@
 //   stream    the reply a Bot is writing: a start, its text as it comes, an end
 //   notice    something a client that is not looking should hear about (mobile.js)
 //   room      a group chat changed: ask for `room-chat` again
-//   timeline  new rows of the unified timeline projection (projection.js), for a
-//             client that renders rows instead of raw events; `from`/`bufferFrom`
-//             tell it whether it can bridge its own cursor or must re-read
 // `hello` carries the team's revision and, for the mobile API, its version and the
 // latest notice, so a client that reconnects knows what it missed.
 import { ROUTE } from './constants.js'
@@ -34,39 +31,30 @@ export function install(rt) {
     }
     try { controller.enqueue(chunk) } catch { clients.delete(controller) }
   }
-  // Readers of the Remote stream `dsBot/feed` (remote.js), which a relay can carry.
-  /** @type {Set<(event: string, data: unknown) => void>} */
-  const listeners = new Set()
-  const watched = () => clients.size > 0 || listeners.size > 0
   const publish = (event, data) => {
+    for (const tap of taps) {
+      try { tap(event, data) } catch { /* taps are isolated from the feed */ }
+    }
+    if (clients.size === 0) return
     const chunk = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     for (const controller of clients) send(controller, chunk)
-    for (const listener of listeners) listener(event, data)
-  }
-  const hello = () => ({ revision: state.revision, ...(rt.noticeCursor ? { api: rt.apiVersion, ...rt.noticeCursor() } : {}) })
-  // The same events as the HTTP feed, starting with its `hello`; returns the unsubscribe.
-  rt.subscribeFeed = (listener) => {
-    listeners.add(listener)
-    listener('hello', hello())
-    return () => {
-      listeners.delete(listener)
-      if (!watched()) writing.clear()
-    }
   }
 
-  rt.stateSaved = () => {
-    if (watched()) publish('revision', { revision: state.revision })
-  }
+  // Non-SSE listeners (the phone link) get every event through a tap; a tap is
+  // isolated so a slow or throwing listener never hurts SSE clients.
+  const taps = new Set()
+  rt.feedTap = (listener) => { taps.add(listener); return () => taps.delete(listener) }
+  const listening = () => clients.size > 0 || taps.size > 0
+  const offSaved = rt.onSaved(() => {
+    if (listening()) publish('revision', { revision: state.revision })
+  })
   rt.publishFeed = (event, data) => {
-    if (watched()) publish(event, data)
+    if (listening()) publish(event, data)
   }
-  /** Whether anyone is watching the feed: the timeline projection computes and
-   * publishes a delta only then (it writes the row log either way). */
-  rt.feedWatched = () => watched()
 
   let liveTimer
   const live = () => {
-    if (!watched() || liveTimer !== undefined) return
+    if (!listening() || liveTimer !== undefined) return
     liveTimer = setTimeout(() => {
       liveTimer = undefined
       publish('live', {})
@@ -76,15 +64,8 @@ export function install(rt) {
     if (rt.selfOf(agent.id) !== undefined) live()
   })
 
-  // The unified timeline projection (projection.js) owns the row log and publishes
-  // its own `timeline` frames. It has to: the row log must be written *before* the
-  // delta reads it back, and projection's `session/event` listener registers after
-  // this one (feed installs before channel in index.js), so a delta computed here
-  // always lagged one event behind — which is what held a turn's deliverable card
-  // back until the *next* message arrived (and made it look like it appeared "mid
-  // way"). Here only a Bot's own chat's `message` items and the `live` signal stay.
   ctx.on('session/event', (session, event) => {
-    if (!watched()) return
+    if (!listening()) return
     const botId = rt.chatOwners.get(session.id)
     if (botId === undefined) return
     for (const item of rt.displayItems(session.id, [event])) publish('message', { botId, sessionId: session.id, item })
@@ -97,7 +78,7 @@ export function install(rt) {
   ctx.on('agent/assistant-stream', ({ agent, frame }) => {
     if (frame.type === 'start') {
       const botId = rt.chatOwners.get(agent.id)
-      if (!watched() || botId === undefined || (state.exchangeTurns[agent.id] ?? []).includes(frame.turn)) return
+      if (!listening() || botId === undefined || (state.exchangeTurns[agent.id] ?? []).includes(frame.turn)) return
       writing.set(frame.attemptId, { botId, sessionId: agent.id })
       publish('stream', { botId, sessionId: agent.id, attemptId: frame.attemptId, phase: 'start' })
       return
@@ -111,9 +92,14 @@ export function install(rt) {
     }
   })
 
+  // A Request built on a caller's signal only follows it while the Request is reachable;
+  // once collected, its abort never fires and the feed stays open. Each open feed keeps
+  // its Request until it leaves.
+  const requests = new Map()
   const leave = (controller) => {
     clients.delete(controller)
-    if (!watched()) writing.clear()
+    requests.delete(controller)
+    if (!listening()) writing.clear()
     try { controller.close() } catch { /* already closed or errored */ }
   }
 
@@ -127,10 +113,12 @@ export function install(rt) {
         start(own) {
           controller = own
           clients.add(own)
-          send(own, encoder.encode(`event: hello\ndata: ${JSON.stringify(hello())}\n\n`))
+          const hello = { revision: state.revision, ...(rt.noticeCursor ? { api: rt.apiVersion, ...rt.noticeCursor() } : {}) }
+          send(own, encoder.encode(`event: hello\ndata: ${JSON.stringify(hello)}\n\n`))
         },
         cancel() { leave(controller) },
       })
+      requests.set(controller, request)
       request.signal.addEventListener('abort', () => leave(controller), { once: true })
       return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' } })
     },
@@ -144,6 +132,7 @@ export function install(rt) {
     return () => {
       clearInterval(keepalive)
       clearTimeout(liveTimer)
+      offSaved()
       for (const controller of clients) leave(controller)
     }
   }, 'ds-bot: live feed')

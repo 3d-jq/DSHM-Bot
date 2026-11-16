@@ -1,6 +1,6 @@
 {
-  "name": "ds-bot",
-  "version": "0.2.5",
+  "name": "ds-bot-dshm",
+  "version": "0.3.6-dshm.1",
   "description": "DS Bot: a team of long-lived Bots for DeepSeek Harness, with Main Bots, Bot-to-Bot messages and group chats",
   "keywords": [
     "dsh-plugin",
@@ -11,13 +11,13 @@
     "multi-agent",
     "agents"
   ],
-  "homepage": "https://github.com/Fei2411/DeepSeek-Bot#readme",
+  "homepage": "https://github.com/Fei2411/DS-Bot#readme",
   "bugs": {
-    "url": "https://github.com/Fei2411/DeepSeek-Bot/issues"
+    "url": "https://github.com/Fei2411/DS-Bot/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Fei2411/DeepSeek-Bot.git",
+    "url": "git+https://github.com/Fei2411/DS-Bot.git",
     "directory": "ds-bot"
   },
   "license": "Apache-2.0",
@@ -25,7 +25,6 @@
   "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./client": "./client.js",
     "./web-search": "./web-search.js",
     "./package.json": "./package.json"
   },
@@ -33,15 +32,16 @@
     "index.js",
     "src/host/",
     "src/shared/",
-    "client.js",
     "web-search.js",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "link.js",
+    "office.js",
+    "src/office/"
   ],
   "scripts": {
-    "build": "node scripts/build-client.mjs",
-    "test": "node --import ./test/harness-resolve.mjs --test \"test/*.test.js\"",
+    "test": "node --import ./test/stub-resolve.mjs --test --test-timeout=120000 --test-force-exit \"test/*.test.js\"",
     "lint": "node scripts/lint.mjs",
     "harness": "npm install --prefix dev/harness --legacy-peer-deps=false --no-package-lock --no-fund --no-audit",
     "check": "sh dev/check.sh"
@@ -49,19 +49,29 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-scope": "*",
     "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/dsh-typert-protocol": "*",
     "@deepseek-ai/dsh-web": "*"
   },
   "dsh": {
-    "client": {
-      "platform": "web"
-    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "@xmldom/xmldom": "0.9.12",
+    "esbuild": "0.28.2",
+    "qrcode-generator": "2.0.4"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "deep-view": "0.1.2",
+    "imapflow": "2.9.1",
+    "jpeg-js": "0.4.4",
+    "mailparser": "3.12.4",
+    "nodemailer": "10.2.1",
+    "playwright-core": "1.64.1",
+    "pngjs": "7.0.0",
+    "ws": "8.18.3"
   }
 }

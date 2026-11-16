@@ -1,19 +1,21 @@
-# Mounts the Bot team host plugin; the browser half is discovered through the
-# package's dsh.client manifest and ./client export.
+# DSHM Bot fork (ds-bot-dshm), host-only. No browser half: DSH's own web UI no
+# longer loads this plugin's client, so the web boot mismatch is gone. Absolute
+# paths keep the loader independent of package-name resolution.
 - insert:
     - id: bot
-      name: ds-bot
+      name: /opt/dsh/node_modules/ds-bot/index.js
     # Web search with the current conversation route's own key, else a keyless
     # results-page fallback (see README "Web search").
     - id: web-search-auto
-      name: ds-bot/web-search
+      name: /opt/dsh/node_modules/ds-bot/web-search.js
 
 # A config override replaces the whole entry config, so fetchProvider is
-# restated. A profile patch that names another searchProvider (exa, perplexity,
-# deepseek-official) wins over this one. Turning off web-search-auto alone
-# leaves this row on "auto", and every web_search then fails; the profile must
-# name another searchProvider too (see README "Web search").
+# restated. A profile patch that names another searchProvider (deepseek-search-api,
+# deepseek-official, exa, perplexity) wins over this one.
 - id: web
   config:
     searchProvider: auto
     fetchProvider: http
+
+# No DS Bot browser settings shell in this host-only fork, so DSH's own settings
+# page stays enabled (upstream ds-bot used to disable it to take over the seat).

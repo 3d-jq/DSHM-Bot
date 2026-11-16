@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { install as installFeed } from '../src/host/feed.js'
 import { install as installParts } from '../src/host/parts.js'
-import { install as installProjection } from '../src/host/projection.js'
+import { install as installProjection } from '../src/host/dshm-timeline.js'
 
 const pluginRoot = fileURLToPath(new URL('../', import.meta.url))
 
@@ -76,10 +76,19 @@ function fakeRt() {
     // The plugin's own room queue (turns.js): posts waiting for the next relay.
     roomInbox: new Map(),
     workDirOf: () => '/root/w',
+    // 0.3.6 feed.js requirements.
+    onSaved: () => () => {},
+    selfOf: () => undefined,
+    // 0.3.6 has no feedWatched; the tests walk `timelineDelta` by hand, so the
+    // listener must not consume the cursor (old fake feed reported no watchers).
+    feedWatched: () => false,
   }
   installParts(rt)
   installProjection(rt)
   installFeed(rt)
+  // 0.3.6 feed.js exposes taps as `rt.feedTap`; the tests subscribe through the
+  // old name.
+  rt.subscribeFeed = rt.feedTap
   return { rt, sessionListeners, logLines }
 }
 
@@ -249,6 +258,7 @@ test('each round keeps its own deliverable card (cards persist as rounds move on
 
 test('a room feed delta carries the live rows plus the round state', async () => {
   const { rt, sessionListeners } = fakeRt()
+  rt.feedWatched = () => true
   const seen = []
   rt.subscribeFeed?.((event, data) => { if (event === 'timeline') seen.push(data) })
   for (const handler of sessionListeners) handler({ id: 'room-1' }, { type: 'user/message', seq: 1, time: 1000, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '大家看一下' }] } })
@@ -332,9 +342,17 @@ function fakeFeedFirstRt() {
     resolveAgent: async () => ({ session: { seq: 0, header: { cwd: '/root/w' } }, inbox: { nextTurn: [], nextStep: [] } }),
     roomProgress: new Map(),
     workDirOf: () => '/root/w',
+    // 0.3.6 feed.js requirements.
+    onSaved: () => () => {},
+    selfOf: () => undefined,
+    // Production order asserts published frames: the feed looks watched.
+    feedWatched: () => true,
   }
   installParts(rt)
   installFeed(rt)
+  // 0.3.6 feed.js exposes taps as `rt.feedTap`; the tests subscribe through the
+  // old name.
+  rt.subscribeFeed = rt.feedTap
   installProjection(rt)
   return { rt, sessionListeners, logLines }
 }
@@ -485,7 +503,7 @@ test('4b: the forwarded payload types cover every event type the folds read', ()
   // TIMELINE_EVENT_TYPES 里 —— 否则客户端只拿到占位帧，折叠不出对应的行。以后有人在
   // 折叠里加了新类型却忘了改转发清单，这条会立刻红（而不是等真机出问题）。
   const parts = readFileSync(`${pluginRoot}src/host/parts.js`, 'utf8')
-  const projection = readFileSync(`${pluginRoot}src/host/projection.js`, 'utf8')
+  const projection = readFileSync(`${pluginRoot}src/host/dshm-timeline.js`, 'utf8')
   const declared = /export const TIMELINE_EVENT_TYPES = new Set\(\[([\s\S]*?)\]\)/.exec(projection)?.[1] ?? ''
   const forwarded = new Set([...declared.matchAll(/'([^']+)'/g)].map(match => match[1]))
   assert.ok(forwarded.size >= 10, `转发清单解析失败：${declared}`)
@@ -517,6 +535,8 @@ test('4c 影子双轨：同一批事件上，客户端折叠与宿主逐行一�
   // 影子双轨的**契约**：宿主与客户端折叠对同一批事件必须逐行相等。
   // 这里直接验宿主侧：同一批事件，宿主自己的两行快照与增量给出的行必须一致。
   const { rt, sessionListeners } = fakeFeedFirstRt()
+  // 这个用例手动走 `timelineDelta`，观察者视角的增量发布要让开游标。
+  rt.feedWatched = () => false
   const events = [
     { type: 'turn/start', seq: 1, time: 1000, data: { turn: 1 } },
     { type: 'user/message', seq: 2, time: 1100, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '你好' }] } },
@@ -540,20 +560,26 @@ test('channel wiring: timeline is a READ endpoint answered by case timeline', ()
   const reads = /const READS = new Set\(\[([^\]]*)\]\)/.exec(source)?.[1] ?? ''
   assert.ok(reads.includes("'timeline'"), 'READS 集合没有 timeline（只读主机会拒绝它）')
   assert.ok(/case 'timeline':/.test(source), 'handle 没有分流 timeline 端点')
+  // `hello` 由 mobile.js 回答，我们的模块在运行时补声明 timeline/events（不改上游源码）。
   const mobile = readFileSync(`${pluginRoot}src/host/mobile.js`, 'utf8')
-  assert.ok(/'timeline'/.test(mobile), 'mobile CAPABILITIES 没有声明 timeline')
+  const capabilities = readFileSync(`${pluginRoot}src/host/dshm-timeline.js`, 'utf8')
+  assert.ok(/\[.*'timeline', 'events'/.test(capabilities), 'hello 能力没有补声明 timeline/events')
   // 兼容自证：旧群聊端点原样保留（官方网页端与旧管线都还在用它们）。
   assert.ok(/async function roomChat\(/.test(mobile), 'room-chat 端点丢了')
   assert.ok(/case 'room-chat': return roomChat\(body\)/.test(mobile), 'room-chat 分流丢了')
   // 时间线帧的发布者是 projection（日志拥有者），不是 feed：feed 的 session/event
   // 监听器先于记录注册，增量会慢一拍（曾把产物卡拖到下一条消息才出现）。
-  const projection = readFileSync(`${pluginRoot}src/host/projection.js`, 'utf8')
+  const projection = readFileSync(`${pluginRoot}src/host/dshm-timeline.js`, 'utf8')
   assert.ok(/publishFeed\?\.\('timeline'/.test(projection), 'projection 没有发布 timeline 事件')
   assert.ok(/roomId: sessionId/.test(projection), 'projection 的房间分支没有发群聊 timeline 增量')
   const feed = readFileSync(`${pluginRoot}src/host/feed.js`, 'utf8')
   assert.ok(!/publish\('timeline'/.test(feed), 'feed 不该再发布 timeline（已归 projection 日志拥有者）')
   const channel = readFileSync(`${pluginRoot}src/host/channel.js`, 'utf8')
   assert.ok(/case 'room-progress':/.test(channel) && /case 'room-chat':/.test(channel), 'channel 的旧群聊端点丢了')
+  // 回声认领：0.3.6 的 send 原本不收 requestId，导致客户端认领不了自己刚发的气泡
+  // （每条消息画两遍，真机 2026-11-16）。适配器必须把它透传给 sendUser。
+  assert.ok(/body\.requestId/.test(channel), 'send 没有透传客户端 requestId（回声会重复）')
+  assert.ok(/mode === 'steer' \? 'steer' : 'queue'/.test(channel), 'sendUser 丢了 steer 模式（插话）')
 })
 
 // ---------------------------------------------------------------------------
