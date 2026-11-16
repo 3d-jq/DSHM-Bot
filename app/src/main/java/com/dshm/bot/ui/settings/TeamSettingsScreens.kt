@@ -51,8 +51,6 @@ import androidx.core.net.toUri
 import com.dshm.bot.ui.settings.SettingsPrimaryButton
 import com.dshm.bot.ui.settings.SettingsSecondaryButton
 
-private const val GITHUB_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
-
 /**
  * 「密钥」页（对齐 DS Bot `SecretsPage`）：列出名字/用途/范围，能改用途与范围、能换值、能删。
  *
@@ -203,111 +201,6 @@ fun SecretsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
 }
 
 /**
- * 「连接器」页（对齐 DS Bot `ConnectorsPage`）：GitHub 的连接状态 / 账号 / 重试 / 断开 / 连接。
- */
-@Composable
-fun ConnectorsScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
-    val viewModel: TeamSettingsViewModel = viewModel(
-        key = "team-connectors:${endpoint?.baseUrl.orEmpty()}:${endpoint?.token.orEmpty()}",
-        factory = TeamSettingsViewModel.factory(endpoint),
-    )
-    val state by viewModel.ui.collectAsStateWithLifecycle()
-    var connecting by remember { mutableStateOf<TeamConnector?>(null) }
-    var connectError by remember { mutableStateOf<String?>(null) }
-
-    SettingsPage(title = stringResource(R.string.team_connectors_title), onBack = onBack) {
-        state.error?.let { message ->
-            item {
-                Text(
-                    text = message,
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.danger,
-                    modifier = Modifier.padding(horizontal = Dshm.spacing.lg),
-                )
-            }
-        }
-        item {
-            SettingsSection(title = stringResource(R.string.team_connectors_available)) {
-                if (state.connectors.isEmpty()) {
-                    SettingsRow(
-                        title = stringResource(R.string.team_connectors_empty),
-                        enabled = false,
-                    )
-                } else {
-                    state.connectors.forEachIndexed { index, connector ->
-                        if (index > 0) SettingsRowDivider()
-                        SettingsRow(
-                            leading = { ConnectorBrandMark(connector) },
-                            title = connector.name,
-                            subtitle = when {
-                                connector.error != null -> stringResource(
-                                    R.string.team_connectors_error,
-                                    connector.error.orEmpty(),
-                                )
-                                connector.connecting -> stringResource(R.string.team_connectors_connecting)
-                                connector.connected -> connector.account?.let {
-                                    stringResource(R.string.team_connectors_connected_as, it)
-                                } ?: stringResource(R.string.team_connectors_connected)
-
-                                else -> stringResource(R.string.team_connectors_about)
-                            },
-                            value = when {
-                                connector.connecting -> stringResource(R.string.team_connectors_connecting)
-                                connector.connected -> stringResource(R.string.team_connectors_disconnect)
-                                connector.error != null -> stringResource(R.string.team_connectors_retry)
-                                else -> stringResource(R.string.team_connectors_connect)
-                            },
-                            valueColor = if (connector.error != null) Dshm.colors.danger else null,
-                            enabled = !connector.connecting && (!connector.connected || !state.busy),
-                            onClick = {
-                                when {
-                                    connector.connected -> viewModel.disconnect(connector)
-                                    connector.error != null -> viewModel.retry(connector)
-                                    else -> {
-                                        connectError = null
-                                        connecting = connector
-                                    }
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-        }
-        item {
-            Text(
-                text = stringResource(R.string.team_connectors_note),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textTertiary,
-                modifier = Modifier.padding(horizontal = Dshm.spacing.lg, vertical = Dshm.spacing.md),
-            )
-        }
-    }
-
-    connecting?.let { connector ->
-        ConnectorTokenDialog(
-            connector = connector,
-            busy = state.busy,
-            error = connectError,
-            onDismiss = {
-                connecting = null
-                connectError = null
-            },
-            onConnect = { token ->
-                viewModel.connect(connector, token) { error ->
-                    if (error == null) {
-                        connecting = null
-                        connectError = null
-                    } else {
-                        connectError = error
-                    }
-                }
-            },
-        )
-    }
-}
-
-/**
  * 「能力」页（对齐 DS Bot `CapabilitiesPage`）：能力库 + 每个 Bot 的挂载开关 + 批准未批准的 MCP。
  */
 @Composable
@@ -390,8 +283,7 @@ fun CapabilitiesScreen(endpoint: RuntimeEndpoint?, onBack: () -> Unit) {
 }
 
 /**
- * 列表行左侧的首字母方块 —— 能力 / 密钥用同一套写法（连接器有品牌图时用
- * [ConnectorBrandMark]）。名字为空时退回 `?`。
+ * 列表行左侧的首字母方块 —— 能力 / 密钥用同一套写法。名字为空时退回 `?`。
  */
 @Composable
 private fun InitialMark(
@@ -942,119 +834,6 @@ private fun SecretSheetActions(
     }
 }
 
-@Composable
-private fun ConnectorTokenDialog(
-    connector: TeamConnector,
-    busy: Boolean,
-    error: String?,
-    onDismiss: () -> Unit,
-    onConnect: (String) -> Unit,
-) {
-    var token by remember { mutableStateOf("") }
-    val context = LocalContext.current
-    SettingsSheet(
-        title = stringResource(R.string.team_connectors_connect_title, connector.name),
-        onDismiss = onDismiss,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(Dshm.spacing.sm)) {
-            ConnectorBrandMark(connector, size = Dshm.spacing.settingsAvatar)
-            Text(
-                text = stringResource(R.string.team_connectors_about),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textSecondary,
-            )
-            if (connector.id == "github") {
-                Text(
-                    text = stringResource(R.string.team_connectors_create_token),
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.accent,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(Dshm.radius.xs))
-                        .clickable {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, GITHUB_TOKEN_URL.toUri()),
-                                )
-                            }
-                        }
-                        .padding(vertical = Dshm.spacing.xs),
-                )
-            }
-            SettingsInput(
-                value = token,
-                onValueChange = { token = it },
-                placeholder = stringResource(R.string.team_connectors_token),
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                text = stringResource(R.string.team_connectors_token_hint),
-                style = Dshm.typography.rowPreview,
-                color = Dshm.colors.textSecondary,
-            )
-            if (error != null) {
-                Text(
-                    text = error,
-                    style = Dshm.typography.rowPreview,
-                    color = Dshm.colors.danger,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SettingsSecondaryButton(
-                    text = stringResource(android.R.string.cancel),
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    fillWidth = false,
-                    onBackground = Dshm.colors.surface,
-                )
-                SettingsPrimaryButton(
-                    text = stringResource(R.string.team_connectors_connect),
-                    enabled = !busy && token.isNotBlank(),
-                    onClick = { onConnect(token) },
-                    modifier = Modifier.weight(1f),
-                    fillWidth = false,
-                )
-            }
-        }
-    }
-}
-
-/** DeepSearch 同款 GitHub 品牌件；其他连接器暂用中性占位。 */
-@Composable
-private fun ConnectorBrandMark(
-    connector: TeamConnector,
-    size: androidx.compose.ui.unit.Dp = Dshm.spacing.avatar,
-) {
-    val github = connector.id.equals("github", ignoreCase = true)
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(RoundedCornerShape(Dshm.radius.sm))
-            .background(if (github) Dshm.colors.githubBrand else Dshm.colors.surfaceMuted),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (github) {
-            Icon(
-                painter = painterResource(R.drawable.ic_connector_github),
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(size * 0.58f),
-            )
-        } else {
-            Text(
-                text = connector.name.take(1).uppercase(),
-                style = Dshm.typography.rowTitle,
-                color = Dshm.colors.textSecondary,
-            )
-        }
-    }
-}
-
-/** 副标题：用途 · 谁能用。 */
 @Composable
 private fun secretSubtitle(secret: TeamSecret, members: List<TeamMember>): String? {
     val scope = when {

@@ -5,9 +5,13 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dshm.bot.data.remote.ConnectorsView
+import com.dshm.bot.data.remote.ConnectorRow
 import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.RemoteDshApi
+import com.dshm.bot.data.remote.parseConnectorsView
+import com.dshm.bot.data.remote.parseMailView
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,17 +31,6 @@ data class TeamSecret(
     val lastUsedAt: Long?,
 )
 
-/** DS Bot 的连接器（目前只有 GitHub）。 */
-data class TeamConnector(
-    val id: String,
-    val name: String,
-    val state: String,
-    val account: String?,
-    val error: String?,
-) {
-    val connected: Boolean get() = state == "ready" || state == "connected" || (state == "idle" && account != null)
-    val connecting: Boolean get() = state == "connecting"
-}
 
 data class TeamMember(val id: String, val name: String)
 
@@ -79,7 +72,8 @@ data class TeamSettingsUi(
     val busy: Boolean = false,
     val error: String? = null,
     val secrets: List<TeamSecret> = emptyList(),
-    val connectors: List<TeamConnector> = emptyList(),
+    /** 0.3.6 的连接器目录 + 邮箱；`connectors` 里不含邮箱（邮箱在 `mail`）。 */
+    val connectorsView: ConnectorsView = ConnectorsView.EMPTY,
     val members: List<TeamMember> = emptyList(),
     val capabilities: List<TeamCapability> = emptyList(),
     /** Bot id → 已挂上的能力名。 */
@@ -141,33 +135,9 @@ class TeamSettingsViewModel(private val endpoint: RuntimeEndpoint?) : ViewModel(
                 }
             }
         }.orEmpty()
-        val connectors = state.optJSONArray("connectors")?.let { array ->
-            buildList {
-                for (index in 0 until array.length()) {
-                    val item = array.optJSONObject(index) ?: continue
-                    val id = item.optString("id")
-                    if (id.isEmpty()) continue
-                    val stateName = item.optString("state").ifEmpty { "off" }
-                    val account = item.opt("account")
-                        ?.takeIf { it != JSONObject.NULL }
-                        ?.toString()
-                        ?.takeIf { it.isNotBlank() && it != "null" }
-                    val errorMessage = item.opt("error")
-                        ?.takeIf { it != JSONObject.NULL }
-                        ?.toString()
-                        ?.takeIf { it.isNotBlank() && it != "null" }
-                    add(
-                        TeamConnector(
-                            id = id,
-                            name = item.optString("name").ifEmpty { id },
-                            state = stateName,
-                            account = account,
-                            error = errorMessage,
-                        ),
-                    )
-                }
-            }
-        }.orEmpty()
+        // 0.3.6 的 `state.connectors` 就是 `connectorsView()` 对象 `{connectors, mail}`
+        // （不是配置字典，也不是旧的裸数组）—— 直接解析它，省一次 RPC。
+        val connectorsView = parseConnectorsView(state.opt("connectors"))
         val members = state.optJSONArray("bots")?.let { array ->
             buildList {
                 for (index in 0 until array.length()) {
@@ -230,7 +200,7 @@ class TeamSettingsViewModel(private val endpoint: RuntimeEndpoint?) : ViewModel(
                 loading = false,
                 error = null,
                 secrets = secrets,
-                connectors = connectors,
+                connectorsView = connectorsView,
                 members = members,
                 capabilities = capabilities,
                 attached = attached,
@@ -396,30 +366,7 @@ class TeamSettingsViewModel(private val endpoint: RuntimeEndpoint?) : ViewModel(
         run(connection, "secret-delete", JSONObject().put("name", name), onDone)
     }
 
-    fun connect(connector: TeamConnector, token: String, onDone: (String?) -> Unit = {}) {
-        val connection = client ?: return
-        if (token.isBlank()) {
-            onDone("先填一个 access token")
-            return
-        }
-        run(
-            connection,
-            "connector-connect",
-            JSONObject().put("id", connector.id).put("token", token.trim()),
-            onDone,
-        )
-    }
-
-    fun disconnect(connector: TeamConnector, onDone: (String?) -> Unit = {}) {
-        val connection = client ?: return
-        run(connection, "connector-disconnect", JSONObject().put("id", connector.id), onDone)
-    }
-
-    fun retry(connector: TeamConnector, onDone: (String?) -> Unit = {}) {
-        val connection = client ?: return
-        run(connection, "connector-retry", JSONObject().put("id", connector.id), onDone)
-    }
-
+    /** 非连接器的写操作（密钥 / 能力）：成功后重读 state。 */
     private fun run(
         connection: DshRemoteApi,
         endpoint: String,
@@ -430,43 +377,100 @@ class TeamSettingsViewModel(private val endpoint: RuntimeEndpoint?) : ViewModel(
             _ui.update { it.copy(busy = true) }
             val result = runCatching { connection.botValue(endpoint, body) }
             val error = result.exceptionOrNull()?.message
-            if (error == null && endpoint.startsWith("connector-")) {
-                (result.getOrNull() as? JSONArray)?.let(::applyConnectors)
-            }
             _ui.update { it.copy(busy = false, error = error) }
-            if (error == null && !endpoint.startsWith("connector-")) load()
+            if (error == null) load()
             onDone(error)
         }
     }
 
-    /** `connector-connect/disconnect/retry` 直接返回 connectorsView 数组。 */
-    private fun applyConnectors(array: JSONArray) {
-        val connectors = buildList {
-            for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                val id = item.optString("id")
-                if (id.isEmpty()) continue
-                val stateName = item.optString("state").ifEmpty { "off" }
-                val account = item.opt("account")
-                    ?.takeIf { it != JSONObject.NULL }
-                    ?.toString()
-                    ?.takeIf { it.isNotBlank() && it != "null" }
-                val errorMessage = item.opt("error")
-                    ?.takeIf { it != JSONObject.NULL }
-                    ?.toString()
-                    ?.takeIf { it.isNotBlank() && it != "null" }
-                add(
-                    TeamConnector(
-                        id = id,
-                        name = item.optString("name").ifEmpty { id },
-                        state = stateName,
-                        account = account,
-                        error = errorMessage,
-                    ),
-                )
+    // ---- 连接器 0.3.6 --------------------------------------------------------
+    // 所有 connector-*/mail-* 端点都返回完整的 `connectorsView()` 对象，统一走 run()。
+
+    /** OAuth 浏览器/设备码登录：宿主在 pending 里给出 url 或 userCode。 */
+    fun connectorConnect(id: String, body: JSONObject = JSONObject(), onDone: (String?) -> Unit = {}) =
+        runConnector("connector-connect", body.put("id", id), onDone)
+
+    fun connectorDisconnect(id: String, onDone: (String?) -> Unit = {}) =
+        runConnector("connector-disconnect", JSONObject().put("id", id), onDone)
+
+    fun connectorRetry(id: String, onDone: (String?) -> Unit = {}) =
+        runConnector("connector-retry", JSONObject().put("id", id), onDone)
+
+    fun connectorCancel(id: String, onDone: (String?) -> Unit = {}) =
+        runConnector("connector-cancel", JSONObject().put("id", id), onDone)
+
+    /** 浏览器 OAuth 回调：粘贴跳转到的完整地址或 code。 */
+    fun connectorSignInCode(id: String, input: String, onDone: (String?) -> Unit = {}) =
+        runConnector("connector-sign-in-code", JSONObject().put("id", id).put("input", input.trim()), onDone)
+
+    /** `needs-client`：填自己的 OAuth client id（密钥另存）。 */
+    fun connectorClient(id: String, clientId: String, clientSecret: String, onDone: (String?) -> Unit = {}) {
+        val body = JSONObject().put("id", id).put("clientId", clientId.trim())
+        if (clientSecret.isNotBlank()) body.put("clientSecret", clientSecret.trim())
+        runConnector("connector-client", body, onDone)
+    }
+
+    /** 只读开关 + 「哪些 Bot 用它」（空列表 = 所有 Bot）。 */
+    fun connectorSet(id: String, readOnly: Boolean?, offFor: List<String>?, onDone: (String?) -> Unit = {}) {
+        val body = JSONObject().put("id", id)
+        if (readOnly != null) body.put("readOnly", readOnly)
+        if (offFor != null) body.put("offFor", JSONArray().apply { offFor.forEach(::put) })
+        runConnector("connector-set", body, onDone)
+    }
+
+    /** 自定义 MCP server：url 或 command 至少一个。 */
+    fun connectorAdd(name: String, url: String?, command: String?, onDone: (String?) -> Unit = {}) {
+        val body = JSONObject().put("name", name.trim())
+        if (!url.isNullOrBlank()) body.put("url", url.trim())
+        if (!command.isNullOrBlank()) body.put("command", command.trim())
+        runConnector("connector-add", body, onDone)
+    }
+
+    fun connectorRemove(id: String, onDone: (String?) -> Unit = {}) =
+        runConnector("connector-remove", JSONObject().put("id", id), onDone)
+
+    // ---- 邮箱 ---------------------------------------------------------------
+
+    /** 授权码 / app password 登录 IMAP 邮箱（provider 可省，按地址识别）。 */
+    fun mailAccountAdd(address: String, password: String, provider: String?, onDone: (String?) -> Unit = {}) {
+        val body = JSONObject().put("address", address.trim()).put("password", password.trim())
+        if (!provider.isNullOrBlank()) body.put("provider", provider)
+        runConnector("mail-account-add", body, onDone)
+    }
+
+    fun mailAccountRemove(id: String, onDone: (String?) -> Unit = {}) =
+        runConnector("mail-account-remove", JSONObject().put("id", id), onDone)
+
+    /** 邮箱规则：允许的收件人 / 不发草稿的 Bot。 */
+    fun mailRuleSet(allowedRecipients: List<String>?, noDraftFor: List<String>?, onDone: (String?) -> Unit = {}) {
+        val body = JSONObject()
+        if (allowedRecipients != null) body.put("allowedRecipients", JSONArray().apply { allowedRecipients.forEach(::put) })
+        if (noDraftFor != null) body.put("noDraftFor", JSONArray().apply { noDraftFor.forEach(::put) })
+        runConnector("mail-rule-set", body, onDone)
+    }
+
+    private fun runConnector(endpoint: String, body: JSONObject, onDone: (String?) -> Unit) {
+        val connection = client ?: return
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, error = null) }
+            val result = runCatching { connection.botValue(endpoint, body) }
+            val error = result.exceptionOrNull()?.message
+            if (error == null) {
+                result.getOrNull()?.let { raw ->
+                    if (endpoint.startsWith("mail-")) {
+                        // 邮箱写端点返回裸 mailView()，不是 connectorsView()：只更新 mail，
+                        // 保留连接器目录（以前用 parseConnectorsView 会把整页读空）。
+                        parseMailView(raw)?.let { mail ->
+                            _ui.update { it.copy(connectorsView = it.connectorsView.copy(mail = mail)) }
+                        }
+                    } else {
+                        _ui.update { it.copy(connectorsView = parseConnectorsView(raw)) }
+                    }
+                }
             }
+            _ui.update { it.copy(busy = false, error = error) }
+            onDone(error)
         }
-        _ui.update { it.copy(connectors = connectors) }
     }
 
     /** `null` = 所有 Bot；空列表也是「所有」之外的空集合，按 DS Bot 的约定发 `all`。 */
