@@ -42,11 +42,15 @@ class BotChatParityPipelineTest {
     @Before
     fun setUp() {
         DshMuxLog.sink = { }
+        // 进程级对话缓存是全局单例：不清会让上一个用例的 entries 铺到下一个用例上
+        // （每个用例的 botId 都是 bot-1，会互相污染）。
+        BotChatStateCache.clear()
     }
 
     @After
     fun tearDown() {
         DshMuxLog.sink = defaultSink
+        BotChatStateCache.clear()
     }
 
     private class FakeApi : DshRemoteApi {
@@ -670,6 +674,49 @@ class BotChatParityPipelineTest {
      * 立刻让位给落定行（对齐 dsh-Go：durable 消息一到就删同 turn/step 的草稿），
      * 不能靠文本比对 + 200ms 定时器 —— 文本对不上时那段时间就是双份。
      */
+    /**
+     * 重进对话（Activity 被系统重建 → 新 VM）：**先把进程缓存里的内容铺上**，
+     * 不能回到骨架屏（loading + 空列表）。对齐 dsh-Go
+     * `_retained(items: transcript.items, loading: items.isEmpty)`。
+     */
+    @Test
+    fun reenteringTheChatPaintsTheCachedTimelineInsteadOfASkeleton() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L))
+        api.snapshotEventFrom = 10L
+        api.snapshotEventTo = 10L
+        api.snapshotSeq = 40
+        api.eventsResponse = listOf(userEvent(10L, 1_000L, "你好"))
+
+        val first = viewModel(api, scheduler)
+        scheduler.runCurrent()
+        val painted = first.uiState.value.entries.map { it.id }
+        assertTrue("首个 VM 应已画出内容", painted.isNotEmpty())
+        assertFalse(first.uiState.value.loading)
+
+        // Activity 重建：同一个 bot，新的 VM，且**快照还没返回**（不跑 scheduler）。
+        val second = BotChatViewModel(
+            botId = "bot-1",
+            botName = "小助手",
+            isGroup = false,
+            endpoint = null,
+            appContext = null,
+            dependencies = BotChatDependencies(
+                remote = FakeApi(),
+                transport = null,
+                speech = null,
+                mux = null,
+            ),
+        )
+        assertEquals(
+            "重进对话必须先把缓存内容铺上（否则就是骨架屏）",
+            painted,
+            second.uiState.value.entries.map { it.id },
+        )
+        assertFalse("有缓存内容时不该再算 loading", second.uiState.value.loading)
+    }
+
     @Test
     fun aSettledBotRowClearsTheStreamingBubbleBySeq() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler

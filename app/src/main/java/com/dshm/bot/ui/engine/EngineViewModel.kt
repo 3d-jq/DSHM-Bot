@@ -245,6 +245,8 @@ class EngineViewModel(
     private fun clearStaleConnections() {
         DshMuxHub.clear()
         DshClients.clear()
+        // 对话的行缓存也跟着作废：旧引擎的行 key / seq 空间画到新会话上只会是错的内容。
+        com.dshm.bot.ui.chat.BotChatStateCache.clear()
     }
 
     fun restart() {

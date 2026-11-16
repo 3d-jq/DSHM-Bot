@@ -278,6 +278,30 @@ private const val SECRET_MIN_LENGTH = 4
  */
 internal const val LIVE_ROW_ID_PREFIX = "live:"
 
+/**
+ * 重进对话时，缓存里的那一版**能留下什么**。
+ *
+ * 只留「屏上内容」：entries / 队列 / 模型 / 历史游标。正在跑、在等回复、正在发、
+ * 活动中这些**瞬时态一律复位** —— 它们由新连接自己报回来（`refreshBotStatus`、
+ * 会话状态事件），留着只会让顶栏出现一个假停止键。
+ *
+ * `loading` 按 dsh-Go `_retained` 的口径算：**只有真的没有内容才算在加载**。
+ */
+private fun BotChatUiState.retainedForReentry(engineOff: Boolean): BotChatUiState = copy(
+    loading = entries.isEmpty(),
+    engineOff = engineOff,
+    error = null,
+    sending = false,
+    waitingForReply = false,
+    running = false,
+    stopVisible = false,
+    activity = null,
+    liveEntryId = null,
+    actionNotice = null,
+    memoryNotice = false,
+    loadingEarlier = false,
+)
+
 data class BotChatUiState(
     val loading: Boolean = true,
     val engineOff: Boolean = false,
@@ -405,11 +429,16 @@ class BotChatViewModel internal constructor(
         attachmentCache?.load().orEmpty(),
     )
     private val _uiState = MutableStateFlow(
-        BotChatUiState(
-            // 行管线首屏：等 timeline 快照到达（宿主投影是唯一来源）。
-            loading = true,
-            engineOff = endpoint == null,
-        ),
+        // 重进对话（Activity 被重建）：先用进程里留着的上一版铺上屏上内容，
+        // `loading` 只按「真的没有内容」算 —— 对齐 dsh-Go 的
+        // `_retained(items: transcript.items, loading: items.isEmpty)`，
+        // 别让用户再看一次骨架屏 + 整条时间线重放。
+        BotChatStateCache.get(botId)?.retainedForReentry(engineOff = endpoint == null)
+            ?: BotChatUiState(
+                // 行管线首屏：等 timeline 快照到达（宿主投影是唯一来源）。
+                loading = true,
+                engineOff = endpoint == null,
+            ),
     )
     val uiState: StateFlow<BotChatUiState> = _uiState.asStateFlow()
 
@@ -488,6 +517,14 @@ class BotChatViewModel internal constructor(
 
     /** 本次流式开始时的时间线游标（落定行的 seq 超过它就说明这条流已成正式消息）。 */
     private var streamStartedAtSeq = 0L
+    /**
+     * 本 VM 有没有**成功落地过**一次快照。
+     *
+     * 用来保护从 [BotChatStateCache] 铺上来的内容：首帧重连期间可能先收到一帧
+     * timeline 增量（此时行缓冲还是空的），空重建不能把已经画在屏上的对话抹掉
+     * （对齐 dsh-Go `_retained`：同步期间永远拿已有内容发布）。
+     */
+    private var snapshotLanded = false
     /**
      * 流式气泡的「乐观 bot 行」状态（对齐 DeepSearch：流式与落定是**同一个 item**）。
      *
@@ -591,6 +628,11 @@ class BotChatViewModel internal constructor(
     private val unclaimedRequests = LinkedHashSet<String>()
 
     init {
+        // 进程级留档：每次状态变化写进 [BotChatStateCache]，Activity 被重建后
+        // 新 VM 一构造就能把上一版内容铺回屏上（不再闪骨架屏）。
+        viewModelScope.launch {
+            _uiState.collect { state -> BotChatStateCache.put(botId, state) }
+        }
         if (client != null) {
             // 宿主投影是唯一管线：hello 的 StateFlow 会先发一次当前值（通常 null），
             // 这一发就是首屏快照；之后 hello 变化（换会话/引擎重启）时重拉一次。
@@ -1218,6 +1260,7 @@ class BotChatViewModel internal constructor(
                 loading = false,
                 hasEarlier = if (reset || snapshot.cursor != null) snapshot.cursor != null else null,
             )
+            snapshotLanded = true
             if (reset || resync) recomputeApprovals()
             logRowApplication(if (reset) "snapshot" else if (resync) "resync" else "replay", snapshot.rows)
             // 四期 4c：取齐这批事件 → 客户端折叠接管显示 → 影子比对。
@@ -1464,6 +1507,12 @@ class BotChatViewModel internal constructor(
         // 队列行与时间线分开：inbox 行只进队列条，不画进对话。
         val queue = mapped.filter { it.kind == ChatEntryKind.PENDING }
         val timeline = mapped.filterNot { it.kind == ChatEntryKind.PENDING }
+        // 从进程缓存铺上来的内容，在**第一次快照落地之前**不能被空重建抹掉：
+        // 重连窗口里可能先来一帧增量（行缓冲还是空的），这时空发布会让屏上的对话
+        // 消失一瞬。对齐 dsh-Go `_retained`：同步期间永远拿已有内容发布。
+        if (timeline.isEmpty() && !snapshotLanded && _uiState.value.entries.isNotEmpty()) {
+            return
+        }
         _uiState.update { state ->
             state.copy(
                 entries = timeline,
