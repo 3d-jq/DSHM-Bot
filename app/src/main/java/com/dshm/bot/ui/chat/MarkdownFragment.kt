@@ -42,9 +42,14 @@ internal fun MarkdownFragment(
     val state = remember {
         mutableStateOf(MarkdownParseCache.peek(raw).takeIf { it.isNotEmpty() })
     }
+    // 这份 blocks 对应的是哪段原文。**必须记**：流式与落定现在是同一个 item，
+    // 落定后 raw 变了但 `remember` 不会重建 —— 只看「state 非空」会把流式尾巴的
+    // 旧解析一直留在屏幕上（最后几个字永远不出现）。
+    var parsedRaw by remember { mutableStateOf(if (state.value != null) raw else null) }
     LaunchedEffect(raw, live) {
-        // 冻结块且初值已经命中缓存：连后台都不用再算。
-        if (!live && state.value != null) return@LaunchedEffect
+        // 冻结块且这段话的结果已经有了（缓存命中 / 本 item 上次就解析过同一段）：
+        // 连后台都不用再算。
+        if (!live && state.value != null && parsedRaw == raw) return@LaunchedEffect
         val parseStart = System.nanoTime()
         val computed = withContext(kotlinx.coroutines.Dispatchers.Default) {
             MarkdownParseCache.blocks(raw)
@@ -59,6 +64,7 @@ internal fun MarkdownFragment(
         // 自适应节流的代价信号：解析越贵，下一次刷新间隔越宽（官方同款公式）。
         if (live) StreamRenderCost.observeRenderCost(parseMs)
         state.value = computed
+        parsedRaw = raw
     }
     val blocks = state.value
     if (blocks == null) {
