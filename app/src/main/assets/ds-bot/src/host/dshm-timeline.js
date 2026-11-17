@@ -202,8 +202,9 @@ export function linkedPathsOf(text, cwd) {
 
 const row = (key, kind, seq, turn, timeMs, payload) => ({ key, kind, seq: seq ?? null, turn: turn ?? null, timeMs: timeMs ?? null, payload })
 
-/** Attachment names of every user message, in the official wire order (attachment
- * blocks first, then text) — the payload keeps names; bytes stay client-side. */
+/** Attachment blocks of every user message, in the official wire order — the payload
+ * keeps the **whole attachment ref** so the client can ask the host for the bytes
+ * (`image-attachment`) instead of only showing a name. */
 export function userAttachmentsOf(events) {
   const bySeq = new Map()
   for (const event of events) {
@@ -213,7 +214,15 @@ export function userAttachmentsOf(events) {
     const attachments = []
     for (const block of content) {
       if ((block?.type === 'image' || block?.type === 'file') && block.attachment !== undefined) {
-        attachments.push({ type: block.type, name: block.attachment?.name ?? null })
+        attachments.push({
+          type: block.type,
+          name: block.attachment?.name ?? null,
+          // The whole ref (id included): the client reads the bytes back through
+          // `image-attachment`. `offloaded` only means the model no longer sees it —
+          // the bytes are still there, so the client **keeps rendering the thumbnail**.
+          attachment: block.attachment,
+          ...(block.offloaded === true ? { offloaded: true } : {}),
+        })
       }
     }
     if (attachments.length > 0 && typeof event.seq === 'number') bySeq.set(event.seq, attachments)
@@ -724,6 +733,32 @@ export function install(rt) {
     }
     wrapped.dshmTimeline = true
     rt.mobileEndpoint = wrapped
+  }
+
+  /**
+   * Read one **image** attachment's bytes back for the client.
+   *
+   * 用户自己发的图片，客户端手里只有名字（附件字节在宿主这边、按 attachmentId 存），
+   * 于是只能画成文件卡、也点不开。这里用宿主自己的 `attachments` 服务把字节读回来
+   * （和它回答模型 image 请求用的是同一个 store），客户端落盘缓存后就能画缩略图、
+   * 点开大图。文字类附件走上游已有的 `file-text`，不需要另开端点。
+   */
+  rt.readImageAttachment = async ref => {
+    const store = ctx.get?.('attachments')
+    if (store === undefined) return { error: 'no attachments store' }
+    if (typeof ref?.attachmentId !== 'string' || ref.attachmentId === '') return { error: 'no attachmentId' }
+    try {
+      const stored = await store.readImage(ref, AbortSignal.timeout(15_000))
+      return {
+        base64: Buffer.from(stored.data).toString('base64'),
+        // 引擎存的是**归一化**后的字节（HEIC 之类的原图会被转成 JPEG）：
+        // 回来的是哪个 mime，客户端就按它落盘，别拿原文件名骗解码器。
+        mime: stored.ref?.mediaType ?? ref?.mediaType ?? 'image/jpeg',
+      }
+    } catch (error) {
+      // 失败要说清原因（客户端会把它记进 client.log）——「点不开」不能再只表现为一个图标。
+      return { error: error?.message ?? String(error) }
+    }
   }
 
   /** Per Session: the events the buffer holds (a ring) — the source of the feed

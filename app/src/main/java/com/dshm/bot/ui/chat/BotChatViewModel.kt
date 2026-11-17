@@ -7,7 +7,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dshm.bot.R
+import com.dshm.bot.data.remote.ArtifactKind
 import com.dshm.bot.data.remote.BotFeedEvent
+import com.dshm.bot.data.remote.artifactKindOf
 import com.dshm.bot.data.remote.DsBotCapabilities
 import com.dshm.bot.data.remote.DsBotParser
 import com.dshm.bot.domain.model.ChatApproval
@@ -18,6 +20,7 @@ import com.dshm.bot.data.remote.ChatTransport
 import com.dshm.bot.data.remote.DshRemoteApi
 import com.dshm.bot.data.remote.parseChatPage
 import com.dshm.bot.data.remote.ChatCursor
+import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.remote.DshMuxHub
 import com.dshm.bot.data.remote.DshMux
 import com.dshm.bot.data.remote.DshMuxLog
@@ -238,11 +241,50 @@ data class ChatAttachmentDraft(
     val cachePath: String? = null,
 )
 
+/**
+ * 本地这份副本**不能直接用**、要回宿主再取一份归一化字节的情况。
+ *
+ * - 没有本地副本 → 要；
+ * - HEIC / HEIF / AVIF（安卓低版本解码器解不开，缩略图与查看器都只会显示一个图标）
+ *   → 也要一份宿主归一化后的 JPEG 顶上。
+ */
+internal fun needsNormalizedCopy(item: ChatAttachmentItem): Boolean {
+    val ext = item.path.substringAfterLast('.', "").lowercase()
+    return ext == "heic" || ext == "heif" || ext == "avif"
+}
+
+/**
+ * 附件落盘名：id 做前缀（稳定、可去重），扩展名跟着**实际字节的 mime**走。
+ *
+ * 引擎回来的图片是归一化后的字节（HEIC → JPEG），所以后缀要用它给的 mime 定；
+ * 拿原文件名的后缀（`.heic`）会让解码器/查看器按错的格式去解。
+ */
+private fun attachmentFileName(id: String, name: String, mime: String?): String {
+    val hash = id.removePrefix("sha256:").filter { it.isLetterOrDigit() }.take(32)
+        .ifEmpty { Integer.toHexString(id.hashCode()) }
+    val ext = when (mime?.lowercase()?.substringBefore(';')?.trim()) {
+        "image/jpeg", "image/jpg" -> "jpg"
+        "image/png" -> "png"
+        "image/gif" -> "gif"
+        "image/webp" -> "webp"
+        "image/heic" -> "heic"
+        "image/heif" -> "heif"
+        "image/avif" -> "avif"
+        else -> name.substringAfterLast('.', "").filter { it.isLetterOrDigit() }.take(8).lowercase()
+    }
+    return if (ext.isEmpty()) hash else "$hash.$ext"
+}
+
 /** 对话气泡里的一个附件（图片画缩略图，文件画文件卡）。 */
 data class ChatAttachmentItem(
     val name: String,
+    /** 本地缓存文件路径；空 = 还没有字节（历史回读的附件就是这样）。 */
     val path: String,
     val isImage: Boolean,
+    /** 宿主附件的稳定 id（`sha256:…`）：本地没有文件时用它回宿主要字节。 */
+    val attachmentId: String? = null,
+    /** 宿主附件 ref 的原始 JSON（读字节时要整份传回去，宿主按它校验）。 */
+    val rawAttachment: String? = null,
 )
 
 private val FOLLOW_TOOLS = setOf(
@@ -565,8 +607,17 @@ class BotChatViewModel internal constructor(
      * LazyColumn 元素原地过渡不换 key（设计 §2 规则 1）。
      */
     private val parityRenderKeys = HashMap<String, String>()
-    /** 本地乐观 echo 行（key = `p:<requestId>`）；认领（user 行）/ 失败时摘掉。 */
+    /** 本地乐观 echo 行（key = `p:<requestId>`）；`requestId` → 行。 */
     private val pendingEchoRows = LinkedHashMap<String, TimelineRow>()
+    /**
+     * 本地 echo 的**发送游标**（`requestId` → 发送那一刻的 `paritySeq`）。
+     *
+     * echo 行自己没有 seq（它不是服务端的记录），但**显示位置要按时间排**：
+     * 以前一律追加到 entries 末尾，落定那一刻流式气泡一退，echo 就成了最后一条 ——
+     * 用户的气泡掉到回答**下面**，随后被认领摘掉又消失，界面闪一下
+     * （真机 2026-11-17：「我的问题气泡会跑到大模型流式输出完的下面，然后又消失」）。
+     */
+    private val echoAnchors = HashMap<String, Long>()
     /** echo 行的本地附件（缓存路径），认领后搬给 user 行，图片预览不闪。 */
     private val pendingEchoAttachments = HashMap<String, List<ChatAttachmentItem>>()
     /** 群聊帧的上一帧 running（true→false 边沿 = 本轮收口，触发快照重拉对齐新行）。 */
@@ -931,6 +982,8 @@ class BotChatViewModel internal constructor(
         }
         pendingEchoRows[echoKeyOf(requestId)] = echoRowOf(requestId, text, attachmentItems, attachments)
         pendingEchoAttachments[requestId] = attachmentItems
+        // 发送游标：echo 就插在它该在的位置（这一轮之后的行走它后面）。
+        echoAnchors[requestId] = paritySeq
         _uiState.update { state -> state.copy(sending = true, error = null) }
         rebuildParityEntries()
         viewModelScope.launch {
@@ -971,6 +1024,7 @@ class BotChatViewModel internal constructor(
                 unclaimedRequests.remove(requestId)
                 pendingEchoRows.remove(echoKeyOf(requestId))
                 pendingEchoAttachments.remove(requestId)
+                echoAnchors.remove(requestId)
                 rebuildParityEntries()
                 _uiState.update { state ->
                     state.copy(
@@ -1458,8 +1512,8 @@ class BotChatViewModel internal constructor(
             } else {
                 parityRenderKeys[row.key]
             }
-            val echoRequestId = (row.payload as? TimelineRowPayload.User)?.requestId
-            val attachmentItems = echoRequestId?.let { pendingEchoAttachments[it] } ?: emptyList()
+            val userPayload = row.payload as? TimelineRowPayload.User
+            val attachmentItems = userPayload?.let { attachmentItemsOf(it, it.requestId) } ?: emptyList()
             // `changes` 行：把按 seq 缓存好的摘要贴给映射器（没拉到就为 null，映射后不出行）。
             val changesSummary = (row.payload as? TimelineRowPayload.Changes)
                 ?.let { row.seq?.let { seq -> changesSummaries[seq] } }
@@ -1483,9 +1537,31 @@ class BotChatViewModel internal constructor(
             }
             mapped += if (uniqueId == entry.id) entry else entry.copy(id = uniqueId)
         }
-        // 本地 echo 行：乐观位置，排在尾部。
-        for (echoRow in pendingEchoRows.values) {
-            chatEntryOf(echoRow, botName)?.let(mapped::add)
+        // 本地 echo 行：**按发送游标插回它该在的位置**，不是永远排最后（见 [echoAnchors]）。
+        //
+        // 认领之后也**不立刻摘**：宿主的行可以比客户端折叠先到，那一刻显示里还没有
+        // 这条正式行 —— 摘掉 echo，用户的泡泡就会凭空消失一会儿。统一在这里判
+        // 「显示里真的有了同 requestId 的 user 行」才摘。
+        val shownEchoRequests = timelineRows.mapNotNullTo(HashSet()) { row ->
+            (row.payload as? TimelineRowPayload.User)?.requestId
+        }
+        for (echoRow in pendingEchoRows.values.toList()) {
+            val echoPayload = echoRow.payload as? TimelineRowPayload.User ?: continue
+            val requestId = echoPayload.requestId
+            if (requestId != null && requestId in shownEchoRequests) {
+                pendingEchoRows.remove(echoRow.key)
+                echoAnchors.remove(requestId)
+                continue
+            }
+            val echoEntry = chatEntryOf(
+                echoRow,
+                botName,
+                attachmentItems = attachmentItemsOf(echoPayload, requestId),
+            ) ?: continue
+            mapped.add(
+                echoInsertIndex(mapped, requestId?.let { echoAnchors[it] }),
+                echoEntry,
+            )
         }
         // 浏览器缩略图：按**地锚 seq** 插回它所属那一轮的轮末，而不是永远排最后
         // （以前追加到末尾 → 下一条消息一来，卡就跑到新消息后面）。
@@ -1512,6 +1588,12 @@ class BotChatViewModel internal constructor(
         // 消失一瞬。对齐 dsh-Go `_retained`：同步期间永远拿已有内容发布。
         if (timeline.isEmpty() && !snapshotLanded && _uiState.value.entries.isNotEmpty()) {
             return
+        }
+        // 历史里的图片附件缺字节：后台补齐（每张一次），取到后重建出缩略图。
+        timeline.forEach { entry ->
+            entry.attachmentItems.forEach { item ->
+                if (item.isImage) ensureAttachmentBytes(item)
+            }
         }
         _uiState.update { state ->
             state.copy(
@@ -1787,7 +1869,7 @@ class BotChatViewModel internal constructor(
         if (row.kind != TimelineRow.KIND_USER) return
         val requestId = (row.payload as? TimelineRowPayload.User)?.requestId ?: return
         val echoKey = "p:$requestId"
-        val hadEcho = pendingEchoRows.remove(echoKey) != null
+        val hadEcho = pendingEchoRows.containsKey(echoKey)
         if (hadEcho || pendingEchoAttachments.containsKey(requestId)) {
             dropPendingInboxRowsOf(requestId)
             unclaimedRequests.remove(requestId)
@@ -1800,6 +1882,8 @@ class BotChatViewModel internal constructor(
             if (firstClaim) {
                 DshMuxLog.log("echo 认领：行=${row.key} requestId=$requestId 有本地echo=$hadEcho → 渲染键=$echoKey")
             }
+            // ⚠️ 这里**不摘 echo**：宿主行/折叠行到齐 ≠ 显示里已经有它（折叠可能还没
+            // 产出这条行）。摘掉由 rebuild 统一判「显示里真的有了」那一刻做。
         }
     }
 
@@ -1946,16 +2030,17 @@ class BotChatViewModel internal constructor(
         } ?: return
         if (row.kind == TimelineRow.KIND_USER) {
             val echoKey = "p:$requestId"
-            val hadEcho = pendingEchoRows.remove(echoKey) != null
+            val hadEcho = pendingEchoRows.containsKey(echoKey)
             if (hadEcho || pendingEchoAttachments.containsKey(requestId)) {
                 dropPendingInboxRowsOf(requestId)
                 parityRenderKeys[row.key] = echoKey
                 unclaimedRequests.remove(requestId)
             }
+            // 与 [claimEchoOf] 一致：不在这里摘 echo（摘掉由 rebuild 判「显示里有了」）。
         } else if (row.kind == TimelineRow.KIND_INBOX) {
-            if (pendingEchoRows.remove("p:$requestId") != null) {
-                unclaimedRequests.remove(requestId)
-            }
+            // inbox 行只说明「进队列了，还没回显」——本地气泡要**留到回显**
+            // （2026-11-15 用户定：没有队列条了，这条气泡就是唯一可见的排队消息）。
+            unclaimedRequests.remove(requestId)
         }
     }
 
@@ -2632,6 +2717,102 @@ class BotChatViewModel internal constructor(
     }
 
 
+
+    /**
+     * 一条 user 行要画哪些附件。
+     *
+     * 优先用本地 echo 带过来的（有缓存路径，能立刻画缩略图）；否则从宿主行的
+     * `blocks` 里建：**按 `type` 认图片**、带上完整 attachment ref。
+     * 以前只取名字（`attachments`），于是历史里的图片被画成文件卡、点也点不开
+     * （真机 2026-11-16）。`offloaded` 的图（引擎把老图抽成编号）没有可用字节，
+     * 交给「N 张图片」计数兜底。
+     */
+    private fun attachmentItemsOf(
+        payload: TimelineRowPayload.User,
+        requestId: String?,
+    ): List<ChatAttachmentItem> {
+        // 本地副本两份来源：内存里的 draft（同一进程刚发的）+ **落盘的**（进程重启后
+        // 唯一还在的那份，key 是 requestId）。以前只查内存 → 重启后自己发的图变成
+        // 一张点不开的图标（真机 2026-11-17）。
+        val local = requestId?.let { pendingEchoAttachments[it] }
+            ?: requestId?.let { sentAttachments[it] }
+            ?: emptyList()
+        // 骨架用行里的 blocks（type / attachmentId 权威），本地那份只贡献字节路径。
+        // 同一张图可能出现在多条消息里：取字节成功过一次就直接用缓存里的路径。
+        val fromBlocks = attachmentItemsOfBlocks(payload.blocks) { id ->
+            sentAttachments["a:$id"]?.firstOrNull()
+        }
+        return mergeLocalAttachmentPaths(fromBlocks, local)
+    }
+
+    /** 已尝试取过字节的附件 id（offload 掉的永远取不到，别每次重建都再打端点）。 */
+    private val attachmentFetches = HashSet<String>()
+    /** 构造参数 `appContext` 不是属性，附件落盘要用 → 存一份。 */
+    private val appCtx: Context? = appContext
+
+    /**
+     * 历史里的图片附件只有 ref、没有字节：按需回宿主取一次，落盘进本地附件缓存，
+     * 再重建一次 —— 缩略图就出来了（点开大图也用的是同一个本地文件）。
+     */
+    /** 点一张没有字节的图：立刻再试一次取字节（不改显示，取到会自己重建出来）。 */
+    fun requestImageBytes(item: ChatAttachmentItem) {
+        attachmentFetches.remove(item.attachmentId)
+        ensureAttachmentBytes(item, force = true)
+    }
+
+    /**
+     * 这张图需要字节（没有本地副本 / 本地是低版本解不开的格式）时回宿主取一次。
+     *
+     * @param force 用户手动点的：跳过「本地副本能不能用」的判断，直接取一遍。
+     */
+    private fun ensureAttachmentBytes(item: ChatAttachmentItem, force: Boolean = false) {
+        val id = item.attachmentId ?: return
+        val raw = item.rawAttachment ?: return
+        if (!force && id in attachmentFetches) return
+        val runtime = endpoint ?: return
+        val context = appCtx ?: return
+        attachmentFetches += id
+        viewModelScope.launch {
+            if (!force) {
+                // 本地副本能用（文件在、格式也解得了）就不用问宿主 —— 判定放 IO。
+                val usable = withContext(Dispatchers.IO) {
+                    item.path.isNotEmpty() && !needsNormalizedCopy(item) &&
+                        runCatching { java.io.File(item.path).length() > 0L }.getOrDefault(false)
+                }
+                if (usable) return@launch
+            }
+            // 失败也留证：`{error}` 是宿主给的原因（取不到 / 没有附件库 …）。
+            var failure: String? = null
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val reply = DshClients.of(runtime).bot(
+                        "image-attachment",
+                        JSONObject().put("attachment", JSONObject(raw)),
+                    )
+                    reply.optString("error").takeIf { it.isNotEmpty() }?.let { failure = it }
+                    val base64 = reply.optString("base64")
+                    if (base64.isEmpty()) return@runCatching null
+                    val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                    // 落盘名用**宿主回来的 mime**定后缀：引擎存的是归一化后的字节
+                    // （HEIC 之类会被转成 JPEG），拿原文件名骗解码器会解不开。
+                    val mime = reply.optString("mime")
+                    val dir = java.io.File(context.filesDir, "chat-attachments").apply { mkdirs() }
+                    val file = java.io.File(dir, attachmentFileName(id, item.name, mime))
+                    file.writeBytes(bytes)
+                    file.absolutePath
+                }.onFailure { failure = it.message ?: it.javaClass.simpleName }
+                    .getOrNull()
+            }
+            if (saved == null) {
+                DshMuxLog.log("附件字节取不到：${item.name} id=$id 原因=${failure ?: "unknown"}")
+                return@launch
+            }
+            sentAttachments["a:$id"] = listOf(item.copy(path = saved))
+            runCatching { attachmentCache?.save(sentAttachments) }
+            DshMuxLog.log("附件字节已取回：${item.name} → $saved")
+            rebuildParityEntries()
+        }
+    }
 
     /**
      * 把浏览器缩略图卡插回时间线的正确位置。

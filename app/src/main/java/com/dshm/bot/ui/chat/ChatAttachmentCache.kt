@@ -34,6 +34,8 @@ internal class ChatAttachmentCache(context: Context, botId: String) {
                                 name = item.optString("name"),
                                 path = path,
                                 isImage = item.optBoolean("image", false),
+                                attachmentId = item.optString("attachmentId").takeIf { it.isNotEmpty() },
+                                rawAttachment = item.optString("raw").takeIf { it.isNotEmpty() },
                             ),
                         )
                     }
@@ -54,7 +56,11 @@ internal class ChatAttachmentCache(context: Context, botId: String) {
                         JSONObject()
                             .put("name", item.name)
                             .put("path", item.path)
-                            .put("image", item.isImage),
+                            .put("image", item.isImage)
+                            // 历史回读的附件只有名字：把宿主 id / ref 一起存下来，
+                            // 下次进对话不用再问一遍「这是哪张图」。
+                            .put("attachmentId", item.attachmentId ?: "")
+                            .put("raw", item.rawAttachment ?: ""),
                     )
                 }
                 json.put(key, array)

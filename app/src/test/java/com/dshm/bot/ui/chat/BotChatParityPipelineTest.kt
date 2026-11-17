@@ -679,6 +679,132 @@ class BotChatParityPipelineTest {
      * 不能回到骨架屏（loading + 空列表）。对齐 dsh-Go
      * `_retained(items: transcript.items, loading: items.isEmpty)`。
      */
+    /**
+     * 自己发的问题**永远在回答上面**（真机 2026-11-17：「大模型流出完后，我的问题气泡
+     * 会跑到大模型流式输出完的下面，然后又消失」）。
+     *
+     * 复现条件：宿主的 user 行/事件还没回来，回答已经落定 —— 本地 echo 就是这条问题的
+     * 唯一代表。以前 echo 一律追加到 entries 末尾 → 落定后它成了最后一条 = 回答的下方。
+     */
+    @Test
+    fun theSentQuestionNeverFallsBelowTheAnswer() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L))
+        api.snapshotEventFrom = 10L
+        api.snapshotEventTo = 10L
+        api.snapshotSeq = 40
+        api.eventsResponse = listOf(userEvent(10L, 1000L, "你好"))
+        val vm = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        vm.send("新问题")
+        scheduler.runCurrent()
+        val rid = api.sendRequestIds.last()
+        assertEquals(
+            "发送后本地 echo 就是最新一条",
+            listOf("user:10", "p:$rid"),
+            vm.uiState.value.entries.map { it.id },
+        )
+
+        api.emitStream(phase = "start", attemptId = "a1")
+        api.emitStream(phase = "chunk", attemptId = "a1", text = "这是回答")
+        scheduler.runCurrent()
+        assertEquals(
+            "流式中：问题在上、流式气泡在下",
+            listOf("user:10", "p:$rid", "live:1"),
+            vm.uiState.value.entries.map { it.id },
+        )
+
+        // 落定：只有回答进了日志（宿主的 user 行还没到）→ echo 必须仍在回答**上面**。
+        api.eventsResponse = buildList {
+            add(userEvent(10L, 1_000L, "你好"))
+            for (seq in 11L..40L) add(SessionEvent(seq, "step/start", 1_000L + seq, null))
+            add(assistantEvent(41L, 1_041L, "这是回答"))
+        }
+        api.emitSession(
+            41L, "assistant/message",
+            data = JSONObject().put("turn", 1).put(
+                "message",
+                JSONObject().put(
+                    "content",
+                    org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "这是回答")),
+                ),
+            ),
+        )
+        scheduler.runCurrent()
+        val ids = vm.uiState.value.entries.map { it.id }
+        assertEquals(
+            "落定后：问题仍在回答上面（不能掉到下面）",
+            listOf("user:10", "p:$rid", "live:1"),
+            ids,
+        )
+    }
+
+    /**
+     * 宿主的 user 行先到、但**显示来源（客户端折叠）还没有这条行**时，
+     * 本地 echo 不能先摘掉 —— 摘了气泡会凭空消失一会儿（真机「然后又消失」）。
+     */
+    @Test
+    fun theEchoStaysUntilTheDisplayedRowsCarryIt() {
+        val scheduler = mainDispatcherRule.testDispatcher.scheduler
+        val api = FakeApi()
+        api.snapshotRows = listOf(api.row("user:10", "user", 10L))
+        api.snapshotEventFrom = 10L
+        api.snapshotEventTo = 10L
+        api.snapshotSeq = 40
+        api.eventsResponse = buildList {
+            add(userEvent(10L, 1_000L, "你好"))
+            for (seq in 11L..40L) add(SessionEvent(seq, "step/start", 1_000L + seq, null))
+        }
+        val vm = viewModel(api, scheduler)
+        scheduler.runCurrent()
+
+        vm.send("新问题")
+        scheduler.runCurrent()
+        val rid = api.sendRequestIds.last()
+
+        // 宿主行认领（absorbParityRow 那条路），但折叠里还没有 user:41 这条行。
+        api.emitTimeline(api.row("user:41", "user", 41L, requestId = rid))
+        scheduler.runCurrent()
+        assertTrue(
+            "认领了但显示里还没有正式行时，气泡要留着：${vm.uiState.value.entries.map { it.id }}",
+            vm.uiState.value.entries.any { it.id == "p:$rid" },
+        )
+
+        // 正式行真的进显示（折叠产出带 requestId 的 user 行）→ echo 摘掉、原地接管。
+        api.eventsResponse = buildList {
+            add(userEvent(10L, 1_000L, "你好"))
+            for (seq in 11L..40L) add(SessionEvent(seq, "step/start", 1_000L + seq, null))
+            add(
+                SessionEvent(
+                    41L, "user/message", 1_041L,
+                    JSONObject()
+                        .put("source", JSONObject().put("kind", "user").put("rpcId", rid))
+                        .put(
+                            "content",
+                            org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "新问题")),
+                        ),
+                ),
+            )
+        }
+        api.emitSession(
+            41L, "user/message",
+            data = JSONObject()
+                .put("source", JSONObject().put("kind", "user").put("rpcId", rid))
+                .put(
+                    "content",
+                    org.json.JSONArray().put(JSONObject().put("type", "text").put("text", "新问题")),
+                ),
+        )
+        scheduler.runCurrent()
+        assertEquals(
+            "显示里有正式行后只剩一条（同 key 原地接管，不重复也不消失）",
+            listOf("user:10", "p:$rid"),
+            vm.uiState.value.entries.map { it.id },
+        )
+    }
+
     @Test
     fun reenteringTheChatPaintsTheCachedTimelineInsteadOfASkeleton() {
         val scheduler = mainDispatcherRule.testDispatcher.scheduler

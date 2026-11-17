@@ -170,7 +170,7 @@ export function install(rt) {
   }
   // What a host that only reads the team may still answer.
   // Updates change the dsh profile, not the team, so a reading host may run them too.
-  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'timeline', 'events', 'room-artifacts', 'run-stats', 'room-progress', 'group-rows', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'phone-wait', 'phone-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'thinking', 'avatar-library', 'computer-system-status', 'computer-shot', 'local-agents', 'local-agent-models', 'browser-frame', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary', 'image'])
+  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'timeline', 'events', 'room-artifacts', 'run-stats', 'room-progress', 'group-rows', 'exchange', 'exchange-text', 'file-text', 'image-attachment', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'phone-wait', 'phone-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'thinking', 'avatar-library', 'computer-system-status', 'computer-shot', 'local-agents', 'local-agent-models', 'browser-frame', 'hello', 'notices', 'avatar', 'room-chat', 'usage-summary', 'image'])
 
   async function setPrefs(body) {
     if (body.theme !== undefined) {
@@ -303,6 +303,12 @@ export function install(rt) {
           if (typeof body.file?.attachmentId !== 'string') return fail('No file named', 'bot/invalid')
           const read = await rt.fileText(body.file)
           return read === undefined ? fail('This file cannot be read here', 'bot/unavailable') : ok(read)
+        }
+        // DSHM Bot: user-sent image bytes. The client only carries the attachment
+        // ref from the row; the store lives here (dshm-timeline.js `readImageAttachment`).
+        case 'image-attachment': {
+          const read = await rt.readImageAttachment?.(body.attachment)
+          return read === undefined ? fail('This image cannot be read here', 'bot/unavailable') : ok(read)
         }
         case 'earlier':
           await rt.load()

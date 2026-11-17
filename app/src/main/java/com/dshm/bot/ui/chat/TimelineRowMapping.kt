@@ -236,3 +236,80 @@ internal fun List<TimelineFile>.toChatArtifacts(): List<ChatArtifact> =
 /** JSON 数组辅助（载荷原样形状的容错读取）。 */
 internal fun JSONArray?.objectListOrEmpty(): List<JSONObject> =
     if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+
+/**
+ * user 行的 `blocks` → 气泡里要画的附件项（纯函数，单测直接锁）。
+ *
+ * 关键：**按 `type` 认图片**、并把**整份 attachment ref** 带上 —— 只有名字的话
+ * 历史里的图片会被画成文件卡、也点不开（真机 2026-11-16）。
+ *
+ * @param cached 本地已下载过的同一附件（按 attachmentId 查），命中就直接复用。
+ */
+internal fun attachmentItemsOfBlocks(
+    blocks: List<JSONObject>,
+    cached: (String) -> ChatAttachmentItem? = { null },
+): List<ChatAttachmentItem> = blocks.mapNotNull { block ->
+    // ⚠️ `offloaded`（引擎把老图抽成编号，不再喂给模型）**不跳过**：那只是「不给模型看」，
+    // 附件本身还在（`{...block, offloaded:true}`，ref 原样保留、字节也读得到）。
+    // 早先按它跳过 → 老图全变成一张点不开的图标（真机 2026-11-17）。
+    val raw = block.optJSONObject("attachment")
+    val name = block.optString("name").takeIf { it.isNotEmpty() }
+        ?: raw?.optString("name")?.takeIf { it.isNotEmpty() }
+        ?: return@mapNotNull null
+    val id = raw?.optString("attachmentId")?.takeIf { it.isNotEmpty() }
+    val image = block.optString("type") == "image" ||
+        com.dshm.bot.data.remote.artifactKindOf(name) == com.dshm.bot.data.remote.ArtifactKind.IMAGE
+    id?.let(cached) ?: ChatAttachmentItem(
+        name = name,
+        path = "",
+        isImage = image,
+        attachmentId = id,
+        rawAttachment = raw?.toString(),
+    )
+}
+
+/**
+ * 本地 echo 行插回列表的下标：**它属于发送那一刻的位置**。
+ *
+ * 从后往前找第一条 `seq <= anchor` 的行，插在它后面 —— 也就是「这一轮之后的
+ * 一切（回答 / 工具行 / 卡片）都排在它后面」。以前 echo 一律追加到末尾，落定那
+ * 一刻流式气泡一退，用户的气泡就成了最后一条（掉到回答下面），随后被认领摘掉又
+ * 消失，界面闪一下（真机 2026-11-17）。
+ *
+ * 没有锚（老路径 / 拿不到游标）就退回追加末尾；`seq` 为 null 的行（浏览器卡、
+ * 别的 echo）不参与比较。
+ */
+internal fun echoInsertIndex(entries: List<ChatEntry>, anchor: Long?): Int {
+    if (anchor == null) return entries.size
+    for (index in entries.indices.reversed()) {
+        val seq = entries[index].seq ?: continue
+        if (seq <= anchor) return index + 1
+    }
+    return entries.size
+}
+
+/**
+ * 把**本地已有的副本路径**贴回附件项（气泡能画缩略图 / 点开看）。
+ *
+ * 为什么要按「行里的 ref」为骨架、只贴 path：ref 是权威的（type/id 都在），
+ * 本地那份只是字节；两边按**下标**再按**名字**对齐（发送时 blocks 与 draft 同序）。
+ *
+ * 真机（2026-11-17）：进程重启后 `pendingEchoAttachments`（内存）没了，而落盘的
+ * `sentAttachments[requestId]` 还在 —— 之前只查内存表，自己发的图就退化成一张
+ * 点不开的图标。
+ */
+internal fun mergeLocalAttachmentPaths(
+    items: List<ChatAttachmentItem>,
+    local: List<ChatAttachmentItem>,
+): List<ChatAttachmentItem> {
+    if (local.isEmpty()) return items
+    val usable = local.filter { it.path.isNotEmpty() }
+    if (usable.isEmpty()) return items
+    return items.mapIndexed { index, item ->
+        if (item.path.isNotEmpty()) return@mapIndexed item
+        val hit = usable.getOrNull(index)?.takeIf { it.name == item.name || usable.size == items.size }
+            ?: usable.firstOrNull { it.name == item.name }
+            ?: return@mapIndexed item
+        item.copy(path = hit.path)
+    }
+}

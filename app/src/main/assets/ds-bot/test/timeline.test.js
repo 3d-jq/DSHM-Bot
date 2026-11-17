@@ -69,16 +69,26 @@ test('rows keep the official vocabulary and keys, ascending by seq', () => {
   assert.equal(rows[1].kind, 'bot')
 })
 
-test('attachment names ride the payload in their original order (attachments before text)', () => {
+test('attachment blocks ride the payload in their original order, with the whole ref', () => {
   reset()
-  const events = [
-    userMessage('看这张图', 'r-2', [
-      { type: 'image', attachment: { name: 'a.png' } },
-      { type: 'file', attachment: { name: 'b.pdf' } },
-    ]),
-  ]
+  // 客户端要能按 type 认出「这是图片」、并拿完整 ref 去宿主读字节（image-attachment），
+  // 只给名字的话只能画成文件卡、点不开（真机 2026-11-16）。
+  const image = { name: 'a.png', attachmentId: 'sha256:aa', mediaType: 'image/png' }
+  const file = { name: 'b.pdf', attachmentId: 'sha256:bb', bytes: 3 }
+  const events = [userMessage('看这张图', 'r-2', [
+    { type: 'image', attachment: image },
+    { type: 'file', attachment: file },
+  ])]
   const rows = composeTimelineRows({ events, baseItems: [base('user', '看这张图', events[0].seq, { rpcId: 'r-2' })] })
-  assert.deepEqual(rows[0].payload.blocks, [{ type: 'image', name: 'a.png' }, { type: 'file', name: 'b.pdf' }])
+  assert.deepEqual(rows[0].payload.blocks, [
+    { type: 'image', name: 'a.png', attachment: image },
+    { type: 'file', name: 'b.pdf', attachment: file },
+  ])
+  // 被 offload 掉的图（引擎把老图抽成编号、不再喂给模型）**照样带完整 ref**：
+  // 字节还在，客户端仍要能画缩略图、点开看（真机 2026-11-17「变成一张点不开的图标」）。
+  const offloaded = [userMessage('旧图', 'r-3', [{ type: 'image', attachment: image, offloaded: true }])]
+  const rows2 = composeTimelineRows({ events: offloaded, baseItems: [base('user', '旧图', offloaded[0].seq)] })
+  assert.deepEqual(rows2[0].payload.blocks, [{ type: 'image', name: 'a.png', attachment: image, offloaded: true }])
 })
 
 // 0.3.6 的官方 displayItems 不再带 rpcId（老 fork 自己打过补丁）。缺了它，客户端认领

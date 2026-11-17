@@ -7,7 +7,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import com.dshm.bot.MainActivity
+import org.json.JSONObject
+
+import com.dshm.bot.data.remote.ArtifactKind
 import com.dshm.bot.data.remote.ChangedFile
+import com.dshm.bot.data.remote.DshClients
+import com.dshm.bot.data.remote.artifactKindOf
 import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,6 +23,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +60,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -460,6 +468,7 @@ fun BotChatScreen(
                         entries = state.entries,
                         streaming = streaming,
                         liveEntryId = state.liveEntryId,
+                        onRequestImageBytes = viewModel::requestImageBytes,
                         activity = shownActivity,
                         lastSendAt = lastSendAt,
                         bot = bot,
@@ -792,6 +801,8 @@ private fun ChatMessages(
     streaming: String,
     /** 当前正在接字的乐观 bot 行 id（没在流式时为 null）；见 [BotChatUiState.liveEntryId]。 */
     liveEntryId: String?,
+    /** 点一张没有字节的图：再试一次回宿主取字节。 */
+    onRequestImageBytes: (ChatAttachmentItem) -> Unit,
     activity: ChatActivity?,
     bot: ChatRowUi,
     endpoint: RuntimeEndpoint?,
@@ -844,6 +855,8 @@ private fun ChatMessages(
     var selectText by remember { mutableStateOf<MessageMenuTarget?>(null) }
     /** 正在全屏查看的图片。 */
     var viewingImage by remember { mutableStateOf<ChatAttachmentItem?>(null) }
+    /** 正在预览正文的用户附件（和大模型的附件同一条 `file-text`）。 */
+    var viewingFile by remember { mutableStateOf<ChatAttachmentItem?>(null) }
     val appContextForMenu = LocalContext.current
     val streamingNow = streaming.isNotEmpty()
     // 本轮**是否已经流过文字**。用来避免「结束瞬间活动行闪一下」：
@@ -1145,6 +1158,11 @@ private fun ChatMessages(
                                 haptics(HapticLevel.LIGHT)
                                 viewingImage = it
                             },
+                            onRequestImage = onRequestImageBytes,
+                            onOpenFile = {
+                                haptics(HapticLevel.LIGHT)
+                                viewingFile = it
+                            },
                             maxBubbleWidth = cap,
                             onLongPress = {
                                 haptics(HapticLevel.LIGHT)
@@ -1326,6 +1344,10 @@ private fun ChatMessages(
         // 点图片缩略图 → 全屏查看器（缩放 / 双击 / 复制 / 分享 / 保存）。
         viewingImage?.let { image ->
             FullscreenImageViewer(item = image, onDismiss = { viewingImage = null })
+        }
+        // 用户发的文档：点一下看正文 —— 和大模型的附件走同一条 `file-text`。
+        viewingFile?.let { item ->
+            UserFilePreviewDialog(item = item, endpoint = endpoint, onDismiss = { viewingFile = null })
         }
         // 普通高斯模糊 + 渐变遮罩（B 方案）：`Modifier.blur` 底层就是 Android
         // RenderEffect 的高斯模糊，只作用在这层渐变上；不录消息层、不做 DstIn /
@@ -1727,6 +1749,10 @@ private fun UserBubble(
     onLongPress: () -> Unit = {},
     /** 点图片缩略图：打开全屏查看器。 */
     onOpenImage: (ChatAttachmentItem) -> Unit = {},
+    /** 点文件块：读回正文预览（和大模型的附件同一条 `file-text`）。 */
+    onOpenFile: (ChatAttachmentItem) -> Unit = {},
+    /** 点一张还没有字节的图：再试一次取字节（否则「点了没反应」）。 */
+    onRequestImage: (ChatAttachmentItem) -> Unit = {},
     /** 气泡宽度上限（由 [UserBubbleWidth] 传入）；默认不限。 */
     maxBubbleWidth: Dp = Dp.Unspecified,
 ) {
@@ -1747,11 +1773,15 @@ private fun UserBubble(
             horizontalAlignment = Alignment.End,
         ) {
             if (items.isNotEmpty()) {
-                UserAttachmentCards(items, onOpenImage)
+                UserAttachmentCards(items, onOpenImage, onOpenFile, onRequestImage)
             } else if (attachments.isNotEmpty()) {
                 UserAttachmentCards(
-                    attachments.map { name -> ChatAttachmentItem(name, "", false) },
+                    attachments.map { name ->
+                        ChatAttachmentItem(name, "", artifactKindOf(name) == ArtifactKind.IMAGE)
+                    },
                     onOpenImage = {},
+                    onOpenFile = {},
+                    onRequestImage = {},
                 )
             }
             // 有本地缩略图时不再写「N 张图片」；只有回读拿不到图才提示数量。
@@ -1822,6 +1852,8 @@ private fun UserBubble(
 private fun UserAttachmentCards(
     items: List<ChatAttachmentItem>,
     onOpenImage: (ChatAttachmentItem) -> Unit,
+    onOpenFile: (ChatAttachmentItem) -> Unit,
+    onRequestImage: (ChatAttachmentItem) -> Unit = {},
 ) {
     androidx.compose.foundation.layout.FlowRow(
         modifier = Modifier.fillMaxWidth(),
@@ -1830,9 +1862,20 @@ private fun UserAttachmentCards(
     ) {
         items.forEach { item ->
             if (item.isImage) {
-                UserThumb(item, Modifier.size(TILE_SIZE), onClick = { onOpenImage(item) })
+                // 字节还没取回来（历史里的图）时先画占位，取到后自动变缩略图。
+                UserThumb(
+                    item,
+                    Modifier.size(TILE_SIZE),
+                    // 还没字节时点一下**再试一次取字节**（以前是个空 onClick，
+                    // 用户读成「点不开」）。
+                    onClick = if (item.path.isEmpty()) {
+                        { onRequestImage(item) }
+                    } else {
+                        { onOpenImage(item) }
+                    },
+                )
             } else {
-                UserFileTile(item.name)
+                UserFileTile(item.name, onClick = { onOpenFile(item) })
             }
         }
     }
@@ -1881,9 +1924,83 @@ private fun UserThumb(
     }
 }
 
+/**
+ * 用户附件的正文预览。
+ *
+ * 和大模型的「显示全部」走**同一条** `file-text`（宿主按 attachment ref 读回正文）：
+ * 以前用户发的文档只有一个文件名、点不开，和大模型附件的行为割裂（真机 2026-11-16）。
+ */
+@Composable
+private fun UserFilePreviewDialog(
+    item: ChatAttachmentItem,
+    endpoint: RuntimeEndpoint?,
+    onDismiss: () -> Unit,
+) {
+    var body by remember(item.name) { mutableStateOf<String?>(null) }
+    var failed by remember(item.name) { mutableStateOf(false) }
+    LaunchedEffect(item.name) {
+        val raw = item.rawAttachment
+        if (endpoint == null || raw == null) {
+            failed = true
+            return@LaunchedEffect
+        }
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching {
+                DshClients.of(endpoint)
+                    .bot("file-text", JSONObject().put("file", JSONObject(raw)))
+                    .optString("text")
+            }.getOrNull()
+        }
+        if (loaded.isNullOrBlank()) failed = true else body = loaded
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Dshm.colors.surface,
+        title = {
+            Text(
+                text = item.name,
+                style = Dshm.typography.settingsRowTitle,
+                color = Dshm.colors.textPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Box(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                when {
+                    failed -> Text(
+                        text = stringResource(R.string.chat_file_preview_failed),
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.textSecondary,
+                    )
+                    body == null -> CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        color = Dshm.colors.accent,
+                        modifier = Modifier.size(Dshm.spacing.lg),
+                    )
+                    else -> Text(
+                        text = requireNotNull(body),
+                        style = Dshm.typography.rowPreview,
+                        color = Dshm.colors.textPrimary,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
+            }
+        },
+    )
+}
+
 /** 文件块：图标 + 两行文件名（对齐 DeepSearch 的 `FileAttachmentTile`）。 */
 @Composable
-private fun UserFileTile(name: String) {
+private fun UserFileTile(name: String, onClick: () -> Unit = {}) {
     val shape = RoundedCornerShape(Dshm.radius.sm)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1893,6 +2010,8 @@ private fun UserFileTile(name: String) {
             .clip(shape)
             .background(Dshm.colors.surfaceMuted)
             .border(Dshm.spacing.hairline, Dshm.colors.divider, shape)
+            // 和大模型的附件对齐：点一下看正文（同一条 `file-text`）。
+            .clickable(onClick = onClick)
             .padding(horizontal = Dshm.spacing.xxs, vertical = Dshm.spacing.xs),
     ) {
         Icon(
@@ -2254,28 +2373,39 @@ private val RELAY_TOOL_NAMES = setOf("message_bot", "stop_bot", "post_to_group",
 private fun relaySenderName(name: String?): String? =
     name?.trim()?.takeIf { it.isNotEmpty() && !it.equals("You", ignoreCase = true) }
 
-/** DS Bot `bt-event` 文案：按 event kind 映射，落回原文。 */
+/**
+ * DS Bot `bt-event` 文案：按 event kind 映射，落回原文。
+ *
+ * **文案一律照官方 `DS-Bot/ds-bot/src/client/i18n.js` + `cells.js`**（用户 2026-11-16
+ * 要求逐条对齐）。官方那套是「前缀 + 名字胶囊」拼出来的，我们拼成一句
+ * （`EventLine` 后面还会按名字把这段切开，名字用胶囊画）。
+ */
 @Composable
 private fun eventLineLabel(kind: String?, name: String?, fallback: String, code: String?): String {
     val who = name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_event_some_bot)
+    val groupWho = name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_event_some_group)
     val prefix = when (kind) {
-        "request" -> "消息来自 $who"
-        "reply" -> "回复来自 $who"
-        "report" -> "来自群聊的回复"
-        "post", "post_to_group" -> if (who.isNotBlank()) "$who 在群里发言" else "在群里发言"
-        "create_group" -> if (fallback.isNotBlank()) "创建群聊：$fallback" else "创建了群聊"
+        // relay 事件（官方 `Message from` / `Reply from` / `Replies from`）
+        "request" -> "收到消息：$who"
+        "reply" -> "收到回复：$who"
+        "report" -> "群聊回复：$groupWho"
+        // 群操作（官方 `cells.js` 的 verbs：Created group / Updated group / Deleted group / Posted in）
+        "post", "post_to_group" -> "已发到：$groupWho"
+        "create_group" -> "已创建群聊：$groupWho"
+        "update_group" -> "已更新群聊：$groupWho"
+        "delete_group" -> "已删除群聊：$groupWho"
         "resume" -> "重启后接着做之前的工作"
-        "retry" -> "已要求重试写成文本的工具调用"
-        "secret" -> "密钥请求"
+        "retry" -> "工具调用被写成了文字，已让它重新调用"
+        "secret" -> "$who 需要一个密钥"
         "done" -> "$who 做完了"
         "stopped" -> "你停下了 $who 的工作"
         "working" -> "$who 开始做了"
         "approval" -> "$who 停下来等你批准"
         "missed" -> "$who 没有及时回应"
-        "lookup" -> if (fallback.isNotBlank()) "$who 在对话里查找「$fallback」" else "$who 查看了自己的对话"
-        "resumed" -> "$who 的工作被重启打断，已接着做"
+        "lookup" -> if (fallback.isNotBlank()) "$who 在自己的对话里查找「$fallback」" else "$who 查看了自己的对话"
+        "resumed" -> "$who 的工作被重启打断，已经接着做"
         "cut" -> "$who 的工作又被重启打断，已停下"
-        "schedule" -> fallback.ifBlank { "定时任务已启动" }
+        "schedule" -> fallback.ifBlank { "例行任务开始" }
         // 失败原因优先按 code 翻成人话（对齐 DS Bot `failureLabel`），没有 code 才用原文。
         "failed" -> "$who 没能回答：${failureLabel(code, fallback)}"
         else -> null

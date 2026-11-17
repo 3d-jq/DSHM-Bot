@@ -24,7 +24,7 @@ import org.json.JSONObject
  *
  * 口径细节（与宿主逐字对齐，改动前先看 `docs/phase4-event-subscription.md`）：
  * - `user` 行：仅 `source.kind === "user"`；文本 = text 块 `\n` 连接后 trim；
- *   `images` = image 块数；`blocks` = 带 attachment 的 image/file 块名；
+ *   `images` = image 块数；`blocks` = 带 attachment 的 image/file 块（含整份 ref）；
  *   `requestId` = `source.rpcId`（本地乐观行的认领键）。
  * - `bot` 行：`assistant/message` **按文本块各出一行**，空白块不出行。
  * - `tool` 行：只有 9 个社交工具成行（`present` 不成行——交付卡是它唯一的表面）。
@@ -476,9 +476,15 @@ internal object TimelineFold {
                     "file" -> Unit
                 }
                 if ((block.optString("type") == "image" || block.optString("type") == "file") && block.has("attachment")) {
+                    // **整份 attachment ref 一起带上**（不止名字）：客户端画像缩略图 /
+                    // 点开文件都要靠它回宿主读字节（`image-attachment` / `file-text`）。
+                    // 只带名字的话历史里的图片只能画成文件卡、也点不开（真机 2026-11-16）。
+                    val ref = block.optJSONObject("attachment")
                     blocks += JSONObject()
                         .put("type", block.optString("type"))
-                        .put("name", block.optJSONObject("attachment")?.optString("name"))
+                        .put("name", ref?.optString("name"))
+                        .put("attachment", ref ?: JSONObject())
+                        .apply { if (block.optBoolean("offloaded")) put("offloaded", true) }
                 }
             }
         }

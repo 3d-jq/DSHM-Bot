@@ -70,7 +70,10 @@
         "blocks": [
           {
             "type": "image",
-            "name": "a.png"
+            "name": "a.png",
+            "attachment": {
+              "name": "a.png"
+            }
           }
         ],
         "requestId": "r-9"
