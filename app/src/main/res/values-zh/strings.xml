@@ -345,7 +345,6 @@
     <string name="team_secrets_delete_confirm">删除 %1$s？正在用它的 Bot 会立刻失去访问。</string>
     <string name="team_connectors_title">连接器</string>
     <string name="team_connectors_available">可用的连接器</string>
-    <string name="team_connectors_empty">没有可用的连接器</string>
     <string name="team_connectors_connected">已连接</string>
     <string name="team_connectors_connected_as">已连接：%1$s</string>
     <string name="team_connectors_connect">连接</string>
@@ -354,10 +353,7 @@
     <string name="team_connectors_retry">重试</string>
     <string name="team_connectors_connecting">连接中…</string>
     <string name="team_connectors_error">连接失败：%1$s</string>
-    <string name="team_connectors_about">仓库、Issue、PR 与代码搜索。</string>
-    <string name="team_connectors_create_token">去 GitHub 生成 token</string>
     <string name="team_connectors_token">Access token</string>
-    <string name="team_connectors_token_hint">粘贴一个有 repo 权限的 GitHub token，会存成密钥。</string>
     <string name="team_connectors_note">token 会存成密钥，Bot 只能通过工具访问它。</string>
     <string name="team_connectors_search">搜索连接器</string>
     <string name="team_connectors_all">全部</string>
@@ -378,7 +374,6 @@
     <string name="team_connectors_custom_command">命令</string>
     <string name="team_connectors_custom_hint">填地址或命令，地址必须是 https://。</string>
     <string name="team_connectors_empty_search">没有匹配的</string>
-    <string name="team_connectors_tools">%1$d 个工具</string>
     <string name="team_connectors_read_only">只读</string>
     <string name="team_connectors_read_only_hint">只允许 Bot 通过这个连接器读取。</string>
     <string name="team_connectors_for_bots">使用它的 Bot</string>
@@ -387,7 +382,6 @@
     <string name="team_connectors_needs_client">需要应用 client ID</string>
     <string name="team_connectors_waiting_sign_in">等待登录…</string>
     <string name="team_connectors_browser_hint">在浏览器里完成登录，然后回到这里。</string>
-    <string name="team_connectors_open_again">再打开</string>
     <string name="team_connectors_paste_address">粘贴你跳转到的地址</string>
     <string name="team_connectors_finish_sign_in">完成登录</string>
     <string name="team_connectors_did_not_return">没有跳回来？</string>
@@ -398,8 +392,6 @@
     <string name="team_connectors_key">%1$s key</string>
     <string name="team_connectors_get_key">获取 key</string>
     <string name="team_connectors_mailbox">邮箱</string>
-    <string name="team_connectors_mail_about">QQ、163、126、Gmail、iCloud 等 IMAP 邮箱</string>
-    <string name="team_connectors_mail_accounts">%1$d 个邮箱</string>
     <string name="team_connectors_mail_add">添加邮箱</string>
     <string name="team_connectors_mail_address">邮箱地址</string>
     <string name="team_connectors_mail_password">授权码 / 应用专用密码</string>

@@ -56,17 +56,22 @@
 
 需要 **JDK 21** 与 Android SDK（在 `local.properties` 中写 `sdk.dir`，不要提交）。
 
+> `JAVA_HOME` 必须指向 JDK 21：Android Gradle 插件在**配置阶段**就检查版本，指向别的 JDK 会直接失败
+> （本机曾因 `JAVA_HOME` 是 JDK 13 而构建不起来）。多版本并存时这样显式指定：
+> `JAVA_HOME=/path/to/jdk-21 ./gradlew :app:assembleDebug`。
+
 ```bash
 ./gradlew :app:assembleDebug        # 调试 APK
 ./gradlew :app:testDebugUnitTest    # 单元测试
 ./gradlew :app:lintDebug            # Lint（warning 也视为错误）
 ```
 
-宿主侧插件（`app/src/main/assets/ds-bot/`）的测试：
+宿主侧插件（`app/src/main/assets/ds-bot/`）的测试需要 **Node 24**（CI 用它；22 也能跑）。
+依赖已经随仓库提交（`node_modules` 内置），**不需要 `npm install`**：
 
 ```bash
 cd app/src/main/assets/ds-bot
-node --test --import ./test/stub-resolve.mjs test/*.test.js
+npm test                            # node --import ./test/stub-resolve.mjs --test …
 ```
 
 ## 目录

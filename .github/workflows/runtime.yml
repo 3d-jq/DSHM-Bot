@@ -54,4 +54,27 @@ jobs:
         with:
           files: dist/*
 
+  # 13 个 DSH 补丁 + dsh-go-bridge 的 guard 测试以前不在任何流水线上（build-runtime.sh 自己
+  # 注释就写着要跑 run-guard-tests.sh）。x86_64 的全量构建会：install_dsh（锁文件）→
+  # patch-dsh（校验 pinned before/after 哈希，打歪立刻红）→ 产出 .work/x86_64/dsh-prefix；
+  # 之后再 boot 一个 throwaway dsh web + route-probe + dsh-go-bridge 跑 guard（只读、不动 ~/.dsh）。
+  guard-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 curl xz-utils unzip dpkg binutils file git ca-certificates gnupg gzip bzip2 zstd zip
+
+      # build-runtime.sh x86_64 会一路做 install_dsh + patch-dsh（哈希校验）——这一步
+      # 本身就覆盖「补丁打歪」；之后 guard 测的是打出来的真 prefix。
+      - name: Build DSH prefix (x86_64) — verifies patch pins
+        run: bash runtime/build-runtime.sh x86_64
+
+      - name: Route-guard + bridge tests
+        run: bash runtime/tests/run-guard-tests.sh runtime/.work/x86_64/dsh-prefix

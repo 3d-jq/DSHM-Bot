@@ -69,3 +69,24 @@ jobs:
             app/build/reports/tests/
             app/build/reports/lint-results-debug.*
           retention-days: 14
+
+  # 宿主侧插件是我们**手改过**的（`src/host/channel.js`、`dshm-timeline.js`、`browser.js`…），
+  # 但它的 57 个 Node 测试以前不在任何流水线上 —— 改坏了只有真机才发现（例如给
+  # `channel.js` 加端点时写错 `READS` 集合）。依赖随仓库提交，不需要 npm install。
+  plugin-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 与运行时一致用 Node 24（`runtime/build-runtime.sh` 装的就是 24.x）。
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Host plugin tests
+        working-directory: app/src/main/assets/ds-bot
+        run: npm test
+

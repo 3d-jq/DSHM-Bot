@@ -73,7 +73,9 @@ object ClientLog {
             try {
                 target.parentFile?.mkdirs()
                 if (target.length() > MAX_BYTES) rotate(target)
-                target.appendText(message + "\n")
+                // 与 [EngineLog] 同一套脱敏：客户端日志会进诊断页、也会被用户贴出来，
+                // 不能让密钥（`Bearer …` / `sk-…`）跟着落盘。
+                target.appendText(TextMasking.maskSecrets(message) + "\n")
             } catch (_: Exception) {
                 // 日志写不进去不能影响业务。
             }

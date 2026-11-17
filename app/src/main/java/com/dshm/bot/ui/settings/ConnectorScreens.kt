@@ -1,6 +1,7 @@
 package com.dshm.bot.ui.settings
 
 import android.content.Intent
+import androidx.core.net.toUri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -487,7 +488,7 @@ private fun OpenLinkRow(url: String, label: String? = null) {
     val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth().clickable {
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
         }.padding(vertical = Dshm.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {

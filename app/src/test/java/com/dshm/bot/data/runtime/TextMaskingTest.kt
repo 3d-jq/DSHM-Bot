@@ -36,6 +36,21 @@ class TextMaskingTest {
     }
 
     @Test
+    fun masksBareDeepSeekKeysAndBearerHeaders() {
+        // 这两个是外部 review 指出的漏网形态：裸的 sk-… 与 Authorization 头。
+        // 用明显是假的值（`dshm-test-` 前缀），只验证掩码形状。
+        assertEquals("key sk-*** end", TextMasking.maskSecrets("key sk-dshm-test-only-0001 end"))
+        assertEquals(
+            "Authorization: Bearer ***",
+            TextMasking.maskSecrets("Authorization: Bearer dshm-test-token-ab"),
+        )
+        val masked = TextMasking.maskSecrets("Bearer dshm-test-token-ab sk-dshm-test-only-0001")
+        assertEquals("Bearer *** sk-***", masked)
+        assertFalse(masked.contains("dshm-test-token-ab"))
+        assertFalse(masked.contains("sk-dshm-test-only-0001"))
+    }
+
+    @Test
     fun leavesUnrelatedAndEmptyTextAlone() {
         assertEquals("", TextMasking.maskSecrets(""))
         assertEquals("starting proot…", TextMasking.maskSecrets("starting proot…"))

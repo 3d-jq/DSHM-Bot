@@ -344,7 +344,6 @@
     <string name="team_secrets_delete_confirm">Delete %1$s? Bots that use it lose access at once.</string>
     <string name="team_connectors_title">Connectors</string>
     <string name="team_connectors_available">Available</string>
-    <string name="team_connectors_empty">No connectors available</string>
     <string name="team_connectors_connected">Connected</string>
     <string name="team_connectors_connected_as">Connected as %1$s</string>
     <string name="team_connectors_connect">Connect</string>
@@ -353,10 +352,7 @@
     <string name="team_connectors_retry">Retry</string>
     <string name="team_connectors_connecting">Connecting…</string>
     <string name="team_connectors_error">Could not connect: %1$s</string>
-    <string name="team_connectors_about">Repositories, issues, pull requests and code search.</string>
-    <string name="team_connectors_create_token">Create a token on GitHub</string>
     <string name="team_connectors_token">Access token</string>
-    <string name="team_connectors_token_hint">Paste a GitHub token with repo access. It is kept as a secret.</string>
     <string name="team_connectors_note">The token is saved as a secret; Bots only reach it through their tools.</string>
     <string name="team_connectors_search">Search connectors</string>
     <string name="team_connectors_all">All</string>
@@ -377,7 +373,6 @@
     <string name="team_connectors_custom_command">Command</string>
     <string name="team_connectors_custom_hint">Enter a URL or a command. URLs must be https://.</string>
     <string name="team_connectors_empty_search">Nothing matches</string>
-    <string name="team_connectors_tools">%1$d tools</string>
     <string name="team_connectors_read_only">Read-only</string>
     <string name="team_connectors_read_only_hint">Only let Bots read through this connector.</string>
     <string name="team_connectors_for_bots">Bots using this</string>
@@ -385,8 +380,7 @@
     <string name="team_connectors_sign_in_again">Sign in again</string>
     <string name="team_connectors_needs_client">Needs an app client ID</string>
     <string name="team_connectors_waiting_sign_in">Waiting for sign-in…</string>
-    <string name="team_connectors_browser_hint">Finish signing in in your browser, then come back.</string>
-    <string name="team_connectors_open_again">Open again</string>
+    <string name="team_connectors_browser_hint">Finish signing in your browser, then come back.</string>
     <string name="team_connectors_paste_address">Paste the address you landed on</string>
     <string name="team_connectors_finish_sign_in">Finish sign-in</string>
     <string name="team_connectors_did_not_return">Did not come back here?</string>
@@ -397,8 +391,6 @@
     <string name="team_connectors_key">%1$s key</string>
     <string name="team_connectors_get_key">Get a key</string>
     <string name="team_connectors_mailbox">Mailbox</string>
-    <string name="team_connectors_mail_about">QQ, 163, 126, Gmail, iCloud and other IMAP mail</string>
-    <string name="team_connectors_mail_accounts">%1$d accounts</string>
     <string name="team_connectors_mail_add">Add mailbox</string>
     <string name="team_connectors_mail_address">Email address</string>
     <string name="team_connectors_mail_password">Authorization code / app password</string>
