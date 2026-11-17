@@ -18,7 +18,7 @@
 | 产物卡（presented） | 轮末固定、按轮持久化、present 优先 |
 | 审批 / 提问 / 视图卡 / 密钥卡 | mux `$events` + `state.questions/views/secretRequests` |
 | 附件、长文（whole）、图片查看器 | 本地缓存 + FileProvider |
-| **浏览器整套** | WebView 池/多标签/下载/`read_browser`/BrowserGuard/缩略图卡 |
+| **浏览器整套** | WebView 池/多标签/下载/`read_browser`/`browser_*` 动作组（`src/host/browser-tools.js`，与读页共用 `browser-wait` 通道：**面板关着也能开页/点击/截图**）/BrowserGuard/缩略图卡 |
 | 语音输入、手机操控（无障碍） | 独立通道 |
 | 20+ 设置子页、模型渠道、插件、权限、定时任务、记忆、诊断、账号 | |
 | 群聊（成员 dock、round 状态、群产物卡按轮） | |
@@ -27,7 +27,7 @@
 | 通知栏（回合完成/错误/审批/提问） | |
 | 正文搜索（`session/search`，结果聚成「消息」段） | 对齐网页端 CommandPalette 的 Messages 段（2026-11-16） |
 | 震动反馈（三档 + 总开关） | 对齐 dsh-Go 85 处 `HapticFeedback.*` 的**动作**落点（2026-11-16）：发送/复制/选择=轻、停止/审批同意=中；总开关在「设置 → 个性化 → 震动反馈」（本机偏好，存 SharedPreferences，`Haptics.kt`）。档位映射必须用 API≤23 的 `View` 常量（`Confirm/Reject` 是 API 30，minSdk 26 上会静默失效）；无权限 |
-| **宿主插件升级到 0.3.6**（2026-11-16） | 上游从我们内嵌的 dev 快照（0.2.x）直接跳到 **v0.3.6**。做法：官方 `chat`/`room-chat`/feed `message`/`notices` 当**接口**，界面仍走我们的 `timeline` schema（`src/host/dshm-timeline.js`，由原 `projection.js` 移植）。新增 3 个兼容别名的 channel 动作：`stop`（→`stop-chat`/`stop-room-work`）、`room-continue`（→goal resume）、`room-queue`（按下标删除）；`room-artifacts` 在适配器里重实现（成员 `deliverables/presented`）。`hello` 的 capabilities 由适配器补 `timeline`/`events`。**手机操控**模块改名 `phone-control.js`（与上游手机配对 `phone.js` 同名冲突）。内置 `node_modules`（deep-view/ws/@modelcontextprotocol 全链，排除会遮蔽宿主的 `@deepseek-ai/*`） |
+| **宿主插件升级到 0.3.6**（2026-11-16） | 上游从我们内嵌的 dev 快照（0.2.x）直接跳到 **v0.3.6**。做法：官方 `chat`/`room-chat`/feed `message`/`notices` 当**接口**，界面仍走我们的 `timeline` schema（`src/host/dshm-timeline.js`，由原 `projection.js` 移植）。新增 3 个兼容别名的 channel 动作：`stop`（→`stop-chat`/`stop-room-work`）、`room-continue`（→goal resume）、`room-queue`（按下标删除）；`room-artifacts` 在适配器里重实现（成员 `deliverables/presented`）。`hello` 的 capabilities 由适配器补 `timeline`/`events`。**手机操控**模块改名 `phone-control.js`（与上游手机配对 `phone.js` 同名冲突）。内置 `node_modules`（deep-view/ws/@modelcontextprotocol 全链，排除会遮蔽宿主的 `@deepseek-ai/*`）。**升级踩到的坑**：上游 `browser.js` 只剩桌面版（`read_browser` + playwright 的 `browser-plugins.js`，`browserPlugin` 没配就整组不注册）→ 我们的 `browser_*` 工具曾整组消失（模型报 `unknown tool "browser_open"`）；已用 `src/host/browser-tools.js` 恢复 app-relay 那套（`test/browser-tools.test.js` 守门） |
 
 > **ds-bot 私有 fork（2026-11-16）**：用户拍板不再同步上游，把内嵌插件做成专门版本 ——
 > 改名 `ds-bot-dshm`、版本 `0.3.6-dshm.1`；**host-only**（删 `client.js`/`src/client`，DSH 原生网页不再加载插件前端、`web boot failed` 报错随之消失），保留 host 需要的 `link.js`/`office.js`/`src/office`；`cordis.patch.yml` 全部用绝对路径、恢复 DSH 自带设置壳。APK 25.9MB→24.3MB。JS 57 + JVM 740 绿。

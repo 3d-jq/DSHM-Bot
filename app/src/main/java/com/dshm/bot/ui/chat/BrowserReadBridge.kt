@@ -38,17 +38,18 @@ object BrowserReadBridge {
         val clientId = "android-" + UUID.randomUUID()
         while (currentCoroutineContext().isActive) {
             val started = System.currentTimeMillis()
-            val open = withContext(Dispatchers.Main) { store.openPages() }
-            val value = runCatching {
+            // 一轮出什么错都不许把通道打死：它是 Bot 唯一能碰浏览器的路，
+            // 一旦这个循环退出，所有浏览器工具都会永远「没有响应」。
+            val round = runCatching {
+                val open = withContext(Dispatchers.Main) { store.openPages() }
                 api.botValue(
                     "browser-wait",
                     JSONObject().put("clientId", clientId).put("open", open),
                 )
             }
-            val items = value.getOrNull() as? JSONArray
+            val items = browserWaitRequests(round.getOrNull())
             if (items == null) {
-                val message = value.exceptionOrNull()?.message
-                if (message != null) lastError.value = message
+                round.exceptionOrNull()?.message?.let { lastError.value = it }
                 // 插件没开（`bot/browser-off`）或引擎在重启：退一步再试，别打热循环。
                 val elapsed = System.currentTimeMillis() - started
                 delay(if (elapsed < 1_000) 5_000 else 500)
@@ -59,9 +60,12 @@ object BrowserReadBridge {
                 val item = items.optJSONObject(index) ?: continue
                 // 兜底：里面的每一步（脚本 8 秒、waitStable 30 秒、网络 30 秒）都已各自有界，
                 // 这是最后的保险丝 —— 一条请求不管卡在哪都不许拖住整条长轮询。
-                // 超时补一条失败回执，让 Bot 立刻拿到错误，而不是等满自己的超时。
-                val finished = withTimeoutOrNull(ANSWER_FALLBACK_TIMEOUT_MS) { answer(api, store, item) }
-                if (finished == null) {
+                // 超时或抛错都补一条失败回执，让 Bot 立刻拿到错误，而不是等满自己的超时。
+                val finished = runCatching {
+                    withTimeoutOrNull(ANSWER_FALLBACK_TIMEOUT_MS) { answer(api, store, item) }
+                }
+                finished.exceptionOrNull()?.message?.let { lastError.value = it }
+                if (finished.getOrNull() == null) {
                     val id = item.optString("id")
                     if (id.isNotEmpty()) {
                         runCatching { api.botValue("browser-result", answerTimeoutReceipt(id)) }
@@ -617,3 +621,19 @@ internal fun answerTimeoutReceipt(id: String): JSONObject = JSONObject()
     .put("id", id)
     .put("ok", false)
     .put("error", "The page did not answer")
+
+/**
+ * 一条 `browser-wait` 长轮询的结果里，请求列表在哪儿。
+ *
+ * 两种形状都要认（0.3.6 升级时这里变过一次，谁都没发现）：
+ * - 0.3.6 起：`{ requests: [...], holds: {...} }`
+ * - 更早：裸数组 `[...]`
+ *
+ * 认不出来返回 `null`（调用方据此退一步重试），而不是空数组 —— 空数组会被当成
+ * 「这轮没有请求」，把已经下发的东西悄悄吞掉。
+ */
+internal fun browserWaitRequests(value: Any?): JSONArray? = when (value) {
+    is JSONArray -> value
+    is JSONObject -> value.optJSONArray("requests")
+    else -> null
+}

@@ -1434,3 +1434,31 @@ own chat or another group"，`dockMembers` 只藏「本群正在发言」的人�
   「deepseek 配色 = 原生令牌」。
 
 **验证**：82 测试类 / 486 用例全绿，lint 零 warning，assembleDebug 通过。
+
+### 浏览器工具整组消失：恢复 app-relay（2026-11-17）
+
+用户报「浏览器工具怎么掉了」：Bot 调 `browser_open` 得到 `unknown tool`，退一步调
+`read_browser` 得到「浏览器面板只在桌面 App 里存在」。
+
+**根因**：0.3.6 fork 升级（`89374b8`）把内嵌插件的 `src/host/browser.js` 换成了上游
+桌面版——只剩 `read_browser`（读页）和 playwright 的 `browser-plugins.js`（`browserPlugin`
+没配就整组不注册，且设备上没有 playwright / WebView 没有 CDP）。我们原来那套
+「工具 → `browser-wait` 通道 → App 的 WebView 池」的动作组（`browser_open` / `click` /
+`type` / `scroll` / `tabs` / `executeJs` / `screenshot` / `hand_over` …）随之整组丢掉，
+而 App 侧 `BrowserReadBridge` 一直在应答这些 `kind`，只是**没人再发**。
+
+**修复**：
+- 新增 `src/host/browser-tools.js`：恢复整组动作工具，全部走同一条通道（`kind` + `browser-result`），
+  面板关着也能开页/操作（页在 App 的 WebView 池里）；配了 `browserPlugin`/`Api` 时让给 playwright 那套。
+- `browser.js`：通道加 `call()`（任意动作 + 45 秒超时）与 `latestClient()` 兜底 ——
+  没报过页面的 Bot 也能收到 `browser_open`；`result` 不再丢动作结果；`read_browser`
+  把 `no-page` 当状态（提示 `browser_open`）而不是失败。
+- 测试：`test/browser-channel.test.js`（通道兜底 / read 契约）、`test/browser-tools.test.js`
+  （整组注册 + 每个工具的请求形状）。插件测试 57 → 67 例。
+
+**第二跳（同日，工具修好后才暴露）**：Bot 改报 `The app did not answer in time. Its window may be
+closed or busy.` —— App 其实在轮询（否则会是 `absent`），是 **0.3.6 把 `browser-wait` 的返回从裸数组
+改成 `{requests, holds}`**，而 `BrowserReadBridge.loop` 仍 `as? JSONArray` → 每轮判成「插件没开」
+退避重试，收到的请求全被丢掉，宿主 2 秒重发、45 秒判超时。修：`browserWaitRequests()` 两种形状都认
+（认不出回 null，不是空数组）+ `BrowserWaitShapeTest` 3 例（已回退验证能抓 bug）；`loop` 整轮
+`runCatching`，一轮抛错不许把通道打死，单条 `answer` 抛错也补失败回执。
