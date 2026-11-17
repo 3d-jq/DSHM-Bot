@@ -45,9 +45,10 @@ enum class ResetKeep {
 /**
  * 让 DS Bot 认为「这个宿主有浏览器窗口」。
  *
- * 插件只在 DSH Desktop 或 `DS_BOT_APP=1` 时才注册 `read_browser`、打开 `browser-wait`
- * 通道（`src/host/browser.js` 的 `install`）。手机端那个窗口就是我们的 WebView，
- * 由 `BrowserReadBridge` 应答读页请求。
+ * 插件只在 DSH Desktop 或 `DS_BOT_APP=1` 时才注册 `read_browser` 和整组浏览器工具
+ * （`browser_open` / `browser_click` …，见 `src/host/browser.js` + `browser-tools.js`）、
+ * 打开 `browser-wait` 通道。手机端那个窗口就是我们的 WebView（面板关着也在池子里），
+ * 由 `BrowserReadBridge` 应答读页和动作请求。
  */
 /**
  * 引擎进程的环境：
