@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,22 +28,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.heightIn
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import com.dshm.bot.R
 import com.dshm.bot.core.design.Dshm
-import com.dshm.bot.data.remote.DshClients
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import com.dshm.bot.ui.settings.SettingsPrimaryButton
 
 /**
  * `divider`：一段会话的起点（换对话 / 换目录后）。
@@ -340,15 +331,10 @@ fun WholeAttachmentRow(
                             failed = true
                         } else {
                             busy = true
-                            val loaded = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    DshClients.of(endpoint)
-                                        .bot("file-text", JSONObject().put("file", post.file))
-                                        .optString("text")
-                                }.getOrNull()
-                            }
+                            // 与「用户附件预览」同一条实现（[readFileText]）。
+                            val loaded = readFileText(endpoint, post.file)
                             busy = false
-                            if (loaded.isNullOrBlank()) failed = true else full = loaded
+                            if (loaded == null) failed = true else full = loaded
                         }
                     }
                     if (!failed) shown = true
@@ -385,37 +371,13 @@ fun WholeAttachmentRow(
 
     val body = full
     if (shown && body != null) {
-        AlertDialog(
-            onDismissRequest = { shown = false },
-            containerColor = Dshm.colors.surface,
-            title = {
-                Text(
-                    text = post.name,
-                    style = Dshm.typography.settingsRowTitle,
-                    color = Dshm.colors.textPrimary,
-                )
-            },
-            text = {
-                androidx.compose.foundation.layout.Box(
-                    modifier = Modifier
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Text(
-                        text = body,
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.textPrimary,
-                    )
-                }
-            },
-            confirmButton = {
-                SettingsPrimaryButton(
-                    text = stringResource(R.string.action_done),
-                    onClick = { shown = false },
-                    fillWidth = false,
-                )
-            },
+        // 与大模型的「显示全部」共用同一个弹层（标题 + 可滚动正文 + 完成按钮）。
+        FileTextPreviewDialog(
+            title = post.name,
+            body = body,
+            failed = false,
+            onDismiss = { shown = false },
         )
     }
-}
 
+}

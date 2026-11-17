@@ -1927,8 +1927,8 @@ private fun UserThumb(
 /**
  * 用户附件的正文预览。
  *
- * 和大模型的「显示全部」走**同一条** `file-text`（宿主按 attachment ref 读回正文）：
- * 以前用户发的文档只有一个文件名、点不开，和大模型附件的行为割裂（真机 2026-11-16）。
+ * 读正文 / 弹层都走共用的 [readFileText] + [FileTextPreviewDialog]（与大模型的
+ * 「显示全部」是**同一份实现**）——以前两处各抄一遍，行为和失败文案都对不齐。
  */
 @Composable
 private fun UserFilePreviewDialog(
@@ -1939,62 +1939,15 @@ private fun UserFilePreviewDialog(
     var body by remember(item.name) { mutableStateOf<String?>(null) }
     var failed by remember(item.name) { mutableStateOf(false) }
     LaunchedEffect(item.name) {
-        val raw = item.rawAttachment
-        if (endpoint == null || raw == null) {
-            failed = true
-            return@LaunchedEffect
-        }
-        val loaded = withContext(Dispatchers.IO) {
-            runCatching {
-                DshClients.of(endpoint)
-                    .bot("file-text", JSONObject().put("file", JSONObject(raw)))
-                    .optString("text")
-            }.getOrNull()
-        }
-        if (loaded.isNullOrBlank()) failed = true else body = loaded
+        val ref = item.rawAttachment?.let { raw -> runCatching { JSONObject(raw) }.getOrNull() }
+        val loaded = readFileText(endpoint, ref)
+        if (loaded == null) failed = true else body = loaded
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Dshm.colors.surface,
-        title = {
-            Text(
-                text = item.name,
-                style = Dshm.typography.settingsRowTitle,
-                color = Dshm.colors.textPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        text = {
-            Box(
-                modifier = Modifier
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                when {
-                    failed -> Text(
-                        text = stringResource(R.string.chat_file_preview_failed),
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.textSecondary,
-                    )
-                    body == null -> CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        color = Dshm.colors.accent,
-                        modifier = Modifier.size(Dshm.spacing.lg),
-                    )
-                    else -> Text(
-                        text = requireNotNull(body),
-                        style = Dshm.typography.rowPreview,
-                        color = Dshm.colors.textPrimary,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_done), color = Dshm.colors.accent)
-            }
-        },
+    FileTextPreviewDialog(
+        title = item.name,
+        body = body,
+        failed = failed,
+        onDismiss = onDismiss,
     )
 }
 
