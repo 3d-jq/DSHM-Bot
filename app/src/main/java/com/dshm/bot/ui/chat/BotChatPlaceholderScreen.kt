@@ -1265,21 +1265,31 @@ private fun ChatMessages(
                         }
                     }
 
-                    ChatEntryKind.BROWSER_SHOT -> BrowserShotCard(
-                        shot = entry.shot,
-                        onClick = { onOpenBrowser(entry.shot?.url) },
-                    )
+                    // 浏览器缩略图卡也是这一轮的产出，跟产物卡同宽（[CARD_MAX_FRACTION]）。
+                    // 以前它 `fillMaxWidth()`，比气泡宽出一截，一屏里看着像错列（用户 2026-11-17 指出）。
+                    ChatEntryKind.BROWSER_SHOT -> CappedCardWidth {
+                        BrowserShotCard(
+                            shot = entry.shot,
+                            onClick = { onOpenBrowser(entry.shot?.url) },
+                        )
+                    }
 
                     // 网页版 `chat` items 的另外三种 kind：分隔线 / 只读视图卡 / 问答回执。
                     ChatEntryKind.DIVIDER -> PartDividerRow(timeMs = entry.timeMs)
 
-                    ChatEntryKind.VIEW -> ViewCardReadOnly(card = entry.view)
+                    // 这两张也是左列卡片，同样封顶到助手气泡的宽度（[CARD_MAX_FRACTION]），
+                    // 不然一屏里会出现「气泡缩进、卡片铺满」的错列。
+                    ChatEntryKind.VIEW -> CappedCardWidth {
+                        ViewCardReadOnly(card = entry.view)
+                    }
 
                     // 回答过的提问 / 视图卡：网页版分别是 `AnsweredCell` / `AnsweredView`。
-                    ChatEntryKind.ANSWERED -> if (entry.answeredView != null) {
-                        AnsweredViewCard(answer = entry.answeredView)
-                    } else {
-                        AnsweredQuestionCard(answered = entry.answered)
+                    ChatEntryKind.ANSWERED -> CappedCardWidth {
+                        if (entry.answeredView != null) {
+                            AnsweredViewCard(answer = entry.answeredView)
+                        } else {
+                            AnsweredQuestionCard(answered = entry.answered)
+                        }
                     }
 
                     // inbox 行（排队 / 插话中的消息）**不画**：对齐官方网页端
