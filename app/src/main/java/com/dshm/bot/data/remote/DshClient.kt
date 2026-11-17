@@ -163,8 +163,13 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
      * 契约测试才能区分「失败」与「空快照」。
      */
     suspend fun timeline(request: TimelineRequest = TimelineRequest()): TimelineSnapshot =
-        parseTimelineSnapshot(bot("timeline", request.toPayload()))
-            ?: error("timeline 响应形状不对")
+        // 解析也要在 IO 上：[bot] 只把**请求**放 IO，`opt("value")` 回来的是原始 JSON，
+        // 模型构建（每行一个 payload）会落在**调用方上下文**——也就是主线程。
+        // 快照 100+ 行、每次 resync/翻页都走这条路，长对话会直接掉帧。
+        withContext(Dispatchers.IO) {
+            parseTimelineSnapshot(bot("timeline", request.toPayload()))
+                ?: error("timeline 响应形状不对")
+        }
 
     /**
      * 四期 4a：durable 事件补洞查询（`/api/bot` 的 `events`，宿主按 seq 区间回放）。
@@ -176,16 +181,19 @@ class DshClient(private val endpoint: RuntimeEndpoint) {
         from: Long,
         through: Long? = null,
         max: Int = 500,
-    ): List<SessionEvent> = parseSessionEventsResponse(
-        bot(
-            "events",
-            JSONObject()
-                .put("sessionId", sessionId)
-                .put("from", from)
-                .apply { if (through != null) put("through", through) }
-                .put("max", max),
-        ),
-    )
+    ): List<SessionEvent> = withContext(Dispatchers.IO) {
+        // 同上：事件列表可能一次 500 条，解析不该压在主线程。
+        parseSessionEventsResponse(
+            bot(
+                "events",
+                JSONObject()
+                    .put("sessionId", sessionId)
+                    .put("from", from)
+                    .apply { if (through != null) put("through", through) }
+                    .put("max", max),
+            ),
+        )
+    }
 
     /**
      * 一轮改动的文件摘要：`GET /api/changes.summary?sessionId=..&seq=..`。

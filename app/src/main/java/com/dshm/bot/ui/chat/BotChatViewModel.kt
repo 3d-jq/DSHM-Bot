@@ -1976,51 +1976,6 @@ class BotChatViewModel internal constructor(
 
     // endregion
 
-    /**
-     * earlier 分页：timeline cursor 翻页，新的一页**整页前插**进行缓冲
-     * （LinkedHashMap 重建保持「新页 rows + 旧 rows」的插入序）。
-     *
-     * 单聊 / 群聊同一做法：part 之间 seq 空间独立，靠 seq 排序会插错位置；
-     * 宿主已按显示序返回每页 rows，客户端只做前插。
-     */
-    private fun parityLoadEarlier() {
-        val connection = client ?: return
-        val cursor = parityCursor ?: return
-        if (parityLoadingEarlier) return
-        parityLoadingEarlier = true
-        rebuildParityEntries()
-        viewModelScope.launch {
-            val request = TimelineRequest(
-                botId = botId.takeIf { !isGroup },
-                roomId = botId.takeIf { isGroup },
-                cursor = cursor,
-            )
-            runCatching { connection.timeline(request) }
-                .onSuccess { snapshot ->
-                    if (snapshot == null) {
-                        // 接口默认实现 = 不支持（能力/接线缺位），静默收场。
-                        parityLoadingEarlier = false
-                        rebuildParityEntries()
-                        return@onSuccess
-                    }
-                    parityCursor = snapshot.cursor
-                    if (isGroup) {
-                        // 位置序：更早的页**整页前插**（不跨 part 按 seq 排序）。
-                        parityLog.prependPage(snapshot.rows)
-                        snapshot.rows.forEach { row -> absorbEchoRelationsOf(row) }
-                    } else {
-                        snapshot.rows.forEach { row -> absorbParityRow(row) }
-                    }
-                    parityLoadingEarlier = false
-                    rebuildParityEntries(hasEarlier = snapshot.cursor != null)
-                }
-                .onFailure {
-                    parityLoadingEarlier = false
-                    rebuildParityEntries()
-                }
-        }
-    }
-
     /** earlier 前插时只做行替换与 echo 认领，不走 absorbParityRow（后者会去重排队行）。 */
     private fun absorbEchoRelationsOf(row: TimelineRow) {
         val requestId = when (val payload = row.payload) {
