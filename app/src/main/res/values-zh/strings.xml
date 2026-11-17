@@ -277,7 +277,10 @@
     <string name="chat_artifact_not_allowed">引擎不允许读这个路径</string>
     <string name="chat_artifact_failed">拿不到这个文件：%1$s</string>
     <string name="chat_artifact_offline">本机引擎没连上</string>
-    <string name="chat_event_some_bot">另一个 Bot</string>
+    <!-- 对齐官方 DS Bot i18n：'A Bot' / 'a group chat' -->
+    <string name="chat_event_some_bot">一个 Bot</string>
+    <string name="chat_event_some_group">一个群聊</string>
+    <string name="chat_file_preview_failed">这个文件打不开（可能已经被引擎归档）</string>
     <string name="exchange_empty">还没有消息</string>
     <string name="exchange_show_all">显示全部 · %1$d 字</string>
     <string name="pending_custom_hint">或者直接说点什么…</string>

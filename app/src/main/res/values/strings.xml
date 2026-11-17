@@ -277,7 +277,9 @@
     <string name="chat_artifact_not_allowed">The engine does not allow reading this path</string>
     <string name="chat_artifact_failed">Could not get the file: %1$s</string>
     <string name="chat_artifact_offline">The local engine is not connected</string>
-    <string name="chat_event_some_bot">another Bot</string>
+    <string name="chat_event_some_bot">A Bot</string>
+    <string name="chat_event_some_group">a group chat</string>
+    <string name="chat_file_preview_failed">This file cannot be opened (the engine may have archived it)</string>
     <string name="exchange_empty">No messages yet</string>
     <string name="exchange_show_all">Show all · %1$d chars</string>
     <string name="pending_custom_hint">Or type something…</string>
