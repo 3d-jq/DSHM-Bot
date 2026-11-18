@@ -40,6 +40,24 @@ data class DshmTypography(
         fontWeight = FontWeight.Normal,
         fontFamily = FontFamily.Monospace,
     ),
+    /**
+     * 对话活动状态行的文案（官方 `.bt-typing-label > .bt-shimmer`：14px / 22px）。
+     *
+     * 比 rowPreview 大一档、行高更松：这行是「它正在做什么」的唯一提示，官方
+     * 特意给它正文级的可读性（扫光高光也用正文色）。
+     */
+    val activityLabel: TextStyle = TextStyle(fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal),
+    /**
+     * 活动状态行的计时（官方 `.bt-typing-time`：12px / 22px、tabular-nums）。
+     *
+     * 数字等宽：秒数跳动时后面的 `s`/`m` 不会左右晃。
+     */
+    val activityTime: TextStyle = TextStyle(
+        fontSize = 12.sp,
+        lineHeight = 22.sp,
+        fontWeight = FontWeight.Normal,
+        fontFeatureSettings = "tnum",
+    ),
     /** 输入框正文（bodyLarge 16sp、行高 1.45 倍，与 dsh-Go 一致）。
      *  trim = None 让行高完整生效，光标也按完整行高显示（不会比 dsh-Go 短）。 */
     val composerText: TextStyle = TextStyle(

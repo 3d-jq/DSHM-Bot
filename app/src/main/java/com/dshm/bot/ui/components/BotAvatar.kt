@@ -45,6 +45,14 @@ fun BotAvatar(
     size: Dp = Dshm.spacing.avatar,
     avatarImage: String? = null,
     avatarShape: String? = null,
+    /**
+     * 眼睛的竖向缩放（1 = 正常，0.15 = 眨眼 / 0.55 = 眯眼）。
+     *
+     * 只有矢量形状头像（鲸鱼等）有眼睛；照片和图标头像忽略这个参数。
+     * 活动状态行按官方 `bt-mark[data-state]` 的节奏驱动它（thinking 眯眼、
+     * working 眨眼…）。
+     */
+    eyesScaleY: Float = 1f,
 ) {
     val colors = Dshm.colors
     val shape = avatarShape
@@ -93,6 +101,7 @@ fun BotAvatar(
                 ShapeAvatar(
                     shape = key ?: BotShapeSpecs.FALLBACK,
                     inkId = inkId,
+                    eyesScaleY = eyesScaleY,
                 )
             }
 
@@ -108,7 +117,7 @@ fun BotAvatar(
 
 /** 把 DS Bot 的 100×100 SVG 角色画到 Compose Canvas 上（身体、阴影、高光、眼睛）。 */
 @Composable
-private fun ShapeAvatar(shape: String, inkId: String?) {
+private fun ShapeAvatar(shape: String, inkId: String?, eyesScaleY: Float = 1f) {
     val spec = BotShapeSpecs.all[shape] ?: BotShapeSpecs.all[BotShapeSpecs.FALLBACK] ?: return
     val body = remember(spec.body) { spec.body.path() }
     val shade = remember(spec.shade) { spec.shade?.path() }
@@ -127,13 +136,15 @@ private fun ShapeAvatar(shape: String, inkId: String?) {
             }
             shade?.let { drawPath(it, Color.Black.copy(alpha = 0.14f)) }
             light?.let { drawPath(it, Color.White.copy(alpha = 0.16f)) }
+            val eyeScale = eyesScaleY.coerceIn(0.05f, 1f)
             spec.eyes.forEach { eye ->
                 if (eye.size < 5) return@forEach
                 rotate(degrees = eye[4], pivot = Offset(eye[0], eye[1])) {
                     drawRoundRect(
                         color = Color.Black,
-                        topLeft = Offset(eye[0] - eye[2] / 2f, eye[1] - eye[3] / 2f),
-                        size = Size(eye[2], eye[3]),
+                        // 眯眼/眨眼只压高度，眼睛中线不动。
+                        topLeft = Offset(eye[0] - eye[2] / 2f, eye[1] - eye[3] * eyeScale / 2f),
+                        size = Size(eye[2], eye[3] * eyeScale),
                         cornerRadius = CornerRadius(eye[2] / 2f),
                     )
                 }

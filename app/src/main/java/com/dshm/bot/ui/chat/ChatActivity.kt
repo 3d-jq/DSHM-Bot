@@ -32,6 +32,12 @@ const val CHAT_ACTIVITY_PHRASE_HOLD_MS = 800L
 /** 活动状态文案的扫光一轮用时（DS Bot `bt-shimmer` 是 2.2s）。 */
 const val CHAT_ACTIVITY_SHIMMER_MS = 2_200
 
+/** 扫光一轮分多少格（官方 `.bt-shimmer` 的 `steps(60)`：一格格跳）。 */
+const val CHAT_ACTIVITY_SHIMMER_STEPS = 60f
+
+/** 活动行撤掉的退出动画时长（官方 `.bt-typing[data-exiting]` 140ms）。 */
+const val CHAT_ACTIVITY_EXIT_MS = 140L
+
 /**
  * 单聊这一轮在跑吗（按优先级，顺序就是几年前踩过的坑）：
  *

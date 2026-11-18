@@ -28,6 +28,9 @@ import kotlin.math.abs
  * 实现：把 `TextStyle.color` 换成沿 X 轴移动的三段渐变（底色 → 高光 → 底色）。
  * 渐变带宽取文字宽度的 [BAND_RATIO]（有最小宽度，短名字也看得见），进度无限循环。
  * 文字宽度靠 `onTextLayout` 回填，所以高光刚好扫过名字本身，不会扫到空白区。
+ *
+ * **一格格跳**（2026-11-18 用户要求，和对话活动行统一）：官方 `.bt-shimmer` 用
+ * `steps(60)`，位移是 60 个离散位置而不是连续滑动；这里把进度量化到 [STEPS] 档。
  */
 @Composable
 fun ShimmerText(
@@ -40,7 +43,7 @@ fun ShimmerText(
     overflow: TextOverflow = TextOverflow.Ellipsis,
 ) {
     val transition = rememberInfiniteTransition(label = "shimmer")
-    val progress by transition.animateFloat(
+    val raw by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -49,6 +52,8 @@ fun ShimmerText(
         ),
         label = "shimmer-progress",
     )
+    // 官方的 `steps(60)`：一格格跳，不是连续滑。量化后同一档内 brush 不变。
+    val progress = kotlin.math.floor(raw * STEPS) / STEPS
     // 首次组合时还不知道宽度：先用 0（高光在左外侧），测量后下一帧就正常。
     var textWidth by remember { mutableFloatStateOf(0f) }
     val band = (textWidth * BAND_RATIO).coerceAtLeast(MIN_BAND_PX)
@@ -73,8 +78,11 @@ fun ShimmerText(
     )
 }
 
-/** 一轮扫光的时长：慢一点才像「呼吸」，太快会显得躁。 */
-private const val SWEEP_MS = 1_800
+/** 一轮扫光的时长（官方 `.bt-shimmer` 的 2.2s）。 */
+private const val SWEEP_MS = 2_200
+
+/** 一轮扫光分成多少格（官方 `steps(60)`）。 */
+private const val STEPS = 60f
 
 /** 高光带占文字宽度的比例。 */
 private const val BAND_RATIO = 0.6f

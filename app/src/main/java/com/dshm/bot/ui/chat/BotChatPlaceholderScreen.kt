@@ -17,10 +17,13 @@ import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -107,6 +110,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -130,6 +134,7 @@ import com.dshm.bot.core.design.Dshm
 import com.dshm.bot.core.design.HapticLevel
 import com.dshm.bot.core.design.rememberHaptics
 import com.dshm.bot.core.design.rememberLoopValue
+import com.dshm.bot.core.design.MotionProfile
 import com.dshm.bot.data.notify.ChatNotifier
 import com.dshm.bot.data.runtime.RuntimeEndpoint
 import com.dshm.bot.domain.model.AvatarGlyph
@@ -872,6 +877,24 @@ private fun ChatMessages(
     val typing = activity != null &&
         (activity.kind != ChatActivityKind.THINKING || (!streamingNow && !streamedThisRun))
 
+    // 活动行的挂载/退出：官方 `.bt-typing[data-exiting]` 会先播 140ms 的
+    // 「缩小 + 模糊」再真的撤行。这里让 item 多活 140ms，退出动画才看得见。
+    var activityRowAlive by remember { mutableStateOf(false) }
+    var activityRowExiting by remember { mutableStateOf(false) }
+    var lastActivity by remember { mutableStateOf<ChatActivity?>(null) }
+    SideEffect { if (activity != null) lastActivity = activity }
+    LaunchedEffect(typing) {
+        if (typing) {
+            activityRowAlive = true
+            activityRowExiting = false
+        } else if (activityRowAlive) {
+            activityRowExiting = true
+            delay(CHAT_ACTIVITY_EXIT_MS)
+            activityRowAlive = false
+            activityRowExiting = false
+        }
+    }
+
     // 列表是**倒序**的（照 DeepSearch 的 ChatScreen）：index 0 是最新消息、
     // 显示在底部。Compose 的 reverseLayout 原生就会把底部锚住 ——
     // 不手动 scrollToItem，让它自己贴底（手动滚反而会和它打架）。
@@ -1059,7 +1082,8 @@ private fun ChatMessages(
                 Spacer(Modifier.height(bottomPadding))
             }
             // 倒序：最新的排在 index 0（底部）。所以流式气泡和思考行排在最前。
-            if (typing) {
+            val rowActivity = lastActivity
+            if (activityRowAlive && rowActivity != null) {
                 item(key = "typing") {
                     // 活动行单独固定 12dp 上间距（官方 `[data-chat-running] > .bt-typing`），
                     // 不跟气泡/事件行的间距规则走。
@@ -1068,8 +1092,9 @@ private fun ChatMessages(
                     Box(Modifier.animateItem().padding(top = Dshm.spacing.md)) {
                         ChatActivityRow(
                             bot = bot,
-                            activity = requireNotNull(activity),
+                            activity = rowActivity,
                             fallbackStartedAtMs = lastSendAt,
+                            exiting = activityRowExiting,
                         )
                     }
                 }
@@ -1419,25 +1444,33 @@ private fun ChatMessages(
 /**
  * DS Bot 的活动状态行：头像 + 当前状态文案 + 本回合已用时间。
  *
- * 对齐 `ActivityIndicator`：文案至少展示 800ms，计时从回合开始而不是组件挂载开始；
- * 行本身跟着 `running` 走，流式文字开始后也不提前撤掉。
+ * 对齐官方 `ActivityIndicator` + `styles.js` 的 `.bt-typing`：
+ * - 头像 28dp、gap 12dp、行高 36dp、文案 14/22、计时 12/22（tabular-nums）；
+ * - 文案从池里**随机**取（官方 `drawPhrase` 用 Math.random），至少停留 800ms；
+ * - 头像按状态给动作（官方 `bt-mark[data-state]`）：thinking 轻转 + 眯眼、
+ *   searching 左右探、working 上下浮 + 眨眼、sending 往前冲、alert 跳一下；
+ * - 进出场：进入 spring 0.9→1，退出 140ms 缩小 + blur(3px)；每句新词带
+ *   blur(5px) + translateY(3px) 的 220ms 入场。
  */
 @Composable
 private fun ChatActivityRow(
     bot: ChatRowUi,
     activity: ChatActivity,
     fallbackStartedAtMs: Long,
+    /** 正在播退出动画（父级还会保留这一行 140ms）。 */
+    exiting: Boolean = false,
 ) {
     var shown by remember { mutableStateOf(activity) }
     var shownAt by remember { mutableStateOf(0L) }
-    var phraseIndex by remember { mutableIntStateOf(0) }
+    // 随机抽词的下标：官方每次换词都重新抽，顺序轮会显得「很规律」。
+    var phraseDraw by remember { mutableIntStateOf(0) }
     LaunchedEffect(activity) {
         val now = System.currentTimeMillis()
         val holdLeft = shownAt + CHAT_ACTIVITY_PHRASE_HOLD_MS - now
         if (holdLeft > 0) delay(holdLeft)
         shown = activity
         shownAt = System.currentTimeMillis()
-        if (activity.label == null) phraseIndex += 1
+        if (activity.label == null) phraseDraw = kotlin.random.Random.nextInt(1_024)
     }
     SideEffect {
         if (shownAt == 0L) {
@@ -1454,48 +1487,116 @@ private fun ChatActivityRow(
             } else {
                 0L
             }
-            kotlinx.coroutines.delay(1_000)
+            // 对齐官方 `Elapsed`：按整秒跳，不累积漂移。
+            val drift = (System.currentTimeMillis() - startedAt).mod(1_000L)
+            delay(1_000L - drift.coerceIn(1L, 1_000L) + 1L)
         }
     }
-    val label = chatActivityLabel(shown, phraseIndex)
+    val label = chatActivityLabel(shown, phraseDraw)
+    // 官方 `.bt-typing` 的头像 28px。
+    val avatarSize = Dshm.spacing.xxl + Dshm.spacing.xs
     // DS Bot `bt-typing`：群聊状态行显示「正在发言的那个成员」的头像，不是群头像。
     val speakingMember = if (bot.isGroup && shown.memberId != null) {
         bot.roomMembers.firstOrNull { it.id == shown.memberId }
     } else {
         null
     }
-    val scale = rememberLoopValue(
-        profile = Dshm.motion,
-        label = "thinking",
-        from = if (shown.kind == ChatActivityKind.ALERT) 1f else 0.94f,
-        to = if (shown.kind == ChatActivityKind.ALERT) 1f else 1.06f,
-        durationMs = if (shown.kind == ChatActivityKind.ALERT) 1_200 else 620,
-    )
+
+    // ---- 吉祥物动作（官方 bt-mark[data-state]）----
+    val motion = Dshm.motion
+    val kind = shown.kind
+    val tilt = if (kind == ChatActivityKind.THINKING) {
+        rememberLoopValue(motion, "activity-ponder", -3f, 3f, durationMs = 2_200)
+    } else {
+        0f
+    }
+    // seek 左右探 / bob 上下浮 / dash 往前冲 / hop 跳一下。
+    val driftX = when (kind) {
+        ChatActivityKind.SEARCHING -> rememberLoopValue(motion, "activity-seek", -2f, 2f, durationMs = 1_000)
+        ChatActivityKind.SENDING -> rememberLoopValue(
+            motion, "activity-dash", 0f, 3f, durationMs = 1_100,
+            repeatMode = RepeatMode.Restart, easing = LinearEasing,
+        )
+        else -> 0f
+    }
+    val driftY = when (kind) {
+        ChatActivityKind.WORKING -> rememberLoopValue(motion, "activity-bob", 0f, -2f, durationMs = 1_600)
+        ChatActivityKind.ALERT -> rememberLoopValue(motion, "activity-hop", 0f, -5f, durationMs = 650)
+        else -> 0f
+    }
+    val breathe = rememberLoopValue(motion, "activity-breathe", 1f, 1.03f, durationMs = 2_200)
+    // 眨眼：官方 working 是 2.4s 眨一次；thinking 是一直眯着（ponder 的 squint）。
+    val eyes = when (kind) {
+        ChatActivityKind.WORKING -> rememberBlinkEyes(motion)
+        ChatActivityKind.THINKING -> rememberLoopValue(motion, "activity-squint", 1f, 0.55f, durationMs = 2_200)
+        else -> 1f
+    }
+
+    // ---- 进出场 ----
+    val enter = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        enter.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 900f))
+    }
+    val exit = remember { Animatable(0f) }
+    LaunchedEffect(exiting) {
+        if (exiting) exit.animateTo(1f, tween(CHAT_ACTIVITY_EXIT_MS.toInt()))
+    }
+    // 官方：进入 scale .9→1；退出 scale 1→.92 + blur 3px。
+    val rowScale = (0.9f + 0.1f * enter.value) * (1f - 0.08f * exit.value)
+    val rowAlpha = enter.value * (1f - exit.value)
+
+    // ---- 每句新词的入场：blur(5px) + translateY(3px) + 淡入，220ms ----
+    val labelEnter = remember { Animatable(1f) }
+    LaunchedEffect(label) {
+        labelEnter.snapTo(0f)
+        labelEnter.animateTo(1f, tween(220))
+    }
+    val labelBlur = (1f - labelEnter.value) * 5f
+    val labelShift = (1f - labelEnter.value) * 3f
+
     Row(
-        modifier = Modifier.padding(horizontal = Dshm.spacing.xxs),
-        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.sm),
+        modifier = Modifier
+            // 官方 `.bt-typing`：高 36px、左内边距 8px、gap 12px。
+            .heightIn(min = Dshm.spacing.xxxl + Dshm.spacing.xs)
+            .graphicsLayer {
+                scaleX = rowScale
+                scaleY = rowScale
+                alpha = rowAlpha
+                transformOrigin = TransformOrigin(0f, 0.5f)
+            }
+            .then(
+                if (exit.value > 0.01f) {
+                    Modifier.blur((3f * exit.value).dp, BlurredEdgeTreatment.Unbounded)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(start = Dshm.spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(Dshm.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val markModifier = Modifier.graphicsLayer {
+            translationX = driftX.dp.toPx()
+            translationY = driftY.dp.toPx()
+            rotationZ = tilt
+            scaleX = breathe
+            scaleY = breathe
+        }
         if (speakingMember != null) {
             BotAvatar(
                 inkId = speakingMember.inkId,
                 glyph = AvatarGlyph.BOT,
                 avatarImage = speakingMember.avatarImage,
                 avatarShape = speakingMember.avatarShape,
-                size = Dshm.spacing.lg + Dshm.spacing.sm,
-                modifier = Modifier.graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                },
+                size = avatarSize,
+                eyesScaleY = eyes,
+                modifier = markModifier,
             )
         } else if (bot.isGroup) {
             RoomAvatar(
                 members = bot.roomMembers,
-                size = Dshm.spacing.lg + Dshm.spacing.sm,
-                modifier = Modifier.graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                },
+                size = avatarSize,
+                modifier = markModifier,
             )
         } else {
             BotAvatar(
@@ -1503,40 +1604,86 @@ private fun ChatActivityRow(
                 glyph = bot.glyph,
                 avatarImage = bot.avatarImage,
                 avatarShape = bot.avatarShape,
-                size = Dshm.spacing.lg + Dshm.spacing.sm,
-                modifier = Modifier.graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                },
+                size = avatarSize,
+                eyesScaleY = eyes,
+                modifier = markModifier,
             )
         }
-        // DS Bot `bt-shimmer`：状态文案上有一道从左扫到右的高光（2.2s 一轮）。
-        BoxWithConstraints(modifier = Modifier.weight(1f, fill = false)) {
-            val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .graphicsLayer {
+                        alpha = labelEnter.value
+                        translationY = labelShift.dp.toPx()
+                    }
+                    .then(
+                        if (labelBlur > 0.01f) {
+                            Modifier.blur(labelBlur.dp, BlurredEdgeTreatment.Unbounded)
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
+                Text(
+                    text = label,
+                    style = Dshm.typography.activityLabel.copy(brush = activityShimmerBrush(widthPx)),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
-                text = label,
-                style = Dshm.typography.rowPreview.copy(brush = activityShimmerBrush(widthPx)),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                text = "· ${chatActivityElapsed(elapsedMs)}",
+                style = Dshm.typography.activityTime,
+                color = Dshm.colors.textTertiary,
+                // 官方 `.bt-typing-time`：margin-left 6px。
+                modifier = Modifier.padding(start = Dshm.spacing.xs + Dshm.spacing.xxs),
             )
         }
-        Text(
-            text = "· ${chatActivityElapsed(elapsedMs)}",
-            style = Dshm.typography.rowTime,
-            color = Dshm.colors.textTertiary,
-        )
     }
+}
+
+/**
+ * 眨眼：2.4s 一轮，最后 200ms 闭上再睁开（官方 `bt-blink`）。
+ *
+ * 动效关掉（`quiet`）时返回 1，不眨眼。
+ */
+@Composable
+private fun rememberBlinkEyes(profile: MotionProfile): Float {
+    if (!profile.allowLoops) return 1f
+    val transition = rememberInfiniteTransition(label = "activity-blink")
+    val value by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 2_400
+                1f at 0
+                1f at 2_140
+                0.15f at 2_220
+                1f at 2_320
+            },
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "activity-blink-value",
+    )
+    return value
 }
 
 /**
  * 活动状态文案的扫光笔刷（DS Bot `bt-shimmer`）。
  *
- * 底色是淡的文字色，中间一段是实色，整段高光从左扫到右；2.2s 一轮。
+ * 官方 CSS：底色是**主文字色 40%**、高光是**主文字色**；`background-size:200%` 配
+ * `steps(60)`，也就是一格格跳、不是连续滑。整段高光从左扫到右，2.2s 一轮。
  */
 @Composable
 private fun activityShimmerBrush(widthPx: Float): Brush {
-    val base = Dshm.colors.textSecondary.copy(alpha = 0.32f)
-    val highlight = Dshm.colors.textSecondary
+    val base = Dshm.colors.textPrimary.copy(alpha = 0.40f)
+    val highlight = Dshm.colors.textPrimary
     val progress = rememberLoopValue(
         profile = Dshm.motion,
         label = "activity-shimmer",
@@ -1546,10 +1693,12 @@ private fun activityShimmerBrush(widthPx: Float): Brush {
         repeatMode = RepeatMode.Restart,
         easing = LinearEasing,
     )
+    // 官方的 steps(60)：一格格跳。
+    val stepped = kotlin.math.floor(progress * CHAT_ACTIVITY_SHIMMER_STEPS) / CHAT_ACTIVITY_SHIMMER_STEPS
     // 高光窗口大概一段文字宽；整轮里它从左边外面一路扫到右边外面，
     // 中间没有空档（之前窗口太窄，扫过去以后要等大半轮才再来一次）。
     val span = (widthPx * 1.15f).coerceAtLeast(160f)
-    val center = -span / 2f + progress * (widthPx + span)
+    val center = -span / 2f + stepped * (widthPx + span)
     val start = center - span / 2f
     return Brush.linearGradient(
         colors = listOf(base, base, highlight, base, base),
