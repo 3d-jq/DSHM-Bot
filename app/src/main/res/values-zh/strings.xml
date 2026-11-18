@@ -344,9 +344,10 @@
     <string name="team_secrets_delete">删除</string>
     <string name="team_secrets_delete_confirm">删除 %1$s？正在用它的 Bot 会立刻失去访问。</string>
     <string name="team_connectors_title">连接器</string>
-    <string name="team_connectors_available">可用的连接器</string>
     <string name="team_connectors_connected">已连接</string>
     <string name="team_connectors_connected_as">已连接：%1$s</string>
+    <string name="team_connectors_connected_count">已连接 %1$d</string>
+    <string name="team_connectors_tools">%1$d 个工具</string>
     <string name="team_connectors_connect">连接</string>
     <string name="team_connectors_connect_title">连接 %1$s</string>
     <string name="team_connectors_disconnect">断开</string>
@@ -355,9 +356,9 @@
     <string name="team_connectors_error">连接失败：%1$s</string>
     <string name="team_connectors_token">Access token</string>
     <string name="team_connectors_note">token 会存成密钥，Bot 只能通过工具访问它。</string>
-    <string name="team_connectors_search">搜索连接器</string>
     <string name="team_connectors_all">全部</string>
     <string name="team_connectors_recommended">推荐</string>
+    <string name="team_connectors_empty_title">还没有连接器</string>
     <string name="team_connectors_cat_dev">开发者</string>
     <string name="team_connectors_cat_docs">文档</string>
     <string name="team_connectors_cat_work">工作</string>
@@ -367,7 +368,6 @@
     <string name="team_connectors_cat_search">搜索</string>
     <string name="team_connectors_cat_other">其它</string>
     <string name="team_connectors_added">已添加</string>
-    <string name="team_connectors_custom">自定义</string>
     <string name="team_connectors_add_custom">添加 MCP 服务</string>
     <string name="team_connectors_custom_name">名称</string>
     <string name="team_connectors_custom_url">服务地址</string>
@@ -381,6 +381,8 @@
     <string name="team_connectors_sign_in_again">重新登录</string>
     <string name="team_connectors_needs_client">需要应用 client ID</string>
     <string name="team_connectors_waiting_sign_in">等待登录…</string>
+    <string name="team_connectors_open_in_app">在应用内登录</string>
+    <string name="team_connectors_sign_in_hint">登录完成后会自动回到这里</string>
     <string name="team_connectors_browser_hint">在浏览器里完成登录，然后回到这里。</string>
     <string name="team_connectors_paste_address">粘贴你跳转到的地址</string>
     <string name="team_connectors_finish_sign_in">完成登录</string>
@@ -397,9 +399,9 @@
     <string name="team_connectors_mail_password">授权码 / 应用专用密码</string>
     <string name="team_connectors_mail_hint">粘贴邮箱服务商给的一次性授权码，会存成密钥。</string>
     <string name="team_connectors_mail_no_accounts">还没连接邮箱</string>
+    <string name="team_connectors_mail_note">邮箱账号只给 Bot 读取和收发邮件用；发件地址受「使用它的 Bot」里的规则限制。</string>
     <string name="team_connectors_remove">移除</string>
     <string name="team_connectors_cancel">取消</string>
-    <string name="team_connectors_open">打开</string>
     <string name="settings_team_capabilities">能力</string>
     <string name="settings_team_usage">用量</string>
     <string name="team_caps_title">能力</string>

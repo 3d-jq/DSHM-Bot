@@ -1462,3 +1462,47 @@ closed or busy.` —— App 其实在轮询（否则会是 `absent`），是 **0
 退避重试，收到的请求全被丢掉，宿主 2 秒重发、45 秒判超时。修：`browserWaitRequests()` 两种形状都认
 （认不出回 null，不是空数组）+ `BrowserWaitShapeTest` 3 例（已回退验证能抓 bug）；`loop` 整轮
 `runCatching`，一轮抛错不许把通道打死，单条 `answer` 抛错也补失败回执。
+
+### 连接器页重做 + 登录闭环 + 官方品牌图标（2026-11-18）
+
+用户三轮反馈：「连接器界面太丑」→「自定义做成顶栏加号、不要搜索、没有连接器用白卡」→
+「图标表 DeepSearch 里有，别改人家颜色」。
+
+**目录/详情**：分类从 4 列等宽方格改成官方 `bt-app-chips` 那种自动宽度胶囊（选中反色）；
+行改成白卡 + `SettingsRowDivider`；行尾是状态胶囊（连接 / 重试 / 重新登录 / ✓已连接），
+重试就地执行；补「已连接 N」筛选胶囊（对齐官方 `N connected` 入口）；顶栏 `+` 进自定义
+MCP（邮箱页同样）；搜索框删除（连字符串一起清，UnusedResources 会挡）；空的连接器目录
+用白卡（`SettingsEmpty`），介绍卡按用户要求不显示。
+
+**登录闭环**：以前 `ACTION_VIEW` 丢给系统浏览器，登录完还得把回调地址复制回来贴 → 用户说的
+「没有完整闭环」。现在 `ConnectorSignInScreen`（应用内 WebView）：宿主在 rootfs 里监听
+`http://127.0.0.1:<port>/callback`，WebView 遇到这个地址就**拦下**交给 `connector-sign-in-code`；
+拦不到（服务端 302 直打宿主）时页面每 2s 重读 `state`，连上自动收页。`isConnectorCallback`
+只认 loopback + `/callback` 段（`/callbackHijack` 不误拦，3 例测试）。深页返回加 `BackHandler`
+（登录页 → 详情 → 目录 → 设置逐层退）+ `rememberSaveable`（Activity 重建不丢层级）。
+
+**品牌图标**：从 `D:/program/DeepSearch/port/src/android/app/src/main/assets/icons/connectors/`
+拿 33 份官方 SVG → `design/connector-icons/` + `map.json`；新 `tools/build_connector_icons.py`
+把实心 SVG 转 VectorDrawable（`--check` 校验、`steps` 无关；`fill="none"` 在根上不等于不要
+填充，只有「无 fill 有 stroke」才是描边件）；`CONNECTOR_BRANDS` 表带**官方品牌色**，
+未连接灰底灰图、已连接品牌色底 + `readableInkOn()` 按 WCAG 对比度选白/近黑墨
+（`ConnectorBrandInkTest` 锁每个品牌色 ≥3:1）。没有官方件的（Zapier/DeepWiki/Context7/高德/
+邮箱）退回 lucide 通用图标。
+
+### 活动状态行对齐官方 A+B（2026-11-18）
+
+对照 `activity-row.js` + `cells.js` + `styles.js` 的 `.bt-typing`，文案本来就一致（短语池、
+工具文案、计时格式逐条相同），差的是观感与动效：
+
+- **排版**：文案 14sp/22、计时 12sp/22 且 tabular-nums、头像 28dp、gap 12dp、行高 36dp、
+  左内边距 8dp（新增 `Dshm.typography.activityLabel` / `activityTime`）。
+- **扫光**：底色改主文字色 40%、高光主文字色（原来用次要文字，整行发灰）；进度量化到
+  **60 档**（官方 `steps(60)`）而不是连续滑。
+- **换词**：随机抽取（官方 `drawPhrase` 用 Math.random），不再按顺序轮。
+- **吉祥物动作**：`BotAvatar` 新增 `eyesScaleY`（只压眼睛高度），活动行按状态驱动 ——
+  thinking 轻转 ±3° + 呼吸 + 眯眼、searching 左右探、working 上下浮 + 2.4s 眨眼、
+  sending 往前冲、alert 跳一下（1.3s 来回）。
+- **进出场**：进入 spring(0.9→1)，退出 140ms 缩小到 0.92 + `blur(3px)`（为此让行多活
+  140ms 再撤）；每句新词 blur(5px) + 上移 3px 220ms 入场。
+- 首页名字扫光（`ShimmerText`）同步改成 60 档一格格跳、2.2s（官方同款阶梯）。
+- `quiet` 动效档位下循环全停（沿用 `MotionProfile.allowLoops`）。

@@ -343,9 +343,10 @@
     <string name="team_secrets_delete">Delete</string>
     <string name="team_secrets_delete_confirm">Delete %1$s? Bots that use it lose access at once.</string>
     <string name="team_connectors_title">Connectors</string>
-    <string name="team_connectors_available">Available</string>
     <string name="team_connectors_connected">Connected</string>
     <string name="team_connectors_connected_as">Connected as %1$s</string>
+    <string name="team_connectors_connected_count">Connected %1$d</string>
+    <string name="team_connectors_tools">%1$d tools</string>
     <string name="team_connectors_connect">Connect</string>
     <string name="team_connectors_connect_title">Connect %1$s</string>
     <string name="team_connectors_disconnect">Disconnect</string>
@@ -354,9 +355,9 @@
     <string name="team_connectors_error">Could not connect: %1$s</string>
     <string name="team_connectors_token">Access token</string>
     <string name="team_connectors_note">The token is saved as a secret; Bots only reach it through their tools.</string>
-    <string name="team_connectors_search">Search connectors</string>
     <string name="team_connectors_all">All</string>
     <string name="team_connectors_recommended">Recommended</string>
+    <string name="team_connectors_empty_title">No connectors yet</string>
     <string name="team_connectors_cat_dev">Developer</string>
     <string name="team_connectors_cat_docs">Docs &amp; files</string>
     <string name="team_connectors_cat_work">Work</string>
@@ -366,7 +367,6 @@
     <string name="team_connectors_cat_search">Search</string>
     <string name="team_connectors_cat_other">Other</string>
     <string name="team_connectors_added">Added</string>
-    <string name="team_connectors_custom">Custom</string>
     <string name="team_connectors_add_custom">Add MCP server</string>
     <string name="team_connectors_custom_name">Name</string>
     <string name="team_connectors_custom_url">Server URL</string>
@@ -380,6 +380,8 @@
     <string name="team_connectors_sign_in_again">Sign in again</string>
     <string name="team_connectors_needs_client">Needs an app client ID</string>
     <string name="team_connectors_waiting_sign_in">Waiting for sign-in…</string>
+    <string name="team_connectors_open_in_app">Sign in here</string>
+    <string name="team_connectors_sign_in_hint">You will come back here automatically</string>
     <string name="team_connectors_browser_hint">Finish signing in your browser, then come back.</string>
     <string name="team_connectors_paste_address">Paste the address you landed on</string>
     <string name="team_connectors_finish_sign_in">Finish sign-in</string>
@@ -396,9 +398,9 @@
     <string name="team_connectors_mail_password">Authorization code / app password</string>
     <string name="team_connectors_mail_hint">Paste the one-time authorization code from your mail provider. It is saved as a secret.</string>
     <string name="team_connectors_mail_no_accounts">No mailboxes connected</string>
+    <string name="team_connectors_mail_note">Mailbox accounts are for Bots to read and send mail only; the rules under each Bot decide who may send.</string>
     <string name="team_connectors_remove">Remove</string>
     <string name="team_connectors_cancel">Cancel</string>
-    <string name="team_connectors_open">Open</string>
     <string name="settings_team_capabilities">Capabilities</string>
     <string name="settings_team_usage">Usage</string>
     <string name="team_caps_title">Capabilities</string>
