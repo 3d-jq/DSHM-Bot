@@ -271,21 +271,37 @@ internal fun attachmentItemsOfBlocks(
 /**
  * 本地 echo 行插回列表的下标：**它属于发送那一刻的位置**。
  *
- * 从后往前找第一条 `seq <= anchor` 的行，插在它后面 —— 也就是「这一轮之后的
- * 一切（回答 / 工具行 / 卡片）都排在它后面」。以前 echo 一律追加到末尾，落定那
- * 一刻流式气泡一退，用户的气泡就成了最后一条（掉到回答下面），随后被认领摘掉又
- * 消失，界面闪一下（真机 2026-11-17）。
+ * 从后往前跳过「比这次发送更新」的行，第一个不比它新的行后面就是位置 —— 也就是
+ * 「这一轮之后的一切（回答 / 工具行 / 卡片）都排在它后面」。以前 echo 一律追加到
+ * 末尾，落定那一刻流式气泡一退，用户的气泡就成了最后一条（掉到回答下面），随后
+ * 被认领摘掉又消失，界面闪一下（真机 2026-11-17）。
  *
- * 没有锚（老路径 / 拿不到游标）就退回追加末尾；`seq` 为 null 的行（浏览器卡、
- * 别的 echo）不参与比较。
+ * **seq 为 null 的行不能直接跳过**（群聊 relay 回复的 id 是 `<callId>:<index>`，
+ * 没有数字 seq）：它们通常排在列表尾部，跳过它们会让新消息插到这些回复**上面**
+ * —— 用户报的「群聊里发消息气泡错位」就是这个。这类行按时间比较：比发送时刻新的
+ * 留在下面，旧的排到它前面。
+ *
+ * @param anchor 发送那一刻的游标 seq（私聊/群聊的数字 seq 空间）。
+ * @param anchorTimeMs 发送时刻（毫秒）。宿主和我们跑在同一台机器上，时间同源，
+ *   可以直接和行的 `timeMs` 比。
  */
-internal fun echoInsertIndex(entries: List<ChatEntry>, anchor: Long?): Int {
-    if (anchor == null) return entries.size
+internal fun echoInsertIndex(entries: List<ChatEntry>, anchor: Long?, anchorTimeMs: Long? = null): Int {
     for (index in entries.indices.reversed()) {
-        val seq = entries[index].seq ?: continue
-        if (seq <= anchor) return index + 1
+        if (isNewerThanSend(entries[index], anchor, anchorTimeMs)) continue
+        return index + 1
     }
-    return entries.size
+    // 全都比这次发送新 → 它就属于最上面。
+    return 0
+}
+
+/** 这一行是不是「在发送之后」才到的：有数字 seq 比 seq，否则比时间。 */
+private fun isNewerThanSend(entry: ChatEntry, anchor: Long?, anchorTimeMs: Long?): Boolean {
+    val seq = entry.seq
+    if (seq != null && anchor != null) return seq > anchor
+    val time = entry.timeMs
+    if (time != null && anchorTimeMs != null) return time > anchorTimeMs
+    // 既没有可比 seq 也没有可比时间（浏览器卡、别的 echo）：当作不比它新。
+    return false
 }
 
 /**

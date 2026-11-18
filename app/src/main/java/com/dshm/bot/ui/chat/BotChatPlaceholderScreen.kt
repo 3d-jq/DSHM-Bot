@@ -315,10 +315,15 @@ fun BotChatScreen(
     // 发送了几次 —— 每发一次就重新钉到底（照 DeepSearch 的 SEND-PATH）。
     var sendCount by remember { mutableIntStateOf(0) }
     var lastSendAt by remember { mutableStateOf(0L) }
-    // 刚发出消息、引擎还没上报 `state.work` 的一两秒空窗：本地先显示状态行。
+    // 刚发出消息、引擎还没上报 `state.work` / round 状态的一两秒空窗：本地先显示状态行。
     // 否则要等 `watchForRunEnd()` 1 秒后的第一次轮询（或 stream/start）才出现，
     // 观感上就是「消息发出去了，状态行迟到」。
-    val shownActivity = state.activity ?: if (!bot.isGroup && (state.sending || state.running)) {
+    //
+    // **群聊也走这条**（2026-11-18 用户要求）：以前群聊被 `!bot.isGroup` 挡在外面，
+    // 只能等 round 状态回来，总是比私聊晚一拍。群聊的 `running` 由
+    // `groupRoundRunning`（`room-progress` 每秒读，连读三次读不到就按没在跑来收）
+    // 驱动，和私聊一样会在轮末把这一行收掉，不会钉住。
+    val shownActivity = state.activity ?: if (state.sending || state.running) {
         ChatActivity(
             kind = ChatActivityKind.THINKING,
             label = null,
@@ -1539,7 +1544,14 @@ private fun ChatActivityRow(
     }
     val exit = remember { Animatable(0f) }
     LaunchedEffect(exiting) {
-        if (exiting) exit.animateTo(1f, tween(CHAT_ACTIVITY_EXIT_MS.toInt()))
+        // 退出动画播到一半又被留下（群聊的状态在成员之间来回切）时，必须**退回去**：
+        // 否则这一行会一直停在缩小 + 模糊的半透明状态，再出现时就像「顿了一下」。
+        // 用 120ms 动画回位而不是 snap，避免「半透明 → 突然满」的硬切。
+        if (exiting) {
+            exit.animateTo(1f, tween(CHAT_ACTIVITY_EXIT_MS.toInt()))
+        } else if (exit.value > 0f) {
+            exit.animateTo(0f, tween(120))
+        }
     }
     // 官方：进入 scale .9→1；退出 scale 1→.92 + blur 3px。
     val rowScale = (0.9f + 0.1f * enter.value) * (1f - 0.08f * exit.value)

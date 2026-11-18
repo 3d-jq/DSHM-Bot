@@ -618,6 +618,16 @@ class BotChatViewModel internal constructor(
      * （真机 2026-11-17：「我的问题气泡会跑到大模型流式输出完的下面，然后又消失」）。
      */
     private val echoAnchors = HashMap<String, Long>()
+
+    /**
+     * 本地 echo 的**发送时刻**（`requestId` → 毫秒）。
+     *
+     * 群聊里 relay 回复的行 id 是 `<callId>:<index>`，没有数字 seq，靠 [echoAnchors]
+     * 的 seq 比较会漏掉它们 —— 新消息就会插到这些回复上面（用户报的「群聊发消息
+     * 气泡错位」）。这类行按时间比：比发送时刻新的留在下面，旧的排到前面。
+     * 宿主和我们跑在同一台机器上，时间同源。
+     */
+    private val echoAnchorTimes = HashMap<String, Long>()
     /** echo 行的本地附件（缓存路径），认领后搬给 user 行，图片预览不闪。 */
     private val pendingEchoAttachments = HashMap<String, List<ChatAttachmentItem>>()
     /** 群聊帧的上一帧 running（true→false 边沿 = 本轮收口，触发快照重拉对齐新行）。 */
@@ -984,6 +994,7 @@ class BotChatViewModel internal constructor(
         pendingEchoAttachments[requestId] = attachmentItems
         // 发送游标：echo 就插在它该在的位置（这一轮之后的行走它后面）。
         echoAnchors[requestId] = paritySeq
+        echoAnchorTimes[requestId] = System.currentTimeMillis()
         _uiState.update { state -> state.copy(sending = true, error = null) }
         rebuildParityEntries()
         viewModelScope.launch {
@@ -1025,6 +1036,7 @@ class BotChatViewModel internal constructor(
                 pendingEchoRows.remove(echoKeyOf(requestId))
                 pendingEchoAttachments.remove(requestId)
                 echoAnchors.remove(requestId)
+                echoAnchorTimes.remove(requestId)
                 rebuildParityEntries()
                 _uiState.update { state ->
                     state.copy(
@@ -1551,6 +1563,7 @@ class BotChatViewModel internal constructor(
             if (requestId != null && requestId in shownEchoRequests) {
                 pendingEchoRows.remove(echoRow.key)
                 echoAnchors.remove(requestId)
+                echoAnchorTimes.remove(requestId)
                 continue
             }
             val echoEntry = chatEntryOf(
@@ -1559,7 +1572,13 @@ class BotChatViewModel internal constructor(
                 attachmentItems = attachmentItemsOf(echoPayload, requestId),
             ) ?: continue
             mapped.add(
-                echoInsertIndex(mapped, requestId?.let { echoAnchors[it] }),
+                echoInsertIndex(
+                    entries = mapped,
+                    // 群聊的 seq 是各成员事件混在一个缓冲里的池（跨会话空间不可比），
+                    // 只按发送时刻比较；私聊仍用游标 seq（更精确）。
+                    anchor = if (isGroup) null else requestId?.let { echoAnchors[it] },
+                    anchorTimeMs = requestId?.let { echoAnchorTimes[it] },
+                ),
                 echoEntry,
             )
         }

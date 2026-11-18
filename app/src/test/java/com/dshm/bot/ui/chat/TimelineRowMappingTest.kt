@@ -225,4 +225,75 @@ class TimelineRowMappingTest {
         )
     }
 
+    // ---- echo 插回位置（群聊气泡错位的回归）------------------------------------
+
+    private fun entry(id: String, seq: Long?, timeMs: Long? = null) = ChatEntry(
+        id = id,
+        kind = ChatEntryKind.BOT,
+        text = id,
+        seq = seq,
+        timeMs = timeMs,
+    )
+
+    /**
+     * 群聊：尾部是 relay 回复（id 是 `<callId>:<index>`，没有数字 seq）。
+     * 发送时刻晚于它们 → 新消息必须排在它们**下面**（列表末尾）。
+     *
+     * 以前从后往前跳过所有无 seq 的行，插到它们上面 —— 用户报的「群聊发消息气泡错位」。
+     */
+    @Test
+    fun groupEchoGoesBelowTheRelayRepliesThatCameBeforeTheSend() {
+        val entries = listOf(
+            entry("user:10", seq = 10L, timeMs = 1_000L),
+            entry("event:a:0", seq = null, timeMs = 1_200L),
+            entry("event:a:1", seq = null, timeMs = 1_400L),
+        )
+        assertEquals(
+            entries.size,
+            echoInsertIndex(entries, anchor = null, anchorTimeMs = 2_000L),
+        )
+    }
+
+    /** 群聊：发送之后才到的回复 → 新消息留在它们上面。 */
+    @Test
+    fun groupEchoStaysAboveRepliesThatArriveAfterTheSend() {
+        val entries = listOf(
+            entry("user:10", seq = 10L, timeMs = 1_000L),
+            entry("event:b:0", seq = null, timeMs = 3_000L),
+        )
+        assertEquals(
+            1,
+            echoInsertIndex(entries, anchor = null, anchorTimeMs = 2_000L),
+        )
+    }
+
+    /** 私聊：游标 seq 优先 —— 落定回答比发送游标新时，echo 在它上面。 */
+    @Test
+    fun privateEchoStaysAboveTheAnswerThatLandedAfterTheSend() {
+        val entries = listOf(
+            entry("user:10", seq = 10L, timeMs = 1_000L),
+            entry("bot:11", seq = 11L, timeMs = 1_100L),
+        )
+        assertEquals(1, echoInsertIndex(entries, anchor = 10L, anchorTimeMs = 1_050L))
+        // 回答在游标之前（历史行）：echo 排在最后。
+        assertEquals(2, echoInsertIndex(entries, anchor = 11L, anchorTimeMs = 1_500L))
+    }
+
+    /** 全部比发送新（比如整批历史刚补进来）：echo 属于最上面。 */
+    @Test
+    fun echoGoesToTheTopWhenEverythingIsNewer() {
+        val entries = listOf(
+            entry("bot:20", seq = 20L, timeMs = 5_000L),
+            entry("bot:21", seq = 21L, timeMs = 5_100L),
+        )
+        assertEquals(0, echoInsertIndex(entries, anchor = 10L, anchorTimeMs = 1_000L))
+    }
+
+    /** 空列表 / 老路径（没有任何锚）：追加到末尾。 */
+    @Test
+    fun emptyListAndMissingAnchorsFallBackToTheEnd() {
+        assertEquals(0, echoInsertIndex(emptyList(), anchor = null, anchorTimeMs = null))
+        val entries = listOf(entry("user:1", seq = 1L, timeMs = 100L))
+        assertEquals(1, echoInsertIndex(entries, anchor = null, anchorTimeMs = null))
+    }
 }

@@ -1506,3 +1506,18 @@ MCP（邮箱页同样）；搜索框删除（连字符串一起清，UnusedResou
   140ms 再撤）；每句新词 blur(5px) + 上移 3px 220ms 入场。
 - 首页名字扫光（`ShimmerText`）同步改成 60 档一格格跳、2.2s（官方同款阶梯）。
 - `quiet` 动效档位下循环全停（沿用 `MotionProfile.allowLoops`）。
+
+### 群聊三处：气泡错位 / 状态行「顿一下」/ 状态行晚一拍（2026-11-18）
+
+1. **群聊发消息气泡错位**：群聊 relay 回复的行 id 是 `<callId>:<index>`（宿主
+   `mobile.js` 的 `replyItem`），没有数字 seq；`echoInsertIndex` 从后往前跳过所有无
+   seq 的行，于是新消息插到了尾部那串群回复**上面**（私聊每行都有 seq，所以不犯）。
+   修：无 seq 的行不再跳过，改比**时间**（新增 `echoAnchorTimes`，发送时刻；宿主与
+   App 同机同源时钟）；群聊 `anchor = null` 只按时间比较（房间的 seq 是各成员事件混在
+   一个缓冲池里的编号，跨空间不可比），私聊仍用游标 seq。`TimelineRowMappingTest` +5 例。
+2. **状态行「顿一下」**：上一轮引入的退出动画 `Animatable` 在 `exiting` 变回 false 时
+   没有复位 —— 群聊状态在成员之间来回切，动画常被打断，行停在「缩小 + blur + 半透明」
+   状态，再出现时硬切。修：取消时 120ms 动画退回 0。
+3. **群聊状态行晚一拍**：`shownActivity` 的本地兜底被 `!bot.isGroup` 挡着，只能等宿主
+   `room-progress`。修：群聊也走同一条（`groupRoundRunning` 连读三次读不到就按没在跑收，
+   不会钉住）。
